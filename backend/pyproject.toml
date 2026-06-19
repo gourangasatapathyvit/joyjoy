@@ -1,0 +1,41 @@
+[project]
+name = "joyjoy-backend"
+version = "0.1.0"
+description = "Multi-tenant Deep Agents backend (single process, Postgres-backed) behind hermes-webui."
+requires-python = ">=3.11"
+dependencies = [
+    # Agent engine
+    "deepagents==0.6.10",
+    "langgraph>=1.2,<2",
+    "langchain-core>=0.3",
+    "langchain-openai>=0.2",
+    "langchain-mcp-adapters>=0.1",
+    # Persistence (dev sqlite / prod postgres)
+    "langgraph-checkpoint-sqlite>=2.0",
+    "langgraph-checkpoint-postgres>=2.0",
+    "psycopg[binary,pool]>=3.2",
+    "aiosqlite>=0.20",
+    # Web server
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sse-starlette>=2.1",
+    # Config / auth / crypto
+    "pydantic-settings>=2.4",
+    "pyjwt>=2.9",
+    "cryptography>=42",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

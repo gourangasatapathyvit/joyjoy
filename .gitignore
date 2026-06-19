@@ -1,0 +1,28 @@
+# secrets / local state
+.env
+*.env.local
+data/
+webui-state/
+*.sqlite
+*.sqlite-*
+config/*.local.json
+# global model catalog (holds literal API keys):
+config/models.json
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# webui transient state (copied app keeps its own runtime dirs out of git)
+webui/.venv/
+webui/state/
+webui/**/__pycache__/
+
+# misc
+node_modules/
+.DS_Store
+*.log
