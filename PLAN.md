@@ -26,12 +26,12 @@ hermes-webui  (auth, sessions, chat UI)   webui/   CHAT_BACKEND=gateway
   ▼
 joyjoy-backend  (FastAPI, ONE process)     backend/app/
   • auth.py        gateway key + per-user identity (X-User-Id / JWT sub)
-  • agent.py       one compiled create_deep_agent(); Azure OpenAI model
+  • agent.py       create_deep_agent() cached per (kind,user,model); multi-provider build_model_for()
   • context.py     AgentContext(user_id, thread_id) → store namespace (user_id,"fs")
   • persistence.py dev: AsyncSqliteSaver + FilesystemBackend(local, per-user dir)
   │               prod: AsyncPostgresSaver + StoreBackend(AsyncPostgresStore, ns=(user_id,…))
   ▼
-Azure OpenAI (o4-mini / o3 / gpt-5)        + LangSmith traces (optional, per user)
+Model providers (build_model_for): Azure OpenAI · Azure AI Foundry/Claude · Bedrock · OpenAI-compat · Gemini
   ▼
 Postgres `langgraph_db` (10.44.63.72)  — checkpoints + store(memory, skills, virtual FS) + creds table
 ```
@@ -67,7 +67,8 @@ joyjoy/
 ## 6. Gateway contract the backend implements (for hermes)
 - `GET  /healthz`, `GET /v1/models`
 - `POST /v1/chat/completions` — OpenAI-compatible **SSE** (default gateway path) — **MVP**
-- `POST /v1/runs` + `GET /v1/runs/{id}/events` — SSE with tool-progress + `approval.request` (phase 2)
+- `POST /v1/runs` + `GET /v1/runs/{id}/events` + `POST /v1/runs/{id}/approvals/{aid}/respond` — SSE with tool-progress + `approval.request`
+- Per-user CRUD/config (all `X-User-Id`-scoped; global ids are read-only): `/v1/skills/*`, `/v1/mcp/servers/*`, `/v1/models/config*`, `/v1/memory*`
 
 ## 7. Required hermes-webui patches (all in `webui/`)
 1. **Config only** (no code): `HERMES_WEBUI_CHAT_BACKEND=gateway`,
@@ -78,15 +79,19 @@ joyjoy/
 3. **Forward session id** → `X-Thread-Id` so deepagents thread == hermes session.
 4. **Skills/MCP panels** → point "global (read-only) + user" management at backend endpoints (phase 3).
 
-## 8. Phased checklist
-- [x] **Phase 0 — scaffold**: project, `.env`, persistence factory, agent factory, `/healthz`, `/v1/chat/completions`, dev SQLite smoke test — **DONE & validated live** (streaming SSE, cross-thread persistence, tenant isolation, Azure o4-mini)
-- [x] **Phase 1 — wire UI — DONE & validated in-browser (headed + headless)**. 1b multi-user accounts live: `alice`/`bob` log in by username+password; alice's chat (Azure o4-mini) wrote a file → bob's agent read it → **NOFILE** (per-user backend isolation proven). Headed via chrome-devtools MCP; headless via Chrome CDP (login `{ok:true}`, `logged_in:true`). Evidence: `tst/joyjoy-{alice-chat,bob-isolated,headless-login,headless-app}.png`.
-  - Follow-ups: (a) add a gateway **heartbeat endpoint** so the cosmetic "Gateway heartbeat failed" banner clears (chat works regardless); (b) the webui **conversation sidebar is instance-global** (bob sees alice's conversation *titles*) — partition the webui session store per user if per-user conversation lists are required (separate from 1b's backend isolation).
-- [ ] **Phase 2 — runs API**: `/v1/runs` + events (tool progress + approvals); user/thread forwarding
-- [ ] **Phase 3 — skills + MCP**: global (RO) + user endpoints + UI panels
-- [ ] **Phase 4 — credentials**: encrypted `credentials` table replacing `auth.json`; per-user provider keys
-- [ ] **Phase 5 — prod**: `APP_ENV=prod` (Postgres store+saver), run `.setup()` migrations, load test, sandbox `execute`
-- [ ] **Phase 6 — ops**: docker-compose (backend + webui + postgres), CI
+## 8. Status / phased checklist
+> Detailed, current architecture for contributors is in **[CLAUDE.md](./CLAUDE.md)**.
+
+- [x] **Phase 0 — scaffold**: persistence factory, agent factory, `/healthz`, `/v1/chat/completions`, dev SQLite — **DONE & validated** (streaming SSE, cross-thread persistence, tenant isolation).
+- [x] **Phase 1 — wire UI**: gateway mode; multi-user accounts (`alice`/`bob`) with per-user **backend** isolation proven; gateway **heartbeat** endpoint added; **per-user conversation sidebar** (session→owner map, `/api/sessions` filtered). **DONE & validated in-browser**.
+- [x] **Phase 2 — runs API**: `/v1/runs` + `/v1/runs/{id}/events` (SSE) + `/respond` approvals + `/v1/capabilities`. HITL: every MCP/plugin tool is gated for approval in run mode. **DONE & validated** (live tool card → Allow once → resume).
+- [x] **Phase 3 — skills + MCP**: global (read-only) + per-user, runtime-loaded (no recompile). Skills = disk `skills/global/` + per-user store; MCP = `config/global.mcp.json` + `data/users/<uid>/mcp.json` (langchain-mcp-adapters). **Full CRUD from the UI** (Skills / MCP / Memory tabs). 72 Hermes skills copied into global. Active MCP: `jira` (http), `web-search` (uvx duckduckgo), demo. **DONE & validated**.
+- [x] **Models / providers** *(added beyond the original plan)*: store-backed catalog — global `config/models.json` + per-user `data/users/<uid>/models.json` — managed from **Settings → Providers** (CRUD; global read-only). Five provider types via `agent.build_model_for` dispatch: `azure_openai`, `anthropic` (Azure AI Foundry/Claude), `bedrock`, `openai` (OpenAI-compatible), `gemini`. Keys live in the gitignored JSON files, masked in the UI; chat picker grouped by provider. **DONE & validated**.
+- [~] **Phase 4 — credentials**: per-user provider keys are handled via the Providers-tab catalog (plain **gitignored** JSON files). The encrypted `credentials` table (Fernet, `CREDENTIAL_ENCRYPTION_KEY`) is scaffolded for prod but is **not yet** the active store.
+- [~] **Phase 5 — prod Postgres**: prod store+saver on isolated **`joyjoy_db`** proven (conn pool; write / cross-thread / isolation). Load test + sandboxed `execute` still pending.
+- [ ] **Phase 6 — ops**: docker-compose (backend + webui + postgres), CI; pin provider SDKs (`langchain-anthropic` / `-aws` / `-google-genai`) into `pyproject.toml` (currently installed ad-hoc).
+
+**Also done:** Hermes fully uninstalled — joyjoy is standalone (its own venvs for backend + webui); the UI was de-Hermes rebranded (user-facing strings → "joyjoy"; internal `hermes` / `HERMES_WEBUI_*` / `X-Hermes-*` identifiers deliberately kept — they are load-bearing).
 
 ## 9. To verify on first run (scaffold is written defensively for these)
 - langgraph `context=` kwarg on `ainvoke`/`astream` in 1.2.6 (else config-metadata fallback — the namespace factory already handles both).
