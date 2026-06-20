@@ -96,7 +96,8 @@ async def _stream_segment(run: _Run, agent_input):
                         err = getattr(m, "status", None) == "error"
                         await _emit(run, "tool.completed", tool=getattr(m, "name", None),
                                     name=getattr(m, "name", None), toolCallId=getattr(m, "tool_call_id", None),
-                                    status="error" if err else "completed", is_error=err)
+                                    status="error" if err else "completed", is_error=err,
+                                    result=_content_to_text(getattr(m, "content", ""))[:4000])
     return ("interrupt", interrupt_val) if interrupt_val is not None else ("done", None)
 
 

@@ -216,6 +216,7 @@ def _gateway_tool_progress_event(payload: dict) -> tuple[str, dict] | None:
         "preview": payload.get("label") or payload.get("preview"),
         "args": payload.get("args") if isinstance(payload.get("args"), dict) else {},
         "is_error": bool(payload.get("error")) or status in {"error", "failed"},
+        "result": payload.get("result"),
     }
     if tid:
         event_payload["tid"] = str(tid)
@@ -394,6 +395,8 @@ def _run_gateway_runs_api_streaming(
                                 ) or shared_tc.get("name") == event_payload.get("name"):
                                     shared_tc["done"] = True
                                     shared_tc["is_error"] = bool(event_payload.get("is_error"))
+                                    if event_payload.get("result") is not None:
+                                        shared_tc["result"] = event_payload.get("result")
                                     break
                     put_gateway_event(event_name, event_payload)
                     if event_name != "reasoning":
@@ -748,8 +751,38 @@ def _run_gateway_chat_streaming(
             saved_reasoning = STREAM_REASONING_TEXT.get(stream_id, "")
             if saved_reasoning:
                 assistant_msg["reasoning"] = saved_reasoning
+            # joyjoy: persist the agent/tool/MCP calls as a worklog assistant message so
+            # they stay visible AFTER the turn finalizes and on reload (not just live).
+            # Kept SEPARATE from the final-text message so the response isn't swallowed
+            # into the worklog group. Carries both the OpenAI shape (id/type/function)
+            # and the live shape (name/args/snippet/done/is_error/tid) the worklog renders.
+            tool_msgs = []
+            _live_tcs = STREAM_LIVE_TOOL_CALLS.get(stream_id) or []
+            if _live_tcs:
+                _persisted_tcs = []
+                for _i, _tc in enumerate(_live_tcs):
+                    _nm = _tc.get("name") or "tool"
+                    _a = _tc.get("args") if isinstance(_tc.get("args"), dict) else {}
+                    _tid = _tc.get("tid") or ("call_" + str(_i))
+                    _persisted_tcs.append({
+                        "id": _tid, "type": "function",
+                        "function": {"name": _nm, "arguments": json.dumps(_a, ensure_ascii=False)},
+                        "name": _nm, "args": _a, "snippet": str(_tc.get("result") or ""),
+                        "done": bool(_tc.get("done", True)), "is_error": bool(_tc.get("is_error")),
+                        "tid": _tid,
+                    })
+                # assistant(tool_calls) + a matching role:tool result per call — the
+                # native shape. The paired results bind the worklog to THIS turn (so it
+                # doesn't group with the previous turn) and avoid orphaned-tool_calls
+                # stripping on the next LLM request.
+                tool_msgs = [{"role": "assistant", "content": "", "tool_calls": _persisted_tcs, "timestamp": now + 0.0000003}]
+                for _tc in _persisted_tcs:
+                    tool_msgs.append({
+                        "role": "tool", "tool_call_id": _tc["id"], "name": _tc["name"],
+                        "content": str(_tc.get("snippet") or ""), "timestamp": now + 0.0000004,
+                    })
             previous_context = list(getattr(s, "context_messages", None) or getattr(s, "messages", None) or [])
-            s.context_messages = previous_context + [user_msg, assistant_msg]
+            s.context_messages = previous_context + [user_msg] + tool_msgs + [assistant_msg]
             try:
                 from api.streaming import _is_context_compression_marker
 
@@ -785,7 +818,7 @@ def _run_gateway_chat_streaming(
                         msg_norm = " ".join(str(msg_text or "").split())
                         if latest_text == msg_norm:
                             display = display[:-1]
-                s.messages = display + [user_msg, assistant_msg]
+                s.messages = display + [user_msg] + tool_msgs + [assistant_msg]
             s.active_stream_id = None
             s.pending_user_message = None
             s.pending_attachments = None
