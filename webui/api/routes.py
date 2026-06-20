@@ -8298,6 +8298,9 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/file/raw":
         return _handle_file_raw(handler, parsed)
 
+    if parsed.path == "/api/file/convert":
+        return _handle_file_convert(handler, parsed)
+
     if parsed.path == "/api/folder/download":
         return _handle_folder_download(handler, parsed)
 
@@ -11051,6 +11054,79 @@ def _serve_static(handler, parsed):
     return True
 
 
+def _message_to_hermes_row(m, sid, idx):
+    """Map one webui-internal message → a hermes-agent message row (the schema Hermes
+    Desktop exports/imports). Tolerant of both our native shape and already-hermes rows."""
+    if not isinstance(m, dict):
+        return None
+    role = m.get("role") or "assistant"
+    raw_tcs = m.get("tool_calls")
+    hermes_tcs = None
+    if isinstance(raw_tcs, list) and raw_tcs:
+        hermes_tcs = []
+        for tc in raw_tcs:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+            name = fn.get("name") or tc.get("name") or ""
+            args = fn.get("arguments")
+            if args is None:
+                a = tc.get("args")
+                args = json.dumps(a, ensure_ascii=False) if isinstance(a, (dict, list)) else (a if isinstance(a, str) else "")
+            elif not isinstance(args, str):
+                args = json.dumps(args, ensure_ascii=False)
+            cid = tc.get("call_id") or tc.get("id") or tc.get("tid") or tc.get("tool_call_id") or tc.get("tool_use_id") or ""
+            hermes_tcs.append({
+                "id": tc.get("id") or cid,
+                "call_id": cid,
+                "response_item_id": tc.get("response_item_id") or (f"fc_{cid}" if cid else None),
+                "type": "function",
+                "function": {"name": name, "arguments": args},
+            })
+    content = m.get("content")
+    if content is not None and not isinstance(content, str):
+        content = json.dumps(content, ensure_ascii=False)
+    return {
+        "id": m.get("id") if isinstance(m.get("id"), int) else idx,
+        "session_id": sid,
+        "role": role,
+        "content": content if content is not None else "",
+        "tool_call_id": m.get("tool_call_id"),
+        "tool_calls": hermes_tcs,
+        "tool_name": m.get("tool_name") or (m.get("name") if role == "tool" else None),
+        "timestamp": m.get("timestamp"),
+        "token_count": m.get("token_count"),
+        "finish_reason": m.get("finish_reason") or ("tool_calls" if hermes_tcs else None),
+        "reasoning": m.get("reasoning"),
+        "reasoning_content": m.get("reasoning_content") or m.get("reasoning"),
+        "reasoning_details": m.get("reasoning_details"),
+        "codex_reasoning_items": m.get("codex_reasoning_items"),
+        "codex_message_items": m.get("codex_message_items"),
+        "platform_message_id": m.get("platform_message_id"),
+        "observed": m.get("observed", 0),
+        "active": m.get("active", 1),
+    }
+
+
+def _to_hermes_session_export(s) -> dict:
+    """Serialize a webui session into the hermes-agent export schema so chats are
+    interchangeable with Hermes Desktop: {exported_at, session_id, title, session,
+    message_count, messages:[hermes rows]}."""
+    from datetime import datetime, timezone
+
+    messages = getattr(s, "messages", None) or []
+    sid = getattr(s, "session_id", "")
+    rows = [r for i, m in enumerate(messages) if (r := _message_to_hermes_row(m, sid, i)) is not None]
+    return {
+        "exported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+        "session_id": sid,
+        "title": getattr(s, "title", None) or "Untitled",
+        "session": None,
+        "message_count": len(rows),
+        "messages": rows,
+    }
+
+
 def _handle_session_export(handler, parsed):
     sid = parse_qs(parsed.query).get("session_id", [""])[0]
     if not sid:
@@ -11062,8 +11138,7 @@ def _handle_session_export(handler, parsed):
     active_profile = get_active_profile_name()
     if not _profiles_match(getattr(s, "profile", None), active_profile):
         return bad(handler, "Session not found", 404)
-    safe = redact_session_data(s.__dict__)
-    payload = json.dumps(safe, ensure_ascii=False, indent=2)
+    payload = json.dumps(_to_hermes_session_export(s), ensure_ascii=False, indent=2)
     handler.send_response(200)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header(
@@ -12788,6 +12863,79 @@ def _handle_file_raw(handler, parsed):
     if html_inline_ok:
         return _serve_inline_html_preview(handler, target, "no-store", csp=sandbox_csp, anchor_root=anchor_root)
     return _serve_file_bytes(handler, target, mime, disposition, "no-store", csp=csp, anchor_root=anchor_root)
+
+
+def _handle_file_convert(handler, parsed):
+    """Convert an office document (doc/docx/xls/xlsx/ppt/pptx/odt/ods/odp/rtf) to PDF via
+    headless LibreOffice and serve the PDF inline, so the existing pdf.js viewer renders it.
+    Sandboxed to the per-user workspace (same resolver as /api/file/raw). The PDF is cached
+    by (path, mtime, size). Returns 501 when LibreOffice isn't installed so the frontend can
+    fall back to a download link. Cloud-safe: conversion runs server-side; the browser only
+    ever receives a PDF (works in a pod that bundles libreoffice in its image)."""
+    import hashlib
+    import tempfile
+    import threading
+    qs = parse_qs(parsed.query)
+    sid = qs.get("session_id", [""])[0]
+    if not sid:
+        return bad(handler, "session_id is required")
+    try:
+        s = get_session_for_file_ops(sid)
+    except KeyError:
+        return bad(handler, "Session not found", 404)
+    resolved = _file_raw_target(s, sid, qs.get("path", [""])[0])
+    if resolved is None:
+        return j(handler, {"error": "not found"}, status=404)
+    anchor_root, target = resolved
+    if not target.is_file():
+        return j(handler, {"error": "not found"}, status=404)
+    soffice = shutil.which("soffice") or shutil.which("libreoffice") or os.environ.get("JOYJOY_SOFFICE", "")
+    if not soffice:
+        return j(handler, {"error": "libreoffice not available", "available": False}, status=501)
+    st = target.stat()
+    if st.st_size > 40 * 1024 * 1024:
+        return j(handler, {"error": "file too large to convert"}, status=413)
+    key = hashlib.sha1(f"{target}|{st.st_mtime_ns}|{st.st_size}".encode("utf-8")).hexdigest()
+    cache_dir = Path(tempfile.gettempdir()) / "joyjoy_office_pdf"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = cache_dir / (key + ".pdf")
+    if not pdf_path.exists() or pdf_path.stat().st_size == 0:
+        if not hasattr(_handle_file_convert, "_lock"):
+            _handle_file_convert._lock = threading.Lock()
+        with _handle_file_convert._lock:  # serialize conversions (LibreOffice is flaky concurrently)
+            if not pdf_path.exists() or pdf_path.stat().st_size == 0:
+                with tempfile.TemporaryDirectory() as outdir, tempfile.TemporaryDirectory() as profile:
+                    try:
+                        proc = subprocess.run(
+                            [soffice, "--headless", "--norestore", "--nolockcheck",
+                             f"-env:UserInstallation=file://{profile}",
+                             "--convert-to", "pdf", "--outdir", outdir, str(target)],
+                            capture_output=True, timeout=120, check=False,
+                        )
+                    except subprocess.TimeoutExpired:
+                        return j(handler, {"error": "conversion timed out"}, status=504)
+                    except Exception as exc:  # noqa: BLE001
+                        return j(handler, {"error": f"conversion failed: {exc}"}, status=500)
+                    produced = Path(outdir) / (target.stem + ".pdf")
+                    if not produced.exists():
+                        logger.warning("office->pdf produced no output for %s (rc=%s): %s",
+                                       target, getattr(proc, "returncode", "?"), (getattr(proc, "stderr", b"") or b"")[:300])
+                        return j(handler, {"error": "conversion produced no output"}, status=500)
+                    shutil.move(str(produced), str(pdf_path))
+    try:
+        data = pdf_path.read_bytes()
+    except Exception:
+        return j(handler, {"error": "read failed"}, status=500)
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/pdf")
+    handler.send_header("Content-Length", str(len(data)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    try:
+        handler.wfile.write(data)
+    except Exception:
+        pass
+    return True
 
 
 def _handle_file_read(handler, parsed):
@@ -18312,7 +18460,11 @@ def _static_cache_token() -> str:
     from api.updates import WEBUI_VERSION
 
     base = WEBUI_VERSION or "unknown"
-    if base in ("", "unknown") or base.endswith("dev"):
+    # Also fold the newest static mtime for "-dirty" git builds: a dirty working
+    # tree means uncommitted local edits, but the git-describe digest is only
+    # computed once at process start — so without this the cache token freezes
+    # and edited JS/CSS/HTML is served stale until a webui restart.
+    if base in ("", "unknown") or base.endswith("dev") or "-dirty" in base:
         try:
             static_root = Path(__file__).parent.parent / "static"
             latest = 0.0

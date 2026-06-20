@@ -5118,7 +5118,7 @@ function renderMd(raw){
       // (zoom-on-click) doesn't already provide.
       const dlLabel=esc(tt('media_download'));
       const dlSvg='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
-      return `<span class="msg-artifact-image"><img class="msg-media-img" src="${safeSrc}" alt="${safeName}" loading="lazy"><a class="msg-artifact-download" href="${safeSrc}" download="${safeName}" title="${dlLabel}" aria-label="${dlLabel}" onclick="event.stopPropagation()">${dlSvg}</a></span>`;
+      return `<span class="msg-artifact-image"><img class="msg-media-img" src="${safeSrc}" alt="${safeName}" loading="lazy" onerror="window._mediaImgFallback&&_mediaImgFallback(this)"><a class="msg-artifact-download" href="${safeSrc}" download="${safeName}" title="${dlLabel}" aria-label="${dlLabel}" onclick="event.stopPropagation()">${dlSvg}</a></span>`;
     };
     if(/^file:\/\//i.test(ref)){
       try{
@@ -5152,7 +5152,7 @@ function renderMd(raw){
       if(mediaKind==='audio'||mediaKind==='video') return mediaPlayerHtml(mediaKind,src,urlPath.split('/').pop()||mediaKind);
       // Render all https:// URLs as <img> — extensionless CDN paths like fal.media still work (#853)
       if(_IMAGE_EXTS.test(urlPath) || /^https?:\/\//i.test(src)){
-        return `<img class="msg-media-img" src="${esc(src)}" alt="image" loading="lazy">`;
+        return `<img class="msg-media-img" src="${esc(src)}" alt="image" loading="lazy" onerror="window._mediaImgFallback&&_mediaImgFallback(this)">`;
       }
       return `<a href="${esc(src)}" target="_blank" rel="noopener">${esc(src)}</a>`;
     }
@@ -5165,7 +5165,7 @@ function renderMd(raw){
     }
     // SVG → inline image (no download, render directly)
     if(_SVG_EXTS.test(ref)){
-      return `<img class="msg-media-svg" src="${esc(apiUrl)}" alt="${t('media_svg_label')}" loading="lazy">`;
+      return `<img class="msg-media-svg" src="${esc(apiUrl)}" alt="${t('media_svg_label')}" loading="lazy" onerror="window._mediaImgFallback&&_mediaImgFallback(this)">`;
     }
     // Audio/video → inline player with speed controls; use &inline=1 for byte-range seeking
     if(_AUDIO_EXTS.test(ref)||_VIDEO_EXTS.test(ref)){
@@ -5193,6 +5193,14 @@ function renderMd(raw){
     // Excalidraw files → lazy-load inline embed
     if(_EXCALIDRAW_EXTS.test(ref)){
       return `<div class="excalidraw-inline-load" data-path="${esc(ref)}">${t('excalidraw_loading')} ${fname}...</div>`;
+    }
+    // Office docs → server-side LibreOffice→PDF, rendered inline via the PDF viewer
+    if(/\.(docx?|xlsx?|pptx?|odt|ods|odp|rtf)$/i.test(ref)){
+      return `<div class="office-preview-load" data-path="${esc(ref)}"><span class="pdf-preview-spinner">⏳</span> ${fname}...</div>`;
+    }
+    // Markdown files → lazy-load + render inline as markdown
+    if(/\.(md|markdown|mdx)$/i.test(ref)){
+      return `<div class="md-preview-load" data-path="${esc(ref)}"><span class="md-preview-spinner">⏳</span> ${fname}...</div>`;
     }
     return `<a class="msg-media-link" href="${esc(apiUrl+'&download=1')}" download="${fname}">📎 ${fname}</a>`;
   });
@@ -11733,6 +11741,24 @@ function buildToolCard(tc){
   return row;
 }
 
+// Graceful fallback when an inline media image can't load (e.g. an imported chat
+// references an absolute host path like C:\... that doesn't exist on THIS server,
+// or a cloud pod without that file). Replaces the broken <img> (whose collapse
+// causes the surrounding path text to overlap) with a clean, sized placeholder.
+function _mediaImgFallback(img){
+  try{
+    if(!img||img.dataset._mf) return; img.dataset._mf='1';
+    const name=(img.getAttribute('alt')||'file');
+    const wrap=(img.closest&&img.closest('.msg-artifact-image'))||img;
+    const ph=document.createElement('span');
+    ph.className='msg-media-missing';
+    ph.style.cssText='display:inline-flex;align-items:center;gap:6px;padding:5px 10px;margin:2px 0;border:1px dashed var(--border);border-radius:8px;color:var(--muted);font-size:12px;max-width:100%;white-space:normal;word-break:break-all;vertical-align:top;';
+    ph.textContent='📎 '+name+' — not available on this server';
+    if(wrap&&wrap.replaceWith) wrap.replaceWith(ph);
+  }catch(_){}
+}
+if(typeof window!=='undefined') window._mediaImgFallback=_mediaImgFallback;
+
 function _colorDiffLines(text){
   if(typeof text !== 'string') return esc(String(text||''));
   return esc(text).split('\n').map(line=>{
@@ -12198,8 +12224,10 @@ function postProcessRenderedMessages(container) {
   loadDiffInline(container);
   loadCsvInline(container);
   loadExcalidrawInline(container);
+  loadOfficeInline(container);
   loadPdfInline(container);
   loadHtmlInline(container);
+  loadMdInline(container);
   renderMermaidBlocks(container);
   renderKatexBlocks(container);
   initTreeViews(container);
@@ -12469,6 +12497,62 @@ function loadCsvInline(container){
   });
 }
 
+// Markdown (.md) files → fetch from the workspace (cloud-safe /api/media) and
+// render inline with the same markdown pipeline used for chat messages.
+function loadMdInline(container){
+  const MD_MAX_SIZE=256*1024; // 256 KB cap for inline markdown preview
+  const root=container||document;
+  root.querySelectorAll('.md-preview-load:not([data-loaded])').forEach(el=>{
+    el.setAttribute('data-loaded','1');
+    const path=el.dataset.path;
+    const fname=esc((path||'').split('/').pop()||path);
+    const dlUrl='api/media?path='+encodeURIComponent(path)+'&download=1';
+    const dlink=`<a class="msg-media-link" href="${dlUrl}" download="${fname}">📎 ${fname}</a>`;
+    fetch('api/media?path='+encodeURIComponent(path))
+      .then(r=>{ if(!r.ok) throw new Error(r.status); return r.text(); })
+      .then(text=>{
+        if(text.length>MD_MAX_SIZE){ el.outerHTML=dlink; return; }
+        const wrap=document.createElement('div');
+        wrap.className='md-preview-wrap';
+        wrap.style.cssText='border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin:4px 0;background:var(--code-bg,rgba(127,127,127,.06));';
+        wrap.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted);margin-bottom:8px;opacity:.8"><span>📝 ${fname}</span><a href="${dlUrl}" download="${fname}" style="color:var(--muted)" title="${t('media_download')}">↓</a></div><div class="md-preview-body preview-md">${renderMd(text)}</div>`;
+        el.replaceWith(wrap);
+        try{ highlightCode(wrap); addCopyButtons(wrap); }catch(_){}
+      })
+      .catch(()=>{ el.outerHTML=dlink; });
+  });
+}
+
+// Office docs (docx/xlsx/pptx/odt/ods/odp/rtf) → server-side LibreOffice→PDF
+// (cloud-safe, cached) fed into the existing PDF viewer. Falls back to a download
+// link when the backend has no LibreOffice (the convert endpoint returns 501).
+function loadOfficeInline(container){
+  const root=container||document;
+  const sid=(typeof S!=='undefined'&&S&&S.session&&S.session.session_id)?String(S.session.session_id):'';
+  root.querySelectorAll('.office-preview-load:not([data-loaded])').forEach(el=>{
+    el.setAttribute('data-loaded','1');
+    const path=el.dataset.path;
+    const fname=esc((path||'').split('/').pop()||path);
+    const dl=sid
+      ? 'api/file/raw?session_id='+encodeURIComponent(sid)+'&path='+encodeURIComponent(path)+'&download=1'
+      : 'api/media?path='+encodeURIComponent(path)+'&download=1';
+    if(!sid){ el.outerHTML=`<a class="msg-media-link" href="${dl}" download="${fname}">📎 ${fname}</a>`; return; }
+    // Hand off to the PDF viewer, fed by the server-side office→PDF conversion endpoint.
+    const pe=document.createElement('div');
+    pe.className='pdf-preview-load';
+    pe.dataset.path=path;
+    pe.dataset.fetchUrl='api/file/convert?session_id='+encodeURIComponent(sid)+'&path='+encodeURIComponent(path);
+    pe.dataset.dlUrl=dl;
+    // The inline render is a converted PDF, but the download must return the
+    // ORIGINAL document (dlUrl→/api/file/raw) — so label it by the real format
+    // (e.g. "Download DOCX"), not "Download PDF".
+    const ext=((path||'').split('.').pop()||'').toUpperCase();
+    pe.dataset.dlLabel=(typeof t==='function'?t('media_download'):'Download')+(ext?' '+ext:'');
+    pe.innerHTML='<span class="pdf-preview-spinner">⏳</span> '+fname+'...';
+    el.replaceWith(pe);
+  });
+}
+
 function loadExcalidrawInline(container){
   const EXCALIDRAW_MAX_SIZE=512*1024; // 512 KB cap
   const root=container||document;
@@ -12603,24 +12687,26 @@ function loadPdfInline(container){
     el.setAttribute('data-loaded','1');
     const path=el.dataset.path;
     const fname=path.split('/').pop()||path;
+    const fetchUrl=el.dataset.fetchUrl||('api/media?path='+encodeURIComponent(path));  // office docs override → /api/file/convert
     const loadPdf=(pdfjsLib)=>{
-      fetch('api/media?path='+encodeURIComponent(path))
+      fetch(fetchUrl)
         .then(r=>{if(!r.ok) throw new Error(r.status); return r.arrayBuffer();})
         .then(buf=>{
           if(buf.byteLength>PDF_MAX_SIZE){
-            el.outerHTML=`<div class="pdf-preview-fallback"><a class="msg-media-link" href="api/media?path=${encodeURIComponent(path)}&download=1" download="${esc(fname)}">📎 ${esc(fname)}</a><br><span style="color:var(--muted);font-size:12px">${t('pdf_too_large')}</span></div>`;
+            el.outerHTML=`<div class="pdf-preview-fallback"><a class="msg-media-link" href="${el.dataset.dlUrl||('api/media?path='+encodeURIComponent(path)+'&download=1')}" download="${esc(fname)}">📎 ${esc(fname)}</a><br><span style="color:var(--muted);font-size:12px">${t('pdf_too_large')}</span></div>`;
             return;
           }
           return pdfjsLib.getDocument({data:buf, isEvalSupported:false}).promise;
         })
         .then(pdf=>{
           if(!pdf) return;
-          const dlUrl='api/media?path='+encodeURIComponent(path)+'&download=1';
+          const dlUrl=el.dataset.dlUrl||('api/media?path='+encodeURIComponent(path)+'&download=1');
           const total=pdf.numPages;
           const pagesLabel=total>1?` · ${total} pages`:'';
           const wrap=document.createElement('div');
           wrap.className='pdf-preview-wrap';
-          wrap.innerHTML=`<div class="pdf-preview-header"><span>📄 ${esc(fname)}${pagesLabel}</span><a href="${dlUrl}" download="${esc(fname)}" class="pdf-download-link">${t('pdf_download')} ↓</a></div><div class="pdf-preview-body"></div>`;
+          const dlLabel=el.dataset.dlLabel||t('pdf_download');  // office docs override → "Download DOCX/XLSX/…"
+          wrap.innerHTML=`<div class="pdf-preview-header"><span>📄 ${esc(fname)}${pagesLabel}</span><a href="${dlUrl}" download="${esc(fname)}" class="pdf-download-link">${esc(dlLabel)} ↓</a></div><div class="pdf-preview-body"></div>`;
           const body=wrap.querySelector('.pdf-preview-body');
           el.replaceWith(wrap);
           // Render every page (capped) sequentially to limit memory; the
@@ -12654,7 +12740,7 @@ function loadPdfInline(container){
           renderPage(1);
         })
         .catch(()=>{
-          const dlUrl='api/media?path='+encodeURIComponent(path)+'&download=1';
+          const dlUrl=el.dataset.dlUrl||('api/media?path='+encodeURIComponent(path)+'&download=1');
           el.outerHTML=`<div class="pdf-preview-fallback"><a class="msg-media-link" href="${dlUrl}" download="${esc(fname)}">📎 ${esc(fname)}</a><br><span style="color:var(--muted);font-size:12px">${t('pdf_error')}</span></div>`;
         });
     };
@@ -12674,7 +12760,7 @@ function loadPdfInline(container){
       window.addEventListener('pdfjs-ready',()=>{ _pdfjsReady=true; loadPdf(window._pdfjsLib); },{once:true});
       setTimeout(()=>{
         if(!_pdfjsReady){
-          const dlUrl='api/media?path='+encodeURIComponent(path)+'&download=1';
+          const dlUrl=el.dataset.dlUrl||('api/media?path='+encodeURIComponent(path)+'&download=1');
           if(el.parentNode){
             el.outerHTML=`<div class="pdf-preview-fallback"><a class="msg-media-link" href="${dlUrl}" download="${esc(fname)}">📎 ${esc(fname)}</a><br><span style="color:var(--muted);font-size:12px">${t('pdf_error')}</span></div>`;
           }
