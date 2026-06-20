@@ -93,6 +93,26 @@ joyjoy/
 
 **Also done:** Hermes fully uninstalled — joyjoy is standalone (its own venvs for backend + webui); the UI was de-Hermes rebranded (user-facing strings → "joyjoy"; internal `hermes` / `HERMES_WEBUI_*` / `X-Hermes-*` identifiers deliberately kept — they are load-bearing).
 
+## 8b. Runs queue & streaming — current design + agreed prod hardening (note)
+
+**Current (single-process — correct for now):** `backend/app/runs.py` uses one in-process
+`asyncio.Queue` per run (producer = a `_drive` task via `asyncio.create_task`; consumer =
+the `/v1/runs/{id}/events` SSE generator), an in-memory `_RUNS` registry, and
+`asyncio.Future`s for HITL approvals. This is the standard single-process SSE pattern —
+confirmed in-house: the sibling app **`ai_sdlc_dashboard`** uses the same `asyncio.Queue`
++ `asyncio.create_task` model (no Celery/arq/taskiq, explicit `replicas: 1`), and it
+matches how LangGraph Platform splits state.
+
+**Known weak spots (NOT urgent; fine for dev/single-host):**
+1. The runs queue is **unbounded** (no backpressure) — a chatty run with a disconnected client can grow memory.
+2. `_RUNS` is **in-memory** — runs/approvals are lost on restart, and `_RUNS` cleanup relies on the client hitting `/events`.
+
+**Agreed prod-hardening path — mirror `ai_sdlc_dashboard` (NOT a task broker, NOT multi-replica):**
+- **Bound the queue:** `asyncio.Queue(maxsize=256)` + drop-oldest on overflow (exactly what `ai_sdlc_dashboard`'s `sse_manager.py` does).
+- **Durable run state in Redis:** run records + paused snapshots (with TTL) so a pod restart can resume; keep durable agent state in **Postgres** (already done). Redis here is for durability + cross-process signaling (pub/sub), **not** cross-replica fan-out.
+- **Stay single-pod** (`Recreate` deploy strategy). Don't add Celery/arq/taskiq unless run execution genuinely needs a distributed worker pool.
+- **Heavier options only if ever needed:** adopt LangGraph Platform's `langgraph-api` (productized runs+streaming), or Redis Streams/NATS + an async task queue (arq / taskiq / Procrastinate-on-Postgres).
+
 ## 9. To verify on first run (scaffold is written defensively for these)
 - langgraph `context=` kwarg on `ainvoke`/`astream` in 1.2.6 (else config-metadata fallback — the namespace factory already handles both).
 - Azure `o4-mini` tool-calling through deepagents.
