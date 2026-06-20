@@ -7401,7 +7401,7 @@ def handle_get(handler, parsed) -> bool:
                     _order = ["azure_openai", "anthropic", "bedrock", "openai", "gemini"]
                     _byprov = {}
                     for _m in _items:
-                        _byprov.setdefault(_m.get("provider") or "other", []).append({"id": _m["id"], "label": _m["id"]})
+                        _byprov.setdefault(_m.get("provider") or "other", []).append({"id": _m["id"], "label": _m["id"], "supports_reasoning": bool(_m.get("supports_reasoning"))})
                     _groups = []
                     for _p in _order + [p for p in _byprov if p not in _order]:
                         if _byprov.get(_p):
@@ -9954,6 +9954,13 @@ def handle_post(handler, parsed) -> bool:
 
     if parsed.path == "/api/models/config/delete":
         _gw = _proxy_gateway_send(handler, "POST", "/v1/models/config/delete", body)
+        if isinstance(_gw, dict):
+            return j(handler, _gw)
+        return j(handler, {"ok": False, "error": "gateway unavailable"})
+
+    if parsed.path == "/api/models/config/test":
+        # Live probe for the Providers-tab status lights (standard + reasoning).
+        _gw = _proxy_gateway_send(handler, "POST", "/v1/models/config/test", body)
         if isinstance(_gw, dict):
             return j(handler, _gw)
         return j(handler, {"ok": False, "error": "gateway unavailable"})
@@ -14994,6 +15001,14 @@ def _handle_chat_start(handler, body, diag=None):
                 _users.set_session_owner(getattr(s, "session_id", None), s._joyjoy_user)
         except Exception:
             s._joyjoy_user = None
+        # joyjoy: per-turn reasoning toggle from the composer. None/off = no reasoning;
+        # otherwise an effort level (on/minimal/low/medium/high/extra_high) forwarded to
+        # the backend run so it enables extended thinking for reasoning-capable models.
+        try:
+            _re = body.get("reasoning_effort")
+            s.reasoning_effort = str(_re).strip().lower() if _re not in (None, "", False, "off", "none") else None
+        except Exception:
+            s.reasoning_effort = None
         # NOTE: runtime-adapter selection is delegated to _start_run (shared
         # with start_session_turn so both entry points behave identically
         # under runtime_adapter_enabled() / runtime_adapter_runner_enabled()

@@ -1270,7 +1270,8 @@ async function send(){
       model_provider:_modelState.model_provider,
       profile:S.activeProfile||S.session.profile||'default',
       explicit_model_pick:_explicitPick||undefined,
-      attachments:uploaded.length?uploaded:undefined
+      attachments:uploaded.length?uploaded:undefined,
+      reasoning_effort:(typeof joyjoyReasoningEffort==='function'?joyjoyReasoningEffort():null)||undefined
     })});
 
     if(startData.title) applySessionTitleUpdate(activeSid, startData.title, {provisionalText:displayText.slice(0,64), rememberProvisional:true});

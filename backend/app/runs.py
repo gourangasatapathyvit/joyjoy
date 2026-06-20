@@ -22,7 +22,7 @@ import uuid
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langgraph.types import Command
 
-from .agent import _content_to_text
+from .agent import _content_to_text, reasoning_text_from_message
 from .context import AgentContext
 
 logger = logging.getLogger("joyjoy.runs")
@@ -59,6 +59,10 @@ def _fmt(args) -> str:
         return str(args)[:2000]
 
 
+# Canonical reasoning-text extractor lives in agent.py (shared with the model-test probe).
+_reasoning_from_msg = reasoning_text_from_message
+
+
 async def _stream_segment(run: _Run, agent_input):
     """Run one astream segment. Returns ('interrupt', hitl) | ('done', None) | ('cancelled', None)."""
     cfg = _config(run.ctx)
@@ -73,6 +77,9 @@ async def _stream_segment(run: _Run, agent_input):
         if mode == "messages":
             msg = chunk[0] if isinstance(chunk, (tuple, list)) else chunk
             if isinstance(msg, AIMessageChunk):
+                rtxt = _reasoning_from_msg(msg)
+                if rtxt:
+                    await _emit(run, "reasoning.available", text=rtxt, delta=rtxt)
                 txt = _content_to_text(getattr(msg, "content", ""))
                 if txt:
                     run.final_text += txt

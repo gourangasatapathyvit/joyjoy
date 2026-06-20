@@ -1955,6 +1955,14 @@ async function populateModelDropdown(opts={}){
       ? data.groups
       : _synthGroupsFromConfigured();
 
+    // joyjoy: capture per-model reasoning support (from /api/models) so the composer
+    // reasoning toggle can enable/disable itself for the selected model.
+    try{
+      window._modelReasoningSupport={};
+      for(const _g of groups){ for(const _m of (_g.models||[])){ if(_m&&_m.id) window._modelReasoningSupport[_m.id]=!!_m.supports_reasoning; } }
+      if(typeof _syncReasoningControl==='function') _syncReasoningControl();
+    }catch(_){}
+
     if(!groups.length) return; // no server groups and no configured fallback
     const previousSelection=_captureModelDropdownSelection(sel);
     // Clear existing options
@@ -2198,6 +2206,7 @@ function _getConfiguredModelBadge(modelId,badgeMap,providerId){
 }
 
 function syncModelChip(){
+  if(typeof _syncReasoningControl==='function') _syncReasoningControl();  // joyjoy reasoning control follows the selected model
   const sel=$('modelSelect');
   const chip=$('composerModelChip');
   const label=$('composerModelLabel');
@@ -2986,9 +2995,9 @@ function _applyReasoningChip(eff){
   const supportedEfforts=(typeof _currentReasoningEffortsSupported==='undefined')
     ?null
     :_currentReasoningEffortsSupported;
-  const supports=Array.isArray(supportedEfforts)
-    ?supportedEfforts.length>0
-    :true;
+  const supports=(typeof _selectedModelSupportsReasoning==='function')
+    ?_selectedModelSupportsReasoning()
+    :(Array.isArray(supportedEfforts)?supportedEfforts.length>0:true);
   if(!supports){
     wrap.style.display='none';
     if(mobileAction) mobileAction.style.display='none';
@@ -3014,6 +3023,32 @@ function fetchReasoningChip(){
     _applyReasoningChip((st&&st.reasoning_effort)||'', st||{});
   }).catch(function(){_applyReasoningChip('', {supported_efforts:[]});});
 }
+
+// ── joyjoy reasoning control (single control = the effort chip) ────────────
+// The effort chip IS the reasoning switch: "None"/unset ("Default") = OFF; any
+// level (Minimal/Low/Medium/High/Extra High) = ON at that effort. The level is
+// forwarded as `reasoning_effort` on /api/chat/start → the backend enables
+// extended thinking for reasoning-capable models. The chip is hidden entirely
+// for models that can't reason (per /api/models supports_reasoning).
+function _joyjoySelectedModelId(){
+  try{ return (window.S&&S.session&&S.session.model)||(($('modelSelect')||{}).value)||window._defaultModel||''; }catch(_){ return ''; }
+}
+function _selectedModelSupportsReasoning(){
+  return !!((window._modelReasoningSupport||{})[_joyjoySelectedModelId()]);
+}
+function joyjoyReasoningEffort(){
+  if(!_selectedModelSupportsReasoning()) return null;
+  var eff=(typeof _currentReasoningEffort!=='undefined'&&_currentReasoningEffort)?String(_currentReasoningEffort).toLowerCase():'';
+  if(!eff||eff==='none'||eff==='off'||eff==='default') return null;  // None / unset = reasoning OFF
+  return eff;  // minimal|low|medium|high|xhigh — backend normalizes
+}
+function _syncReasoningControl(){
+  // Show the effort chip only for reasoning-capable models (it's the reasoning switch).
+  var supported=_selectedModelSupportsReasoning();
+  var wrap=$('composerReasoningWrap'); if(wrap) wrap.style.display=supported?'':'none';
+  var mob=$('composerMobileReasoningAction'); if(mob) mob.style.display=supported?'':'none';
+}
+if(typeof window!=='undefined'){ window._syncReasoningControl=_syncReasoningControl; window.joyjoyReasoningEffort=joyjoyReasoningEffort; }
 
 function syncReasoningChip(){
   fetchReasoningChip();

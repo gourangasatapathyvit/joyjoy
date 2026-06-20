@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 
 from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend, FilesystemBackend, StoreBackend
@@ -40,11 +41,58 @@ DEFAULT_SYSTEM_PROMPT = (
 # Skill sources the agent reads on demand: read-only global (shared) + per-user.
 SKILL_SOURCES = ["/skills/global/", "/skills/user/"]
 
-# (kind, user_id, model_id) -> compiled deep agent
+# (kind, user_id, model_id, reasoning) -> compiled deep agent
 _AGENT_CACHE: dict[tuple, object] = {}
 
+# --- Reasoning / extended-thinking support --------------------------------
+# Effort level -> Anthropic extended-thinking token budget. Higher = more thinking.
+_REASONING_BUDGETS = {"minimal": 1024, "low": 2048, "medium": 4096, "high": 8192, "extra_high": 16384}
 
-def build_model_for(settings: Settings, model_id: str, uid: str | None = None) -> BaseChatModel:
+
+def normalize_reasoning_effort(reasoning) -> str | None:
+    """Canonical effort key (minimal/low/medium/high/extra_high) or None (= off).
+
+    Accepts bools, the UI labels, OpenAI effort strings, or None.
+    """
+    if reasoning is None:
+        return None
+    if isinstance(reasoning, bool):
+        return "medium" if reasoning else None
+    s = str(reasoning).strip().lower().replace("-", "_").replace(" ", "_")
+    if s in ("", "none", "off", "false", "0", "disabled"):
+        return None
+    if s in ("default", "on", "true", "1", "enabled", "auto"):
+        return "medium"
+    # UI aliases: the composer effort chip emits "xhigh" for "Extra High".
+    s = {"xhigh": "extra_high", "x_high": "extra_high", "extrahigh": "extra_high",
+         "extra": "extra_high", "min": "minimal"}.get(s, s)
+    if s in _REASONING_BUDGETS:
+        return s
+    return "medium"
+
+
+def model_supports_reasoning(spec: dict) -> bool:
+    """Can this model produce reasoning / extended thinking? Heuristic by provider +
+    model name, override-able via an explicit ``reasoning`` bool on the spec."""
+    if isinstance(spec.get("reasoning"), bool):
+        return spec["reasoning"]
+    provider = (spec.get("provider") or "azure_openai").lower()
+    ids = [str(spec.get("deployment") or "").lower(), str(spec.get("id") or "").lower()]
+    blob = " ".join(ids)
+    if provider == "anthropic":
+        return True  # Claude 3.7 / 4.x support extended thinking
+    if provider == "bedrock":
+        return any(k in blob for k in ("claude-3-7", "claude-opus-4", "claude-sonnet-4", "claude-4"))
+    if provider == "azure_openai":
+        return any(re.match(r"o[1345]\b", i) for i in ids) or "gpt-5" in blob
+    if provider in ("openai", "openai_compatible"):
+        return any(k in blob for k in ("o1", "o3", "o4", "deepseek-r", "gpt-5", "reason"))
+    if provider in ("gemini", "google"):
+        return "2.5" in blob or "thinking" in blob
+    return False
+
+
+def build_model_for(settings: Settings, model_id: str, uid: str | None = None, reasoning=None) -> BaseChatModel:
     """Chat model for a registry model id, dispatched by ``spec['provider']``.
 
     Supported providers:
@@ -63,17 +111,34 @@ def build_model_for(settings: Settings, model_id: str, uid: str | None = None) -
     specs = merged_model_specs(settings, uid)
     spec = specs.get(model_id) or specs.get(settings.default_model) or next(iter(specs.values()))
     provider = (spec.get("provider") or "azure_openai").lower()
+    effort = normalize_reasoning_effort(reasoning) if model_supports_reasoning(spec) else None
 
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
-        return ChatAnthropic(
+        anthropic_kwargs = dict(
             model=spec["deployment"],
             api_key=spec["api_key"],
             base_url=spec["endpoint"] or None,
             max_tokens=spec.get("max_tokens") or 4096,
             streaming=True,
         )
+        if effort:
+            ep = (spec.get("endpoint") or "").lower()
+            if "azure" in ep or "foundry" in ep:
+                # Azure AI Foundry Claude uses ADAPTIVE thinking (it rejects the standard
+                # {"type":"enabled","budget_tokens":N}). NOTE: Foundry returns only a thinking
+                # *signature*, not the thinking *text* — the model reasons but the text is
+                # redacted (so no visible thinking rows). Standard Anthropic / DeepSeek-R1 DO
+                # return reasoning text, which runs.py forwards as reasoning.available events.
+                anthropic_kwargs["max_tokens"] = max(int(spec.get("max_tokens") or 4096), 8192)
+                anthropic_kwargs["thinking"] = {"type": "adaptive"}
+            else:
+                # Standard Anthropic API (api.anthropic.com): explicit thinking budget.
+                budget = _REASONING_BUDGETS.get(effort, 4096)
+                anthropic_kwargs["max_tokens"] = max(int(spec.get("max_tokens") or 4096), budget + 1024)
+                anthropic_kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+        return ChatAnthropic(**anthropic_kwargs)
 
     if provider == "bedrock":
         from langchain_aws import ChatBedrockConverse
@@ -105,6 +170,8 @@ def build_model_for(settings: Settings, model_id: str, uid: str | None = None) -
             kwargs["base_url"] = spec["endpoint"]
         if spec.get("max_tokens"):
             kwargs["max_tokens"] = spec["max_tokens"]
+        if effort:
+            kwargs["reasoning_effort"] = "high" if effort in ("high", "extra_high") else ("low" if effort in ("minimal", "low") else "medium")
         return ChatOpenAI(**kwargs)
 
     if provider in ("gemini", "google"):
@@ -116,7 +183,7 @@ def build_model_for(settings: Settings, model_id: str, uid: str | None = None) -
         return ChatGoogleGenerativeAI(**kwargs)
 
     # default: Azure OpenAI
-    return AzureChatOpenAI(
+    azure_kwargs = dict(
         azure_endpoint=spec["endpoint"],
         api_key=spec["api_key"],
         api_version=spec["api_version"],
@@ -124,6 +191,16 @@ def build_model_for(settings: Settings, model_id: str, uid: str | None = None) -
         model=spec["id"],
         streaming=True,
     )
+    if effort:
+        # o-series / gpt-5 accept reasoning_effort low|medium|high. ("minimal" is gpt-5-only
+        # and o3/o4-mini reject it, so map minimal→low for safety; extra_high→high.) Azure
+        # usually hides the reasoning *text*, so thinking rows stay empty — the effort still applies.
+        azure_kwargs["reasoning_effort"] = (
+            "high" if effort in ("high", "extra_high")
+            else "medium" if effort == "medium"
+            else "low"
+        )
+    return AzureChatOpenAI(**azure_kwargs)
 
 
 def _user_namespace(rt: object) -> tuple[str, ...]:
@@ -765,6 +842,7 @@ def _public_model_spec(s: dict) -> dict:
         "has_key": bool(s.get("api_key")),
         "api_key_masked": _mask_key(s.get("api_key")),
         "has_aws_secret": bool(s.get("aws_secret_access_key")),
+        "supports_reasoning": model_supports_reasoning(s),
     }
 
 
@@ -896,10 +974,14 @@ async def _system_prompt_for(store, user_id) -> str:
     return base + "\n\n" + "\n\n".join(parts) if parts else base
 
 
-async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run_mode):
+async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run_mode, reasoning=None):
     uid = str(user_id or "default")
     mid = resolve_model(settings, model_id, uid)
-    key = ("run" if run_mode else "chat", uid, mid)
+    # Reasoning is per-request: bake the (normalized, support-gated) effort into the
+    # cache key so a thinking-enabled model is a distinct compiled agent.
+    spec = merged_model_specs(settings, uid).get(mid) or {}
+    effort = normalize_reasoning_effort(reasoning) if model_supports_reasoning(spec) else None
+    key = ("run" if run_mode else "chat", uid, mid, effort)
     agent = _AGENT_CACHE.get(key)
     if agent is not None:
         return agent
@@ -912,7 +994,7 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
         gated |= {getattr(t, "name", None) for t in mcp_tools if getattr(t, "name", None)}
         interrupt_on = {t: True for t in gated if t} or None
     agent = create_deep_agent(
-        model=build_model_for(settings, mid, uid),
+        model=build_model_for(settings, mid, uid, reasoning=effort),
         tools=mcp_tools,
         system_prompt=system_prompt,
         backend=build_backend(settings, store, uid),
@@ -924,20 +1006,20 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
     )
     _AGENT_CACHE[key] = agent
     logger.info(
-        "compiled %s agent user=%s model=%s mcp_tools=%d gated=%s",
-        "run" if run_mode else "chat", uid, mid, len(mcp_tools), list(interrupt_on or {}),
+        "compiled %s agent user=%s model=%s reasoning=%s mcp_tools=%d gated=%s",
+        "run" if run_mode else "chat", uid, mid, effort or "off", len(mcp_tools), list(interrupt_on or {}),
     )
     return agent
 
 
-async def get_agent(settings, checkpointer, store, model_id=None, user_id="default"):
+async def get_agent(settings, checkpointer, store, model_id=None, user_id="default", reasoning=None):
     """Streaming/chat agent (no approval gating)."""
-    return await _get_or_build(settings, checkpointer, store, model_id, user_id, run_mode=False)
+    return await _get_or_build(settings, checkpointer, store, model_id, user_id, run_mode=False, reasoning=reasoning)
 
 
-async def get_run_agent(settings, checkpointer, store, model_id=None, user_id="default"):
+async def get_run_agent(settings, checkpointer, store, model_id=None, user_id="default", reasoning=None):
     """Runs-API agent (MCP/plugin tools gated for HITL approval)."""
-    return await _get_or_build(settings, checkpointer, store, model_id, user_id, run_mode=True)
+    return await _get_or_build(settings, checkpointer, store, model_id, user_id, run_mode=True, reasoning=reasoning)
 
 
 # ----------------------------------------------------------------------------
@@ -992,3 +1074,89 @@ def _content_to_text(content) -> str:
                 parts.append(block)
         return "".join(parts)
     return ""
+
+
+def reasoning_text_from_message(msg) -> str:
+    """Extract reasoning / extended-thinking TEXT from a message or streamed chunk.
+
+    Provider formats vary (mirrors hermes-agent's ``extract_reasoning``):
+      * Anthropic content blocks ``{"type":"thinking","thinking":...}`` — NOTE: Azure AI
+        Foundry returns only a *signature* (no text), confirmed via the raw SDK.
+      * OpenAI-compatible: ``reasoning_content`` / ``reasoning`` (DeepSeek-R1, Moonshot, …)
+        as a direct attr, in ``additional_kwargs``, or a ``{"type":"reasoning_content"}`` block.
+      * OpenRouter unified ``reasoning_details: [{summary|thinking|content|text}]``.
+    Returns "" when there's no reasoning text.
+    """
+    parts: list[str] = []
+
+    def _add(v):
+        if isinstance(v, str) and v.strip():
+            parts.append(v)
+
+    content = getattr(msg, "content", "")
+    if isinstance(content, list):
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            t = block.get("type")
+            if t == "thinking":
+                _add(block.get("thinking"))
+            elif t in ("reasoning_content", "reasoning"):
+                _add(block.get("text") or block.get("reasoning") or block.get("thinking"))
+    # Direct attributes (DeepSeek/Qwen `reasoning`, Moonshot/Novita `reasoning_content`).
+    for attr in ("reasoning", "reasoning_content"):
+        _add(getattr(msg, attr, None))
+    ak = getattr(msg, "additional_kwargs", None) or {}
+    for key in ("reasoning_content", "reasoning"):
+        _add(ak.get(key))
+    details = ak.get("reasoning_details")
+    if isinstance(details, list):
+        for d in details:
+            if isinstance(d, dict):
+                _add(d.get("summary") or d.get("thinking") or d.get("content") or d.get("text"))
+    # De-dup (a delta can surface in both content blocks and additional_kwargs).
+    seen, out = set(), []
+    for p in parts:
+        if p not in seen:
+            seen.add(p)
+            out.append(p)
+    return "".join(out)
+
+
+async def test_model(settings: Settings, user_id: str, model_id: str) -> dict:
+    """Live health probe for the Providers-tab status lights. Two tiny real requests:
+    ``standard`` (a normal completion works) and ``reasoning`` (the model produces
+    reasoning, and whether the reasoning *text* is actually visible in the stream)."""
+    out = {
+        "id": model_id,
+        "standard": {"ok": False},
+        "reasoning": {"supported": False, "ok": False, "visible_text": False},
+    }
+    spec = merged_model_specs(settings, user_id).get(model_id)
+    if not spec:
+        out["error"] = "unknown model"
+        return out
+    supported = model_supports_reasoning(spec)
+    out["reasoning"]["supported"] = supported
+    try:
+        m = build_model_for(settings, model_id, user_id, reasoning=None)
+        r = await asyncio.wait_for(m.ainvoke([HumanMessage("Reply with the single word: pong")]), timeout=45)
+        out["standard"] = {"ok": True, "sample": _content_to_text(getattr(r, "content", ""))[:60]}
+    except Exception as e:  # noqa: BLE001
+        out["standard"] = {"ok": False, "error": str(e)[:300]}
+    if supported:
+        try:
+            mr = build_model_for(settings, model_id, user_id, reasoning="high")
+            visible = False
+
+            async def _probe():
+                nonlocal visible
+                async for ch in mr.astream([HumanMessage("Think briefly step by step, then answer: what is 6 times 7?")]):
+                    if reasoning_text_from_message(ch):
+                        visible = True
+
+            await asyncio.wait_for(_probe(), timeout=60)
+            out["reasoning"] = {"supported": True, "ok": True, "visible_text": visible}
+        except Exception as e:  # noqa: BLE001
+            out["reasoning"] = {"supported": True, "ok": False, "visible_text": False, "error": str(e)[:300]}
+    return out

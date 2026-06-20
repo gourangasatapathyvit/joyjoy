@@ -7660,6 +7660,70 @@ async function _fetchProviderQuotaStatus(force=false){
 // models are read-only; per-user models are added here with url/model/api key.
 let _modelProviderSchema = [];
 let _lastModels = [];
+// id -> last /api/models/config/test result. Persisted to localStorage so the
+// lights survive a page reload (not just in-memory panel re-renders).
+let _modelTests = {};
+try{ _modelTests = JSON.parse(localStorage.getItem('joyjoy-model-tests')||'{}')||{}; }catch(_){ _modelTests={}; }
+function _saveModelTests(){ try{ const c={}; for(const k in _modelTests){ if(!_modelTests[k]||!_modelTests[k].testing) c[k]=_modelTests[k]; } localStorage.setItem('joyjoy-model-tests', JSON.stringify(c)); }catch(_){} }
+
+function _statusDot(color, title){
+  return '<span title="'+esc(title)+'" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+color+';box-shadow:0 0 5px '+color+'99;vertical-align:middle"></span>';
+}
+
+// Two lights per model: (1) standard call, (2) reasoning. Colors:
+//   grey=untested · amber-pulse=testing · green=ok · red=fail · dark=reasoning unsupported
+//   amber(steady)=reasons but provider hides the thinking TEXT (no visible thinking rows)
+function _renderLights(id, supportsReasoning){
+  const t=_modelTests[id]||{};
+  const failed=(!t.testing && !t.standard && (t.error||t.ok===false));  // gateway/proxy error shape -> show RED, not grey
+  let c1='#888', t1='Standard call: not tested — click Test';
+  if(t.testing){ c1='#F5C542'; t1='Testing…'; }
+  else if(failed){ c1='#e94560'; t1='Test failed: '+(t.error||'gateway error'); }
+  else if(t.standard){ if(t.standard.ok){ c1='#3DB665'; t1='Standard call: OK'+(t.standard.sample?(' ("'+t.standard.sample+'")'):''); } else { c1='#e94560'; t1='Standard call FAILED: '+(t.standard.error||'unknown'); } }
+  let c2='#3a3a44', t2='Reasoning: not supported by this model';
+  if(supportsReasoning){
+    c2='#888'; t2='Reasoning: not tested — click Test';
+    if(t.testing){ c2='#F5C542'; t2='Testing…'; }
+    else if(failed){ c2='#e94560'; t2='Test failed: '+(t.error||'gateway error'); }
+    else if(t.reasoning){
+      if(t.reasoning.ok){
+        if(t.reasoning.visible_text){ c2='#3DB665'; t2='Reasoning: works AND thinking text is visible (thinking rows will show)'; }
+        else { c2='#F5A623'; t2='Reasoning: the model reasons, but this provider HIDES the thinking text (no visible thinking rows)'; }
+      } else { c2='#e94560'; t2='Reasoning FAILED: '+(t.reasoning.error||'unknown'); }
+    }
+  }
+  return '<span data-lights="'+esc(id)+'" style="margin-left:8px;display:inline-flex;align-items:center;gap:4px">'
+    +'<span style="font-size:9px;color:var(--muted)">call</span>'+_statusDot(c1,t1)
+    +'<span style="font-size:9px;color:var(--muted);margin-left:6px">reason</span>'+_statusDot(c2,t2)
+    +'</span>';
+}
+
+function _refreshLights(id){
+  const span=document.querySelector('[data-lights="'+(window.CSS&&CSS.escape?CSS.escape(id):id)+'"]');
+  const m=(_lastModels||[]).find(x=>x.id===id);
+  if(!span||!m) return;
+  const tmp=document.createElement('span'); tmp.innerHTML=_renderLights(id, m.supports_reasoning===true);
+  span.replaceWith(tmp.firstChild);
+}
+
+async function testProviderModel(id){
+  if(!id) return;
+  _modelTests[id]={testing:true}; _refreshLights(id);
+  try{
+    const res=await api('/api/models/config/test',{method:'POST',body:JSON.stringify({id:id})});
+    _modelTests[id]=(res&&typeof res==='object')?res:{standard:{ok:false,error:'no response'},reasoning:{}};
+  }catch(e){ _modelTests[id]={standard:{ok:false,error:e.message||String(e)},reasoning:{}}; }
+  _saveModelTests();
+  _refreshLights(id);
+}
+
+// Test every model in the Providers list, sequentially (so we don't hammer the gateway).
+async function testAllProviderModels(){
+  const btn=$('testAllModelsBtn');
+  if(btn){ btn.disabled=true; btn.textContent='Testing all…'; }
+  try{ for(const m of (_lastModels||[])){ if(m&&m.id) await testProviderModel(m.id); } }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='⚡ Test all models'; } }
+}
 
 async function loadProvidersPanel(){
   const list=$('providersList');
@@ -7676,7 +7740,8 @@ async function loadProvidersPanel(){
     const userModels=models.filter(m=>m.scope==='user');
     const globalModels=models.filter(m=>m.scope!=='user');
     let html=_renderAddModelForm();
-    html+='<div class="settings-section-title" style="margin-top:18px">Your models</div>';
+    html+='<div style="margin-top:14px;display:flex;justify-content:flex-end"><button class="sm-btn" id="testAllModelsBtn" type="button" style="padding:5px 12px">⚡ Test all models</button></div>';
+    html+='<div class="settings-section-title" style="margin-top:10px">Your models</div>';
     html+=userModels.length
       ? '<div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">'+userModels.map(_renderModelRow).join('')+'</div>'
       : '<div style="color:var(--muted);font-size:12px;padding:6px 0">None yet — add one with the form above.</div>';
@@ -7686,6 +7751,8 @@ async function loadProvidersPanel(){
     _bindAddModelForm();
     list.querySelectorAll('[data-edit-model]').forEach(btn=>{ btn.onclick=()=>editProviderModel(btn.getAttribute('data-edit-model')); });
     list.querySelectorAll('[data-del-model]').forEach(btn=>{ btn.onclick=()=>deleteProviderModel(btn.getAttribute('data-del-model')); });
+    list.querySelectorAll('[data-test-model]').forEach(btn=>{ btn.onclick=()=>testProviderModel(btn.getAttribute('data-test-model')); });
+    const _ta=$('testAllModelsBtn'); if(_ta) _ta.onclick=testAllProviderModels;
   }catch(e){
     list.innerHTML='<div style="color:var(--error);padding:12px;font-size:13px">Failed to load models: '+esc(e.message||String(e))+'</div>';
   }
@@ -7700,14 +7767,16 @@ function _renderModelRow(m){
   if(m.endpoint) bits.push(esc(m.endpoint));
   if(m.region) bits.push('region: '+esc(m.region));
   if(m.has_key) bits.push('🔑 '+esc(m.api_key_masked||'••••'));
+  const testBtn='<button class="sm-btn" data-test-model="'+esc(m.id)+'" style="padding:4px 10px">Test</button>';
   const right=editable
-    ? '<button class="sm-btn" data-edit-model="'+esc(m.id)+'" style="padding:4px 10px">Edit</button>'
+    ? testBtn
+      +'<button class="sm-btn" data-edit-model="'+esc(m.id)+'" style="padding:4px 10px;margin-left:6px">Edit</button>'
       +'<button class="sm-btn" data-del-model="'+esc(m.id)+'" style="padding:4px 10px;color:var(--accent);border-color:rgba(233,69,96,.3);margin-left:6px">Delete</button>'
-    : '<span title="Global / read-only" style="color:var(--muted);font-size:12px">🔒</span>';
+    : testBtn+'<span title="Global / read-only" style="color:var(--muted);font-size:12px;margin-left:6px">🔒</span>';
   return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card)">'
-    +'<div style="min-width:0"><div style="font-weight:600">'+esc(m.id)+'</div>'
+    +'<div style="min-width:0"><div style="font-weight:600;display:flex;align-items:center;flex-wrap:wrap">'+esc(m.id)+_renderLights(m.id, m.supports_reasoning===true)+'</div>'
     +'<div style="color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+bits.join('  ·  ')+'</div></div>'
-    +'<div style="flex-shrink:0">'+right+'</div></div>';
+    +'<div style="flex-shrink:0;display:flex;align-items:center">'+right+'</div></div>';
 }
 
 function _renderAddModelForm(){
@@ -7751,9 +7820,10 @@ async function saveProviderModel(){
   try{
     const res=await api('/api/models/config/save',{method:'POST',body:JSON.stringify(payload)});
     if(res&&res.ok){
-      if(typeof showToast==='function') showToast('Model "'+(res.id||payload.id||'')+'" added');
+      if(typeof showToast==='function') showToast('Model "'+(res.id||payload.id||'')+'" added — testing…');
       await loadProvidersPanel();
       if(typeof populateModelDropdown==='function') populateModelDropdown();
+      if(res.id) testProviderModel(res.id);  // auto-probe the new config → light the status dots
     }else if(err){ err.style.display=''; err.textContent=(res&&res.error)||'Save failed'; }
   }catch(e){ if(err){ err.style.display=''; err.textContent=e.message||String(e); } }
   finally{ if(btn){ btn.disabled=false; btn.textContent='Add model'; } }

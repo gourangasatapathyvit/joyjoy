@@ -40,6 +40,7 @@ from .agent import (
     invoke_once,
     list_skills,
     merged_model_specs,
+    model_supports_reasoning,
     read_memory,
     read_skill_content,
     resolve_model,
@@ -47,6 +48,7 @@ from .agent import (
     save_user_model,
     save_user_skill,
     stream_messages,
+    test_model,
     toggle_user_mcp,
     toggle_user_skill,
     write_memory,
@@ -173,7 +175,11 @@ async def list_models(request: Request):
     return {
         "object": "list",
         "data": [
-            {"id": mid, "object": "model", "owned_by": "joyjoy", "provider": s.get("provider", "azure_openai")}
+            {
+                "id": mid, "object": "model", "owned_by": "joyjoy",
+                "provider": s.get("provider", "azure_openai"),
+                "supports_reasoning": model_supports_reasoning(s),
+            }
             for mid, s in specs.items()
         ],
     }
@@ -301,6 +307,17 @@ async def models_config_delete(request: Request):
     return JSONResponse(delete_user_model(settings, uid, body.get("id")))
 
 
+@app.post("/v1/models/config/test")
+async def models_config_test(request: Request):
+    """Live probe for the Providers-tab status lights: does this model answer a
+    standard call, and does it produce (visible) reasoning? Two small real requests."""
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    body = await _json(request)
+    model_id = body.get("id") or body.get("model")
+    return JSONResponse(await test_model(settings, uid, model_id))
+
+
 # ── Memory (per-user notes / profile / soul) ──
 @app.get("/v1/memory")
 async def memory_get(request: Request):
@@ -361,8 +378,11 @@ async def chat_completions(request: Request):
     model = resolve_model(settings, body.get("model"), user_id)  # passthrough (validated)
     thread_id = _thread_id(request, body)
     text = _last_user_text(body.get("messages") or [])
+    reasoning = body.get("reasoning_effort")
+    if reasoning is None:
+        reasoning = body.get("reasoning")
     ctx = AgentContext(user_id=user_id, thread_id=thread_id)
-    agent = await get_agent(settings, request.app.state.checkpointer, request.app.state.store, model, user_id)
+    agent = await get_agent(settings, request.app.state.checkpointer, request.app.state.store, model, user_id, reasoning=reasoning)
 
     cid = f"chatcmpl-{uuid.uuid4().hex}"
     created = int(time.time())
@@ -429,10 +449,13 @@ async def create_run(request: Request):
     model = resolve_model(settings, body.get("model"), user_id)
     thread_id = _thread_id(request, body)
     text = _run_input_text(body)
+    reasoning = body.get("reasoning_effort")
+    if reasoning is None:
+        reasoning = body.get("reasoning")
     ctx = AgentContext(user_id=user_id, thread_id=thread_id)
-    agent = await get_run_agent(settings, request.app.state.checkpointer, request.app.state.store, model, user_id)
+    agent = await get_run_agent(settings, request.app.state.checkpointer, request.app.state.store, model, user_id, reasoning=reasoning)
     run_id = await runs_mod.start_run(agent, ctx, text)
-    logger.info("run start id=%s user=%s thread=%s model=%s", run_id, user_id, thread_id, model)
+    logger.info("run start id=%s user=%s thread=%s model=%s reasoning=%s", run_id, user_id, thread_id, model, reasoning)
     return JSONResponse({"run_id": run_id, "id": run_id, "status": "running", "model": model})
 
 

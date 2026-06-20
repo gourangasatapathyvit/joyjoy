@@ -577,6 +577,9 @@ def _run_gateway_chat_streaming(
             body_extras = {}
             if model_provider:
                 body_extras["provider"] = model_provider
+            _re = getattr(s, "reasoning_effort", None)
+            if _re:
+                body_extras["reasoning_effort"] = _re  # joyjoy: composer reasoning toggle
             try:
                 final_text, usage = _run_gateway_runs_api_streaming(
                     session_id, msg_text, model, workspace, stream_id,
