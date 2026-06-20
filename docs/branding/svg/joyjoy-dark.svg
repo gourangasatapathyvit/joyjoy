@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 500" width="1200" height="500">
+  <defs>
+    <linearGradient id="head-border" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#FF6BA8"/>
+      <stop offset="33%"  stop-color="#C780E8"/>
+      <stop offset="66%"  stop-color="#4D96FF"/>
+      <stop offset="100%" stop-color="#6BCB77"/>
+    </linearGradient>
+    <radialGradient id="led-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#FFFAE5"/>
+      <stop offset="40%"  stop-color="#FFD93D"/>
+      <stop offset="100%" stop-color="#FF8C42"/>
+    </radialGradient>
+    <radialGradient id="led-halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#FFD93D" stop-opacity="0.75"/>
+      <stop offset="100%" stop-color="#FFD93D" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="chest" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"   stop-color="#FF6BA8"/>
+      <stop offset="50%"  stop-color="#C780E8"/>
+      <stop offset="100%" stop-color="#4D96FF"/>
+    </linearGradient>
+    <linearGradient id="grad-j1" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#FF8FBA"/><stop offset="100%" stop-color="#FF6BA8"/></linearGradient>
+    <linearGradient id="grad-o1" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#FFE066"/><stop offset="100%" stop-color="#FFD93D"/></linearGradient>
+    <linearGradient id="grad-y1" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#8FDD96"/><stop offset="100%" stop-color="#6BCB77"/></linearGradient>
+    <linearGradient id="grad-j2" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#7AB3FF"/><stop offset="100%" stop-color="#4D96FF"/></linearGradient>
+    <linearGradient id="grad-o2" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#D9A3F2"/><stop offset="100%" stop-color="#C780E8"/></linearGradient>
+    <linearGradient id="grad-y2" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#FFA866"/><stop offset="100%" stop-color="#FF8C42"/></linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="500" fill="#0F1117"/>
+
+  <g transform="translate(40, 30)">
+    <circle cx="200" cy="42" r="38" fill="url(#led-halo)"/>
+    <line x1="200" y1="95" x2="200" y2="55" stroke="#C780E8" stroke-width="8" stroke-linecap="round"/>
+    <circle cx="200" cy="42" r="13" fill="url(#led-glow)" stroke="#FF8C42" stroke-width="2"/>
+    <circle cx="196" cy="38" r="3.5" fill="#FFFFFF" opacity="0.95"/>
+    <rect x="60" y="100" width="280" height="260" rx="54" ry="54"
+          fill="#1A1D26" stroke="url(#head-border)" stroke-width="10"/>
+    <circle cx="60"  cy="220" r="9" fill="#C780E8"/>
+    <circle cx="340" cy="220" r="9" fill="#C780E8"/>
+    <circle cx="152" cy="208" r="38" fill="#FF6BA8"/>
+    <circle cx="248" cy="208" r="38" fill="#4D96FF"/>
+    <circle cx="140" cy="196" r="11" fill="#FFFFFF"/>
+    <circle cx="236" cy="196" r="11" fill="#FFFFFF"/>
+    <circle cx="162" cy="220" r="5"  fill="#FFFFFF" opacity="0.85"/>
+    <circle cx="258" cy="220" r="5"  fill="#FFFFFF" opacity="0.85"/>
+    <ellipse cx="108" cy="270" rx="16" ry="9" fill="#FF8FBA" opacity="0.55"/>
+    <ellipse cx="292" cy="270" rx="16" ry="9" fill="#FF8FBA" opacity="0.55"/>
+    <path d="M160 295 Q200 325 240 295"
+          stroke="#FFA866" stroke-width="8" stroke-linecap="round" fill="none"/>
+    <rect x="158" y="370" width="84" height="22" rx="8" fill="url(#chest)" opacity="0.9"/>
+    <circle cx="178" cy="381" r="3.5" fill="#FFFFFF" opacity="0.95"/>
+    <circle cx="200" cy="381" r="3.5" fill="#FFFFFF" opacity="0.95"/>
+    <circle cx="222" cy="381" r="3.5" fill="#FFFFFF" opacity="0.95"/>
+  </g>
+
+  <g font-family="'Comic Sans MS','Baloo 2','Quicksand','Trebuchet MS',sans-serif"
+     font-weight="900" font-size="180">
+    <text x="520"  y="305" fill="url(#grad-j1)">j</text>
+    <text x="610"  y="305" fill="url(#grad-o1)">o</text>
+    <text x="725"  y="305" fill="url(#grad-y1)">y</text>
+    <text x="840"  y="305" fill="url(#grad-j2)">j</text>
+    <text x="930"  y="305" fill="url(#grad-o2)">o</text>
+    <text x="1045" y="305" fill="url(#grad-y2)">y</text>
+  </g>
+</svg>

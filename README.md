@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/branding/png/joyjoy-primary.png" alt="joyjoy" width="380">
+</p>
+
 # joyjoy
 
 Multi-tenant **Deep Agents** backend (single process, Postgres-backed) with
@@ -15,6 +19,7 @@ mapping, the required hermes patches, and the phased checklist.
 - `webui/` — patched copy of hermes-webui (the UI)
 - `skills/global/`, `config/global.mcp.json` — shared, read-only global skills/MCP
 - `data/` — dev sqlite + per-user files (gitignored)
+- `docs/branding/` — brand kit: logos (`svg/`, `png/`), favicons, and the brand guide (`README.md`)
 
 ## Quick start (dev)
 

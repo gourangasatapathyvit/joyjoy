@@ -15,13 +15,15 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
 from . import runs as runs_mod
@@ -111,6 +113,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# joyjoy branding: serve the favicon + brand assets for anyone hitting the API in a browser
+# (e.g. /docs). Files live in backend/static (copied from the joyjoy brand kit).
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def _favicon_ico():
+    return FileResponse(os.path.join(_STATIC_DIR, "favicon.ico"), media_type="image/x-icon")
+
+
+@app.get("/favicon.svg", include_in_schema=False)
+async def _favicon_svg():
+    return FileResponse(os.path.join(_STATIC_DIR, "favicon.svg"), media_type="image/svg+xml")
+
+
+if os.path.isdir(_STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 
 def _health_payload() -> dict:
