@@ -9863,18 +9863,9 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path == "/api/file/open-vscode":
         return _handle_file_open_vscode(handler, body)
 
-    # ── Workspace management (POST) ──
-    if parsed.path == "/api/workspaces/add":
-        return _handle_workspace_add(handler, body)
-
-    if parsed.path == "/api/workspaces/remove":
-        return _handle_workspace_remove(handler, body)
-
-    if parsed.path == "/api/workspaces/rename":
-        return _handle_workspace_rename(handler, body)
-
-    if parsed.path == "/api/workspaces/reorder":
-        return _handle_workspace_reorder(handler, body)
+    # ── Workspace management (POST) ── joyjoy: REMOVED. There is one fixed
+    # per-user workspace and no add/rename/reorder/remove UI; these endpoints
+    # (add/remove/rename/reorder) are gone so the workspace can't be changed.
 
     # ── Approval (POST) ──
     if parsed.path == "/api/approval/respond":

@@ -169,7 +169,19 @@ def handle_upload(handler):
         except KeyError:
             return j(handler, {'error': 'Session not found'}, status=404)
         safe_name = _sanitize_upload_name(filename)
-        dest = _upload_destination(session_id, safe_name)
+        # joyjoy: store composer attachments IN the per-user workspace (not a
+        # separate inbox) so they persist there, appear in the files panel, and
+        # the agent reads them from its own filesystem. Confined per-user via
+        # resolve_trusted_workspace + safe_resolve_ws (path traversal blocked).
+        workspace = resolve_trusted_workspace(s.workspace)
+        dest = safe_resolve_ws(workspace, safe_name)
+        if dest.exists():
+            stem, suffix = dest.stem, dest.suffix
+            for idx in range(1, 1000):
+                cand = safe_resolve_ws(workspace, f'{stem}-{idx}{suffix}')
+                if not cand.exists():
+                    dest = cand
+                    break
         dest.write_bytes(file_bytes)
         mime = mimetypes.guess_type(safe_name)[0] or 'application/octet-stream'
         return j(handler, {
@@ -344,9 +356,9 @@ def handle_upload_extract(handler):
             s = get_session(session_id)
         except KeyError:
             return j(handler, {'error': 'Session not found'}, status=404)
-        session_dir = _session_attachment_dir(session_id)
-        session_dir.mkdir(parents=True, exist_ok=True)
-        result = extract_archive(file_bytes, filename, session_dir)
+        # joyjoy: extract archives into the per-user workspace (not a separate inbox).
+        workspace = resolve_trusted_workspace(s.workspace)
+        result = extract_archive(file_bytes, filename, workspace)
         return j(handler, {'ok': True, **result})
     except ValueError as e:
         return j(handler, {'error': str(e)}, status=400)

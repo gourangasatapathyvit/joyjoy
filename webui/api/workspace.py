@@ -27,6 +27,50 @@ from api.config import (
     MAX_FILE_BYTES, IMAGE_EXTS, MD_EXTS
 )
 
+import contextvars
+
+# ── joyjoy: per-user workspace ───────────────────────────────────────────────
+# The joyjoy agent's real files live PER-USER in the backend store; the webui
+# "workspace" is only a cosmetic host path. Instead of one shared global path,
+# give each logged-in user their own fixed workspace dir. The server's request
+# handler sets _REQUEST_USER from the session cookie; the resolvers below
+# short-circuit to <home>/joyjoy/data/users/<user>/workspace when it's set.
+_REQUEST_USER: "contextvars.ContextVar" = contextvars.ContextVar("webui_request_user", default=None)
+
+
+def set_request_user(name) -> None:
+    try:
+        _REQUEST_USER.set((str(name).strip() or None) if name else None)
+    except Exception:
+        pass
+
+
+def clear_request_user() -> None:
+    try:
+        _REQUEST_USER.set(None)
+    except Exception:
+        pass
+
+
+def _per_user_workspace_or_none() -> str | None:
+    """Fixed per-user workspace dir (created on demand) when a logged-in
+    multi-user request is in context; else None so callers fall back to the
+    shared default. Lives under HOME so it's trusted by resolve_trusted_workspace."""
+    try:
+        user = _REQUEST_USER.get()
+        if not user:
+            return None
+        from api.users import multi_user_enabled, normalize
+        if not multi_user_enabled():
+            return None
+        base = _home_path() / "joyjoy" / "data" / "users" / normalize(user) / "workspace"
+        base.mkdir(parents=True, exist_ok=True)
+        if base.is_dir():
+            return str(base)
+    except Exception:
+        logger.debug("per-user workspace resolution failed", exc_info=True)
+    return None
+
 
 # ── Profile-aware path resolution ───────────────────────────────────────────
 
@@ -199,6 +243,9 @@ def _profile_default_workspace() -> str:
 
     Falls back to the live DEFAULT_WORKSPACE from api.config.
     """
+    pu = _per_user_workspace_or_none()
+    if pu:
+        return pu  # joyjoy: fixed per-user workspace
     try:
         from api.config import get_config
         cfg = get_config()
@@ -367,6 +414,9 @@ def save_workspaces(workspaces: list) -> None:
 
 
 def get_last_workspace() -> str:
+    pu = _per_user_workspace_or_none()
+    if pu:
+        return pu  # joyjoy: fixed per-user workspace (ignore the shared last-used path)
     remote_cwd = _remote_terminal_cwd()
 
     def valid_last_workspace(raw: str) -> str | None:
@@ -774,6 +824,13 @@ def resolve_trusted_workspace(path: str | Path | None = None) -> Path:
     None/empty path falls back to the boot-time DEFAULT_WORKSPACE, which is always
     trusted (it was validated at server startup).
     """
+    # joyjoy: workspace switching is removed — there is exactly ONE fixed per-user
+    # workspace. Force every file op (panel browse/CRUD, chat, terminal) into it,
+    # regardless of the requested/stored path, so it matches the agent's host root
+    # and old sessions stop pointing at the shared dir.
+    pu = _per_user_workspace_or_none()
+    if pu:
+        return Path(pu)
     if path in (None, ""):
         return _resolve_path(_BOOT_DEFAULT_WORKSPACE)
 

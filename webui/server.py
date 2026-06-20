@@ -319,6 +319,12 @@ class Handler(BaseHTTPRequestHandler):
         if cookie_profile:
             set_request_profile(cookie_profile)
         try:
+            from api.workspace import set_request_user
+            from api.auth import parse_cookie, session_username
+            set_request_user(session_username(parse_cookie(self)))
+        except Exception:
+            pass
+        try:
             parsed = urlparse(self.path)
             if not check_auth(self, parsed): return
             result = handle_get(self, parsed)
@@ -342,6 +348,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._safe_webui_print(traceback.format_exc())
         finally:
             clear_request_profile()
+            try:
+                from api.workspace import clear_request_user
+                clear_request_user()
+            except Exception:
+                pass
 
     def _handle_write(self, route_func) -> None:
         self._req_t0 = time.time()
@@ -349,6 +360,12 @@ class Handler(BaseHTTPRequestHandler):
         cookie_profile = get_profile_cookie(self)
         if cookie_profile:
             set_request_profile(cookie_profile)
+        try:
+            from api.workspace import set_request_user
+            from api.auth import parse_cookie, session_username
+            set_request_user(session_username(parse_cookie(self)))
+        except Exception:
+            pass
         try:
             parsed = urlparse(self.path)
             # Stage-346 Opus SHOULD-FIX defense-in-depth: scope the CSP-report
@@ -381,6 +398,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._safe_webui_print(traceback.format_exc())
         finally:
             clear_request_profile()
+            try:
+                from api.workspace import clear_request_user
+                clear_request_user()
+            except Exception:
+                pass
 
     def do_POST(self) -> None:
         self._handle_write(handle_post)

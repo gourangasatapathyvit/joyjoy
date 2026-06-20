@@ -141,18 +141,31 @@ def _user_namespace(rt: object) -> tuple[str, ...]:
     return (str(uid or "anonymous"), "fs")
 
 
-def build_backend(settings: Settings, store: BaseStore):
-    """Composite filesystem backend:
+def build_backend(settings: Settings, store: BaseStore, user_id: str = "default"):
+    """Composite backend — per-user HOST workspace for the agent's files.
 
-    - default → per-user ``StoreBackend`` (virtual FS, memory, ``/skills/user/``)
-    - ``/skills/global/`` → read-only global skills from disk (shared by all users)
+    - default (the agent's working files) → ``FilesystemBackend`` rooted at a real
+      per-user host dir ``<user_data_root>/<uid>/workspace`` with
+      ``virtual_mode=True`` so every op is confined there (``..``/``~``/absolute
+      escapes are blocked). This is the SAME dir the webui workspace panel browses,
+      so whatever the agent reads/writes shows up there — and nowhere else.
+    - ``/memory/`` and ``/skills/user/`` → per-user ``StoreBackend`` (kept in the
+      store so the memory/skills CRUD endpoints stay authoritative).
+    - ``/skills/global/`` → read-only global skills from disk (shared by all users).
     """
-    user_fs = StoreBackend(store=store, namespace=_user_namespace)
-    routes: dict[str, object] = {}
+    user_store = StoreBackend(store=store, namespace=_user_namespace)
+    uid = str(user_id or "default")
+    host_root = os.path.join(settings.user_data_root, uid, "workspace")
+    os.makedirs(host_root, exist_ok=True)
+    working_fs = FilesystemBackend(root_dir=host_root, virtual_mode=True)
+    routes: dict[str, object] = {
+        "/memory/": user_store,
+        "/skills/user/": user_store,
+    }
     gdir = settings.global_skills_dir
     if gdir and os.path.isdir(gdir):
         routes["/skills/global/"] = FilesystemBackend(root_dir=gdir, virtual_mode=True)
-    return CompositeBackend(default=user_fs, routes=routes) if routes else user_fs
+    return CompositeBackend(default=working_fs, routes=routes)
 
 
 def resolve_model(settings: Settings, requested: str | None, uid: str | None = None) -> str:
@@ -902,7 +915,7 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
         model=build_model_for(settings, mid, uid),
         tools=mcp_tools,
         system_prompt=system_prompt,
-        backend=build_backend(settings, store),
+        backend=build_backend(settings, store, uid),
         checkpointer=checkpointer,
         store=store,
         context_schema=AgentContext,

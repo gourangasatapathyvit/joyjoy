@@ -611,6 +611,27 @@ def _parse_nonnegative_int(value):
 
 
 class Session:
+    # joyjoy: single fixed per-user workspace. When a logged-in request is in
+    # context, EVERY read of .workspace resolves to that user's host workspace
+    # (the agent's root, <home>/joyjoy/data/users/<user>/workspace) so the files
+    # panel + all webui file ops match the agent — regardless of the value stored
+    # on the session record. Falls back to the stored value outside a request
+    # (CLI / background / serialization with no user in context).
+    @property
+    def workspace(self):
+        try:
+            from api.workspace import _per_user_workspace_or_none
+            pu = _per_user_workspace_or_none()
+            if pu:
+                return pu
+        except Exception:
+            pass
+        return getattr(self, "_workspace", "")
+
+    @workspace.setter
+    def workspace(self, value):
+        self._workspace = str(value) if value is not None else ""
+
     def __init__(self, session_id: str=None, title: str='Untitled',
                  workspace=str(DEFAULT_WORKSPACE), model=DEFAULT_MODEL,
                  model_provider=None,
