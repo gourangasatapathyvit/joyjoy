@@ -1,16 +1,19 @@
 """Authentication helpers.
 
-Two independent checks:
-
-1. ``verify_gateway_key`` — confirms the *caller* (hermes-webui) is allowed to
-   use the gateway. Uses a shared API key (``X-API-Key`` or ``Authorization:
-   Bearer``). Disabled when ``GATEWAY_API_KEY`` is unset (dev convenience).
-2. ``resolve_user_id`` — extracts the *end user* identity for tenant isolation.
-   Priority: explicit ``X-User-Id`` header (hermes forwards the authenticated
-   user) > JWT ``sub`` (direct clients) > dev default.
+- ``verify_gateway_key`` — optional shared-key check for a fronting tier (no-op
+  when ``GATEWAY_API_KEY`` is unset, which is the single-server default).
+- Identity resolution for tenant isolation, in priority order:
+  ``X-User-Id`` header (dev proxy) > signed **session cookie** (real login) >
+  ``Authorization: Bearer`` JWT (direct clients) > dev default.
+  ``current_username`` does the same WITHOUT the dev fallback — it backs
+  ``/v1/auth/me`` and the login gate so an unauthenticated visitor is a real 401.
+- Session tokens are short JWTs signed with ``JWT_SECRET``, set as an httpOnly
+  cookie by the ``/v1/auth/*`` routes.
 """
 
 from __future__ import annotations
+
+import time
 
 import jwt
 from fastapi import HTTPException, Request
@@ -25,45 +28,65 @@ def _bearer(request: Request) -> str:
 
 def verify_gateway_key(request: Request, settings: Settings) -> None:
     if not settings.gateway_api_key:
-        return  # open in dev when no key is configured
+        return  # open when no key is configured (single-server default)
     provided = request.headers.get("x-api-key") or _bearer(request)
     if provided != settings.gateway_api_key:
         raise HTTPException(status_code=401, detail="invalid gateway api key")
 
 
-def resolve_user_id(request: Request, settings: Settings) -> str:
-    # 1) explicit forwarded identity (preferred; set by a proxy / the dev Vite server)
+# ── Session cookie (signed JWT) ──────────────────────────────────────────────
+def make_session_token(settings: Settings, username: str) -> str:
+    now = int(time.time())
+    return jwt.encode(
+        {"sub": str(username), "iat": now, "exp": now + settings.session_ttl_hours * 3600},
+        settings.jwt_secret,
+        algorithm="HS256",
+    )
+
+
+def read_session_username(settings: Settings, request: Request) -> str | None:
+    tok = request.cookies.get(settings.session_cookie)
+    if not tok or not settings.jwt_secret:
+        return None
+    try:
+        return jwt.decode(tok, settings.jwt_secret, algorithms=["HS256"]).get("sub")
+    except Exception:
+        return None
+
+
+def _bearer_sub(settings: Settings, request: Request) -> str | None:
+    token = _bearer(request)
+    if not token or not settings.jwt_secret:
+        return None
+    try:
+        claims = jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=[a.strip() for a in settings.jwt_algorithms.split(",") if a.strip()],
+            audience=settings.jwt_audience or None,
+            options={"verify_aud": bool(settings.jwt_audience)},
+        )
+    except Exception:
+        return None
+    sub = claims.get("sub") or claims.get("user_id")
+    return str(sub) if sub else None
+
+
+def current_username(request: Request, settings: Settings) -> str | None:
+    """Authenticated identity with NO dev fallback — for /v1/auth/me and gating."""
     uid = request.headers.get(settings.user_id_header.lower())
     if uid:
         return uid.strip()
+    sess = read_session_username(settings, request)
+    if sess:
+        return sess
+    return _bearer_sub(settings, request)
 
-    # 2) same-origin SPA cookie. When FastAPI serves the built SPA itself (single-
-    #    server / Phase 4) there's no forwarding proxy and EventSource can't send a
-    #    header — the app sets a `joyjoy_uid` cookie on sign-in, sent on every
-    #    same-origin fetch *and* the SSE stream.
-    cookie_uid = request.cookies.get("joyjoy_uid")
-    if cookie_uid:
-        return cookie_uid.strip()
 
-    # 3) JWT subject (direct clients / production without a forwarding proxy)
-    token = _bearer(request)
-    if token and settings.jwt_secret:
-        try:
-            claims = jwt.decode(
-                token,
-                settings.jwt_secret,
-                algorithms=[a.strip() for a in settings.jwt_algorithms.split(",") if a.strip()],
-                audience=settings.jwt_audience or None,
-                options={"verify_aud": bool(settings.jwt_audience)},
-            )
-        except Exception as exc:  # noqa: BLE001 - surface as 401
-            raise HTTPException(status_code=401, detail=f"invalid token: {exc}") from exc
-        sub = claims.get("sub") or claims.get("user_id")
-        if sub:
-            return str(sub)
-
-    # 4) dev fallback
+def resolve_user_id(request: Request, settings: Settings) -> str:
+    u = current_username(request, settings)
+    if u:
+        return u
     if not settings.is_prod:
         return settings.dev_default_user
-
-    raise HTTPException(status_code=401, detail="missing user identity (X-User-Id or JWT)")
+    raise HTTPException(status_code=401, detail="missing user identity (session or JWT)")

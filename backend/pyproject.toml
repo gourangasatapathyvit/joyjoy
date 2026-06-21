@@ -22,6 +22,7 @@ dependencies = [
     # Config / auth / crypto
     "pydantic-settings>=2.4",
     "pyjwt>=2.9",
+    "bcrypt>=4.1",  # password hashing for username/password accounts
     "cryptography>=42",
 ]
 

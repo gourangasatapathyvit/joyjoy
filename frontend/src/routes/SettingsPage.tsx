@@ -5,6 +5,7 @@ import type { ChangeEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { authApi, useMe } from "@/api/auth";
 import { sessionApi, useSessionMutations } from "@/api/sessions";
 import { useUiSettings, useUpdateUiSettings } from "@/api/usersettings";
 import { ModelPicker } from "@/components/chat/ModelPicker";
@@ -15,7 +16,6 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { ProvidersPanel } from "@/routes/ProvidersPanel";
-import { useAuthStore } from "@/store/auth";
 import { useChatStore } from "@/store/chat";
 import {
 	type ActivityDisplay,
@@ -311,23 +311,20 @@ function AppearancePane() {
 // password reset, and logout. Username is read-only (it's the backend identity).
 function ProfilePane() {
 	const { t } = useTranslation();
-	const username = useAuthStore((s) => s.username);
-	const signOut = useAuthStore((s) => s.signOut);
-	const resetPassword = useAuthStore((s) => s.resetPassword);
+	const { data: me } = useMe();
+	const qc = useQueryClient();
 	const navigate = useNavigate();
 	const { data: ui } = useUiSettings();
 	const update = useUpdateUiSettings();
 
 	const [name, setName] = useState("");
-	const [email, setEmail] = useState("");
 	const [profileNote, setProfileNote] = useState<string | null>(null);
 	const seeded = useRef(false);
 
-	// Seed the editable fields from the server once the settings load.
+	// Seed the editable display name from the server once settings load.
 	useEffect(() => {
 		if (!seeded.current && ui) {
 			setName(ui.display_name ?? "");
-			setEmail(ui.email ?? "");
 			seeded.current = true;
 		}
 	}, [ui]);
@@ -336,11 +333,12 @@ function ProfilePane() {
 	const [next, setNext] = useState("");
 	const [confirm, setConfirm] = useState("");
 	const [pwNote, setPwNote] = useState<string | null>(null);
+	const [pwBusy, setPwBusy] = useState(false);
 
 	const saveProfile = () => {
 		setProfileNote(null);
 		update.mutate(
-			{ display_name: name.trim(), email: email.trim() },
+			{ display_name: name.trim() },
 			{
 				onSuccess: () => setProfileNote(t("profile.saved")),
 				onError: () => setProfileNote(t("profile.saveError")),
@@ -348,22 +346,32 @@ function ProfilePane() {
 		);
 	};
 
-	const changePassword = () => {
+	const changePassword = async () => {
 		if (next !== confirm) {
 			setPwNote(t("profile.pwMismatch"));
 			return;
 		}
-		const res = resetPassword(current, next);
-		setPwNote(res.ok ? t("profile.pwUpdated") : t("profile.updateFailed"));
-		if (res.ok) {
-			setCurrent("");
-			setNext("");
-			setConfirm("");
+		setPwBusy(true);
+		try {
+			const res = await authApi.changePassword(current, next);
+			setPwNote(
+				res.ok
+					? t("profile.pwUpdated")
+					: (res.error ?? t("profile.updateFailed")),
+			);
+			if (res.ok) {
+				setCurrent("");
+				setNext("");
+				setConfirm("");
+			}
+		} finally {
+			setPwBusy(false);
 		}
 	};
 
-	const onLogout = () => {
-		signOut();
+	const onLogout = async () => {
+		await authApi.logout();
+		await qc.invalidateQueries({ queryKey: ["me"] });
 		navigate("/signin", { replace: true });
 	};
 
@@ -382,9 +390,18 @@ function ProfilePane() {
 						<Label htmlFor="pf-user">{t("profile.username")}</Label>
 						<Input
 							id="pf-user"
-							value={username ?? ""}
+							value={me?.username ?? ""}
 							disabled
 							className="font-mono"
+						/>
+					</div>
+					<div className="space-y-1.5">
+						<Label htmlFor="pf-email">{t("profile.email")}</Label>
+						<Input
+							id="pf-email"
+							type="email"
+							value={me?.email ?? ""}
+							disabled
 						/>
 					</div>
 					<div className="space-y-1.5">
@@ -394,16 +411,6 @@ function ProfilePane() {
 							value={name}
 							onChange={(e) => setName(e.target.value)}
 							placeholder={t("profile.displayNamePlaceholder")}
-						/>
-					</div>
-					<div className="space-y-1.5">
-						<Label htmlFor="pf-email">{t("profile.email")}</Label>
-						<Input
-							id="pf-email"
-							type="email"
-							value={email}
-							onChange={(e) => setEmail(e.target.value)}
-							placeholder="you@example.com"
 						/>
 					</div>
 					<div className="flex items-center gap-3">
@@ -455,7 +462,11 @@ function ProfilePane() {
 						/>
 					</div>
 					<div className="flex items-center gap-3">
-						<Button variant="outline" onClick={changePassword}>
+						<Button
+							variant="outline"
+							onClick={changePassword}
+							disabled={pwBusy}
+						>
 							{t("profile.updatePassword")}
 						</Button>
 						{pwNote && (

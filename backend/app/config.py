@@ -59,6 +59,21 @@ class Settings(BaseSettings):
     jwt_algorithms: str = "HS256"
     jwt_audience: str = ""
 
+    # ---- Auth (username/password accounts + signed session cookie) ----
+    session_cookie: str = "joyjoy_session"
+    session_ttl_hours: int = 720  # 30 days
+    otp_ttl_minutes: int = 10
+    app_public_name: str = "joyjoy"
+
+    # ---- SMTP (password-reset OTP email). When smtp_host is unset the OTP is
+    #      logged (dev) instead of emailed. ----
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+
     # ---- Postgres (prod) ----
     db_host: str = "localhost"
     db_port: int = 5432

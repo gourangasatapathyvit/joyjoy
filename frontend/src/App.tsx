@@ -1,18 +1,18 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { AppShell } from "@/components/layout/AppShell";
+import { AuthPage } from "@/routes/AuthPage";
 import { ChatPage } from "@/routes/ChatPage";
 import { McpPanel } from "@/routes/McpPanel";
 import { MemoryPanel } from "@/routes/MemoryPanel";
 import { SettingsPage } from "@/routes/SettingsPage";
-import { SignInPage } from "@/routes/SignInPage";
 import { SkillsPanel } from "@/routes/SkillsPanel";
 
 export default function App() {
 	return (
 		<BrowserRouter>
 			<Routes>
-				<Route path="/signin" element={<SignInPage />} />
+				<Route path="/signin" element={<AuthPage />} />
 				<Route
 					element={
 						<RequireAuth>

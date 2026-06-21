@@ -29,6 +29,7 @@ from sse_starlette.sse import EventSourceResponse
 from . import media as media_mod
 from . import runs as runs_mod
 from . import sessions as sessions_mod
+from . import users as users_mod
 from . import usersettings as usersettings_mod
 from . import workspace as workspace_mod
 from .agent import (
@@ -57,7 +58,12 @@ from .agent import (
     toggle_user_skill,
     write_memory,
 )
-from .auth import resolve_user_id, verify_gateway_key
+from .auth import (
+    current_username,
+    make_session_token,
+    resolve_user_id,
+    verify_gateway_key,
+)
 from .config import get_settings
 from .context import AgentContext
 from .persistence import open_persistence
@@ -168,6 +174,111 @@ async def health_detailed():
 @app.get("/v1/health")
 async def v1_health():
     return _health_payload()
+
+
+# ── Auth: username/password accounts, signed session cookie, email-OTP reset ──
+def _set_session(resp: JSONResponse, username: str) -> JSONResponse:
+    resp.set_cookie(
+        settings.session_cookie,
+        make_session_token(settings, username),
+        max_age=settings.session_ttl_hours * 3600,
+        httponly=True,
+        samesite="lax",
+        secure=settings.is_prod,  # require HTTPS only in prod
+        path="/",
+    )
+    return resp
+
+
+@app.post("/v1/auth/signup")
+async def auth_signup(request: Request):
+    body = await _json(request)
+    res = await users_mod.create_user(
+        request.app.state.store, body.get("username"), body.get("email"), body.get("password")
+    )
+    if not res.get("ok"):
+        return JSONResponse(res, status_code=409 if res.get("field") in ("username", "email") else 400)
+    return _set_session(JSONResponse({"ok": True, "user": res["user"]}), res["user"]["username"])
+
+
+@app.post("/v1/auth/login")
+async def auth_login(request: Request):
+    body = await _json(request)
+    user = await users_mod.verify_credentials(
+        request.app.state.store, body.get("username"), body.get("password")
+    )
+    if not user:
+        return JSONResponse({"ok": False, "error": "Invalid username or password."}, status_code=401)
+    return _set_session(JSONResponse({"ok": True, "user": user}), user["username"])
+
+
+@app.post("/v1/auth/logout")
+async def auth_logout():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(settings.session_cookie, path="/")
+    return resp
+
+
+@app.get("/v1/auth/me")
+async def auth_me(request: Request):
+    u = current_username(request, settings)
+    if not u:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    rec = await users_mod.get_user(request.app.state.store, u)
+    return {"username": u, "email": (rec or {}).get("email")}
+
+
+@app.get("/v1/auth/available")
+async def auth_available(request: Request):
+    """Live signup validation: is this username / email already taken?"""
+    q = request.query_params
+    out: dict = {}
+    if q.get("username"):
+        out["username_taken"] = await users_mod.username_taken(request.app.state.store, q["username"])
+    if q.get("email"):
+        out["email_taken"] = await users_mod.email_taken(request.app.state.store, q["email"])
+    return out
+
+
+@app.post("/v1/auth/forgot")
+async def auth_forgot(request: Request):
+    """Email a reset OTP. Always returns ok (never reveals whether the email exists)."""
+    body = await _json(request)
+    email = body.get("email") or ""
+    out: dict = {"ok": True}
+    res = await users_mod.create_reset_otp(request.app.state.store, settings, email)
+    if res:
+        otp, _username = res
+        emailed = await users_mod.send_otp_email(settings, email, otp)
+        if not emailed and not settings.is_prod:
+            out["dev_otp"] = otp  # dev convenience when SMTP isn't configured
+    return JSONResponse(out)
+
+
+@app.post("/v1/auth/reset")
+async def auth_reset(request: Request):
+    body = await _json(request)
+    if not users_mod.valid_password(body.get("password") or ""):
+        return JSONResponse({"ok": False, "error": "Password must be at least 8 characters."}, status_code=400)
+    res = await users_mod.verify_and_consume_otp(
+        request.app.state.store, body.get("email"), body.get("otp")
+    )
+    if not res.get("ok"):
+        return JSONResponse(res, status_code=400)
+    await users_mod.set_password(request.app.state.store, res["username"], body.get("password"))
+    return _set_session(JSONResponse({"ok": True}), res["username"])  # auto-login after reset
+
+
+@app.post("/v1/auth/change-password")
+async def auth_change_password(request: Request):
+    u = current_username(request, settings)
+    if not u:
+        return JSONResponse({"ok": False, "error": "Not signed in."}, status_code=401)
+    body = await _json(request)
+    res = await users_mod.change_password(
+        request.app.state.store, u, body.get("current") or "", body.get("new") or ""
+    )
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
 
 
 @app.get("/v1/models")

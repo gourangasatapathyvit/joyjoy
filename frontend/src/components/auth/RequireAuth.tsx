@@ -1,13 +1,15 @@
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { useAuthStore } from "@/store/auth";
+import { useMe } from "@/api/auth";
 
-// Route guard: unauthenticated visitors are bounced to /signin, remembering where
-// they were headed so sign-in can send them back.
+// Route guard backed by the real session: GET /v1/auth/me. While it's resolving
+// we render nothing; a 401 (not signed in) bounces to /signin, remembering where
+// the visitor was headed so sign-in can send them back.
 export function RequireAuth({ children }: { children: ReactNode }) {
-	const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+	const { data, isLoading, isError } = useMe();
 	const location = useLocation();
-	if (!isAuthenticated) {
+	if (isLoading) return null;
+	if (isError || !data) {
 		return <Navigate to="/signin" replace state={{ from: location }} />;
 	}
 	return <>{children}</>;
