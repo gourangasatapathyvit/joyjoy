@@ -37,6 +37,22 @@ function lsDel(k: string) {
 	}
 }
 
+// Mirror the signed-in identity into a `joyjoy_uid` cookie. When FastAPI serves
+// the SPA itself (single-server), there's no proxy injecting X-User-Id and the
+// SSE EventSource can't send headers — the backend reads this cookie instead
+// (sent automatically on same-origin requests). In dev the Vite proxy's
+// X-User-Id header still takes priority, so this is harmless there.
+function setUidCookie(uid: string | null) {
+	try {
+		// biome-ignore lint/suspicious/noDocumentCookie: document.cookie is the portable, widely-supported way to set this identity cookie
+		document.cookie = uid
+			? `joyjoy_uid=${encodeURIComponent(uid)}; path=/; SameSite=Lax; max-age=31536000`
+			: "joyjoy_uid=; path=/; max-age=0";
+	} catch {
+		// document unavailable (SSR/tests)
+	}
+}
+
 // The stored account, seeding the dev default on first load so sign-in is testable.
 function readAccount(): Account {
 	const raw = lsGet(ACCT_KEY);
@@ -70,6 +86,8 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set) => {
 	const account = readAccount();
 	const token = lsGet(TOKEN_KEY);
+	// Already signed in (persisted token) → restore the identity cookie too.
+	if (token) setUidCookie(account.username);
 	return {
 		token,
 		username: token ? account.username : null,
@@ -84,11 +102,13 @@ export const useAuthStore = create<AuthState>((set) => {
 			}
 			const t = `dev-${crypto.randomUUID()}`;
 			lsSet(TOKEN_KEY, t);
+			setUidCookie(a.username);
 			set({ token: t, username: a.username, isAuthenticated: true });
 			return { ok: true };
 		},
 		signOut: () => {
 			lsDel(TOKEN_KEY);
+			setUidCookie(null);
 			set({ token: null, username: null, isAuthenticated: false });
 		},
 		resetPassword: (current, next) => {
