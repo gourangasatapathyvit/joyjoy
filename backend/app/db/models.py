@@ -1,0 +1,193 @@
+"""Relational schema (SQLAlchemy 2.0). Dev → SQLite, prod → Postgres (same
+tables). Chat messages stay in LangGraph's checkpointer; everything else
+(accounts, config, skills, MCP, models, sessions) lives here.
+
+Conventions: surrogate string-UUID PKs (so a username/email rename never breaks
+FKs); unique natural keys where they matter; JSON columns for free-form blobs
+(provider field-schemas, model settings, skin accent vars, sidebar order); secret
+fields inside `settings` JSON are Fernet-encrypted at rest (see db/crypto.py).
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+def _uuid() -> str:
+    return uuid.uuid4().hex
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+# ── Accounts ─────────────────────────────────────────────────────────────────
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(128), default="")
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class PasswordReset(Base):
+    __tablename__ = "password_resets"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    otp_hash: Mapped[str] = mapped_column(String(255))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+# ── Global catalogs (read-only shipped defaults; seeded on startup) ──────────
+class Skin(Base):
+    __tablename__ = "skins"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(64), unique=True)  # gold/ares/poseidon/...
+    label: Mapped[str] = mapped_column(String(64), default="")
+    config: Mapped[dict] = mapped_column(JSON, default=dict)  # {color, ...accent vars}
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class GlobalProvider(Base):
+    __tablename__ = "global_providers"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(64), unique=True)  # azure_openai/anthropic/...
+    label: Mapped[str] = mapped_column(String(128), default="")
+    config_schema: Mapped[dict] = mapped_column(JSON, default=dict)  # the Add-model form fields
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class GlobalModel(Base):
+    __tablename__ = "global_models"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    model_id: Mapped[str] = mapped_column(String(128), unique=True)  # gpt-5, o3, ...
+    provider_id: Mapped[str] = mapped_column(ForeignKey("global_providers.id"), index=True)
+    settings: Mapped[dict] = mapped_column(JSON, default=dict)  # deployment/endpoint/... (+enc secrets)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class GlobalSkill(Base):
+    __tablename__ = "global_skills"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    content: Mapped[str] = mapped_column(Text, default="")  # SKILL.md
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class GlobalMcp(Base):
+    __tablename__ = "global_mcps"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    transport: Mapped[str] = mapped_column(String(16), default="stdio")  # stdio|http
+    command: Mapped[str] = mapped_column(Text, default="")
+    args: Mapped[str] = mapped_column(Text, default="")  # one per line
+    env: Mapped[str] = mapped_column(Text, default="")  # KEY=value per line
+    url: Mapped[str] = mapped_column(Text, default="")
+    headers: Mapped[str] = mapped_column(Text, default="")  # KEY=value per line
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+# ── Per-user data ───────────────────────────────────────────────────────────
+class UserConfig(Base):
+    __tablename__ = "user_configs"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    skin_id: Mapped[str | None] = mapped_column(ForeignKey("skins.id"), nullable=True)
+    auto_follow: Mapped[bool] = mapped_column(Boolean, default=True)
+    activity_display: Mapped[str] = mapped_column(String(16), default="compact")
+    sidebar_order: Mapped[list] = mapped_column(JSON, default=list)
+    default_model: Mapped[str] = mapped_column(String(128), default="")
+    default_reasoning: Mapped[str] = mapped_column(String(16), default="off")
+    locale: Mapped[str] = mapped_column(String(16), default="en")
+    notes: Mapped[str] = mapped_column(Text, default="")  # memory: long-term notes
+    about_you: Mapped[str] = mapped_column(Text, default="")  # memory: about the user
+    persona: Mapped[str] = mapped_column(Text, default="")  # memory: agent soul
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class UserModel(Base):
+    __tablename__ = "user_models"
+    __table_args__ = (UniqueConstraint("user_id", "model_id", name="uq_user_model"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    provider_id: Mapped[str] = mapped_column(ForeignKey("global_providers.id"))
+    model_id: Mapped[str] = mapped_column(String(128))
+    settings: Mapped[dict] = mapped_column(JSON, default=dict)  # endpoint/deployment/... (+enc secrets)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class UserSkill(Base):
+    __tablename__ = "user_skills"
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_user_skill"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    description: Mapped[str] = mapped_column(Text, default="")
+    content: Mapped[str] = mapped_column(Text, default="")  # SKILL.md
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class UserMcp(Base):
+    __tablename__ = "user_mcps"
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_user_mcp"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    transport: Mapped[str] = mapped_column(String(16), default="stdio")
+    command: Mapped[str] = mapped_column(Text, default="")
+    args: Mapped[str] = mapped_column(Text, default="")
+    env: Mapped[str] = mapped_column(Text, default="")
+    url: Mapped[str] = mapped_column(Text, default="")
+    headers: Mapped[str] = mapped_column(Text, default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class SkillFile(Base):
+    __tablename__ = "skill_files"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    global_skill_id: Mapped[str | None] = mapped_column(
+        ForeignKey("global_skills.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    user_skill_id: Mapped[str | None] = mapped_column(
+        ForeignKey("user_skills.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    filename: Mapped[str] = mapped_column(String(255))
+    content: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Session(Base):
+    __tablename__ = "sessions"
+    thread_id: Mapped[str] = mapped_column(String(64), primary_key=True)  # the LangGraph thread id
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(255), default="New chat")
+    default_model: Mapped[str] = mapped_column(String(128), default="")
+    reasoning: Mapped[str] = mapped_column(String(16), default="off")
+    workspace_path: Mapped[str] = mapped_column(String(255), default="")  # relative to workspace_root
+    forked_from: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)

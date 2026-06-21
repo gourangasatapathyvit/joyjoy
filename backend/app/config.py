@@ -87,6 +87,13 @@ class Settings(BaseSettings):
     # ---- Dev local persistence ----
     sqlite_checkpoint_path: str = "./data/dev_checkpoints.sqlite"
     user_data_root: str = "./data/users"
+    # App relational DB (users/skins/providers/skills/mcp/models/sessions/config).
+    # Dev → SQLite file; prod → the Postgres in DATABASE_URL (shared w/ LangGraph).
+    app_db_path: str = "./data/joyjoy.db"
+    # Agent workspace root — the agent's real files live under <workspace_root>/<uid>/
+    # workspace/<thread>. session.workspace_path stores the relative key; point this
+    # at a shared volume / mount for multi-node. Defaults to user_data_root.
+    workspace_root: str = ""
 
     # ---- Skills / MCP ----
     global_skills_dir: str = "./skills/global"
@@ -127,6 +134,23 @@ class Settings(BaseSettings):
         if raw in ("", "*"):
             return ["*"]
         return [o.strip() for o in raw.split(",") if o.strip()]
+
+    @property
+    def app_db_url(self) -> str:
+        """Async SQLAlchemy URL for the app DB. Prod → Postgres (psycopg async),
+        dev → a local SQLite file."""
+        if self.is_prod:
+            url = (self.database_url or self.pg_dsn).strip()
+            for pre in ("postgresql+psycopg://", "postgresql://", "postgres://"):
+                if url.startswith(pre):
+                    return "postgresql+psycopg://" + url[len(pre):]
+            return url
+        path = os.path.abspath(self.app_db_path)
+        return f"sqlite+aiosqlite:///{path}"
+
+    @property
+    def workspace_root_dir(self) -> str:
+        return self.workspace_root or self.user_data_root
 
     def normalize_model(self, m: dict) -> dict | None:
         """Normalize one raw model entry into a full spec.
