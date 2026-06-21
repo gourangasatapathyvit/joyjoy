@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useMemory, useWriteMemory } from "@/api/queries";
 import type { MemorySection } from "@/api/types";
 import { PanelLayout } from "@/components/layout/PanelLayout";
@@ -6,13 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
-const SECTIONS: { key: MemorySection; label: string; hint: string }[] = [
-	{ key: "memory", label: "Notes", hint: "Long-term notes the agent keeps." },
-	{ key: "user", label: "About you", hint: "Profile facts about the user." },
-	{ key: "soul", label: "Persona", hint: "The agent's character / soul." },
+const SECTIONS: { key: MemorySection; labelKey: string; hintKey: string }[] = [
+	{ key: "memory", labelKey: "memory.notes", hintKey: "memory.notesHint" },
+	{ key: "user", labelKey: "memory.aboutYou", hintKey: "memory.aboutYouHint" },
+	{ key: "soul", labelKey: "memory.persona", hintKey: "memory.personaHint" },
 ];
 
 export function MemoryPanel() {
+	const { t } = useTranslation();
 	const { data } = useMemory();
 	const write = useWriteMemory();
 	const [draft, setDraft] = useState<Record<MemorySection, string>>({
@@ -33,28 +35,25 @@ export function MemoryPanel() {
 	}, [data]);
 
 	return (
-		<PanelLayout
-			title="Memory"
-			description="Per-user memory injected into the agent's system prompt."
-		>
+		<PanelLayout title={t("memory.title")} description={t("memory.subtitle")}>
 			<Tabs defaultValue="memory">
 				<TabsList>
 					{SECTIONS.map((s) => (
 						<TabsTrigger key={s.key} value={s.key}>
-							{s.label}
+							{t(s.labelKey)}
 						</TabsTrigger>
 					))}
 				</TabsList>
 				{SECTIONS.map((s) => (
 					<TabsContent key={s.key} value={s.key} className="space-y-2">
-						<p className="text-xs text-muted-foreground">{s.hint}</p>
+						<p className="text-xs text-muted-foreground">{t(s.hintKey)}</p>
 						<Textarea
 							value={draft[s.key]}
 							onChange={(e) =>
 								setDraft((d) => ({ ...d, [s.key]: e.target.value }))
 							}
 							className="min-h-[300px] font-mono text-xs"
-							placeholder="(empty)"
+							placeholder={t("memory.emptyPlaceholder")}
 						/>
 						<Button
 							size="sm"
@@ -63,7 +62,7 @@ export function MemoryPanel() {
 								write.mutate({ section: s.key, content: draft[s.key] })
 							}
 						>
-							{write.isPending ? "Saving…" : "Save"}
+							{write.isPending ? t("common.saving") : t("common.save")}
 						</Button>
 					</TabsContent>
 				))}

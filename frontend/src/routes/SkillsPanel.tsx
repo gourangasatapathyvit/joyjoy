@@ -1,5 +1,6 @@
 import { Lock, Pencil, Plus, Search, Sparkles, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSkillContent, useSkillMutations, useSkills } from "@/api/queries";
@@ -35,6 +36,7 @@ function SkillDetail({
 	onEdit: () => void;
 	onDelete: () => void;
 }) {
+	const { t } = useTranslation();
 	const { data, isLoading } = useSkillContent(skill.name);
 	const { frontmatter, body } = splitFrontmatter(data?.content ?? "");
 
@@ -50,29 +52,31 @@ function SkillDetail({
 					</Badge>
 					{skill.builtin && (
 						<Badge variant="secondary" className="shrink-0 text-[10px]">
-							built-in
+							{t("skills.builtIn")}
 						</Badge>
 					)}
 				</div>
 				{skill.editable ? (
 					<div className="flex shrink-0 items-center gap-1">
 						<Button size="sm" variant="ghost" onClick={onEdit}>
-							<Pencil className="size-3.5" /> Edit
+							<Pencil className="size-3.5" /> {t("common.edit")}
 						</Button>
 						<Button size="sm" variant="ghost" onClick={onDelete}>
-							<Trash2 className="size-3.5" /> Delete
+							<Trash2 className="size-3.5" /> {t("common.delete")}
 						</Button>
 					</div>
 				) : (
 					<Badge variant="secondary" className="shrink-0 text-[10px]">
-						read-only
+						{t("common.readOnly")}
 					</Badge>
 				)}
 			</div>
 			<div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
 				<div className="mx-auto max-w-3xl">
 					{isLoading ? (
-						<p className="text-sm text-muted-foreground">Loading…</p>
+						<p className="text-sm text-muted-foreground">
+							{t("common.loading")}
+						</p>
 					) : (
 						<>
 							{skill.description && (
@@ -83,7 +87,7 @@ function SkillDetail({
 							{frontmatter && (
 								<details className="mb-4 rounded-md border border-border bg-muted/40">
 									<summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground">
-										Metadata
+										{t("skills.metadata")}
 									</summary>
 									<pre className="overflow-x-auto px-3 pb-3 text-xs text-muted-foreground">
 										{frontmatter}
@@ -92,7 +96,7 @@ function SkillDetail({
 							)}
 							<div className="markdown-body">
 								<ReactMarkdown remarkPlugins={[remarkGfm]}>
-									{body || "_(no content)_"}
+									{body || `_${t("skills.noContent")}_`}
 								</ReactMarkdown>
 							</div>
 						</>
@@ -115,6 +119,7 @@ function SkillEditor({
 	onSaved: (name: string) => void;
 	onCancel: () => void;
 }) {
+	const { t } = useTranslation();
 	const editing = name !== null;
 	const { data, isLoading } = useSkillContent(name);
 	const { save } = useSkillMutations();
@@ -134,10 +139,10 @@ function SkillEditor({
 			{ name: n, content },
 			{
 				onSuccess: (res) => {
-					if (res?.ok === false) setErr(res.error ?? "Save failed");
+					if (res?.ok === false) setErr(res.error ?? t("skills.saveFailed"));
 					else onSaved(n);
 				},
-				onError: () => setErr("Save failed"),
+				onError: () => setErr(t("skills.saveFailed")),
 			},
 		);
 	};
@@ -146,18 +151,18 @@ function SkillEditor({
 		<div className="flex min-h-0 flex-1 flex-col">
 			<div className="flex items-center justify-between gap-3 border-b border-border px-6 py-3">
 				<h1 className="truncate font-heading text-lg font-semibold text-foreground">
-					{editing ? `Edit ${name}` : "New skill"}
+					{editing ? t("skills.editTitle", { name }) : t("skills.newTitle")}
 				</h1>
 				<div className="flex shrink-0 items-center gap-2">
 					<Button size="sm" variant="ghost" onClick={onCancel}>
-						Cancel
+						{t("common.cancel")}
 					</Button>
 					<Button
 						size="sm"
 						onClick={onSave}
 						disabled={!draftName.trim() || save.isPending}
 					>
-						{save.isPending ? "Saving…" : "Save"}
+						{save.isPending ? t("common.saving") : t("common.save")}
 					</Button>
 				</div>
 			</div>
@@ -165,19 +170,21 @@ function SkillEditor({
 				<div className="mx-auto flex h-full min-h-0 w-full max-w-3xl flex-col gap-3">
 					{!editing && (
 						<div className="space-y-1.5">
-							<Label htmlFor="skill-name">Name</Label>
+							<Label htmlFor="skill-name">{t("skills.nameLabel")}</Label>
 							<Input
 								id="skill-name"
 								value={draftName}
 								onChange={(e) => setDraftName(e.target.value)}
-								placeholder="my-skill"
+								placeholder={t("skills.namePlaceholder")}
 							/>
 						</div>
 					)}
 					<div className="flex min-h-0 flex-1 flex-col gap-1.5">
-						<Label htmlFor="skill-content">SKILL.md content</Label>
+						<Label htmlFor="skill-content">{t("skills.contentLabel")}</Label>
 						{editing && isLoading ? (
-							<p className="text-sm text-muted-foreground">Loading…</p>
+							<p className="text-sm text-muted-foreground">
+								{t("common.loading")}
+							</p>
 						) : (
 							<Textarea
 								id="skill-content"
@@ -200,6 +207,7 @@ function SkillEditor({
 // Skills = webui-style master/detail: searchable list on the left; the right
 // pane views the selected skill OR hosts the inline create/edit editor.
 export function SkillsPanel() {
+	const { t } = useTranslation();
 	const { data, isLoading } = useSkills();
 	const { remove, toggle } = useSkillMutations();
 	const skills = data?.skills ?? [];
@@ -240,12 +248,12 @@ export function SkillsPanel() {
 			<aside className="flex w-[300px] shrink-0 flex-col border-r border-border bg-sidebar">
 				<div className="flex items-center justify-between px-4 py-3">
 					<span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-						Skills
+						{t("skills.title")}
 					</span>
 					<button
 						type="button"
 						onClick={startCreate}
-						title="New skill"
+						title={t("skills.newSkill")}
 						className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
 					>
 						<Plus className="size-4" />
@@ -257,14 +265,14 @@ export function SkillsPanel() {
 					<input
 						value={query}
 						onChange={(e) => setQuery(e.target.value)}
-						placeholder="Search skills..."
+						placeholder={t("skills.searchPlaceholder")}
 						className="w-full rounded-lg border border-border bg-background py-[7px] pr-8 pl-8 text-[13px] outline-none transition-[box-shadow,border-color] placeholder:text-muted-foreground focus:border-primary focus:ring-[3px] focus:ring-primary/15"
 					/>
 					{query && (
 						<button
 							type="button"
 							onClick={() => setQuery("")}
-							title="Clear"
+							title={t("conversation.clear")}
 							className="-translate-y-1/2 absolute top-1/2 right-[18px] inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
 						>
 							<X className="size-3.5" />
@@ -274,10 +282,12 @@ export function SkillsPanel() {
 
 				<div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
 					{isLoading ? (
-						<p className="px-2 py-4 text-xs text-muted-foreground">Loading…</p>
+						<p className="px-2 py-4 text-xs text-muted-foreground">
+							{t("common.loading")}
+						</p>
 					) : filtered.length === 0 ? (
 						<p className="px-2 py-4 text-xs text-muted-foreground">
-							{q ? "No matches." : "No skills found."}
+							{q ? t("common.noMatches") : t("skills.none")}
 						</p>
 					) : (
 						<ul className="flex flex-col gap-0.5">
@@ -320,7 +330,7 @@ export function SkillsPanel() {
 														toggle.mutate({ name: s.name, enabled: v })
 													}
 													aria-label={
-														s.enabled ? "Disable skill" : "Enable skill"
+														s.enabled ? t("skills.disable") : t("skills.enable")
 													}
 													className="shrink-0"
 												/>
@@ -363,15 +373,14 @@ export function SkillsPanel() {
 						<Sparkles className="size-8 text-muted-foreground opacity-40" />
 						<div className="space-y-1">
 							<p className="text-sm font-medium text-foreground">
-								Select a skill
+								{t("skills.selectTitle")}
 							</p>
 							<p className="mx-auto max-w-xs text-xs text-muted-foreground">
-								Pick a skill from the list to view its contents, or create a new
-								one.
+								{t("skills.selectHint")}
 							</p>
 						</div>
 						<Button size="sm" variant="outline" onClick={startCreate}>
-							<Plus className="size-3.5" /> New skill
+							<Plus className="size-3.5" /> {t("skills.newSkill")}
 						</Button>
 					</div>
 				)}

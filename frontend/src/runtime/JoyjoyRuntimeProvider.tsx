@@ -22,7 +22,15 @@ import {
 	runEventsUrl,
 } from "@/api/client";
 import { sessionApi } from "@/api/sessions";
-import type { RunEvent, SessionMessageWire } from "@/api/types";
+import type { MediaItem, RunEvent, SessionMessageWire } from "@/api/types";
+import {
+	baseName,
+	isMediaFile,
+	mediaUrl,
+	mimeOf,
+	splitMediaMarkers,
+	workspaceRawUrl,
+} from "@/lib/media";
 import { useChatStore } from "@/store/chat";
 
 type JsonValue =
@@ -46,7 +54,48 @@ type UIPart =
 			argsText: string;
 			result?: string;
 			isError?: boolean;
+			media?: MediaItem[];
 	  };
+
+// All agent media is emitted as an assistant-ui `file` part — its `data` may be
+// any URL (assistant-ui's `image` part rejects non-https/data URLs, but our media
+// is served from a relative /v1 proxy path). MediaFile renders image mimes inline.
+type AuiMediaPart = {
+	type: "file";
+	data: string;
+	mimeType: string;
+	filename?: string;
+};
+
+// The full set of content parts convertMessage emits (annotating flatMap's return
+// so TS infers the union across all branches, not just the first).
+type AuiPart =
+	| { type: "text"; text: string }
+	| { type: "reasoning"; text: string }
+	| {
+			type: "tool-call";
+			toolCallId: string;
+			toolName: string;
+			args: JsonObject;
+			argsText: string;
+			result?: string;
+			status?: { type: "running" };
+	  }
+	| AuiMediaPart;
+
+// Build a media part from a URL (a MEDIA: marker or a workspace file path).
+function urlMediaPart(url: string, filename: string): AuiMediaPart {
+	return { type: "file", data: url, mimeType: mimeOf(filename), filename };
+}
+// Build a media part from a backend base64 block (deepagents read_file binary).
+function blockMediaPart(md: MediaItem): AuiMediaPart {
+	return {
+		type: "file",
+		data: md.data_url,
+		mimeType: md.mime_type,
+		filename: md.filename ?? undefined,
+	};
+}
 
 interface UIMessage {
 	id: string;
@@ -127,7 +176,10 @@ function wireToUI(wire: SessionMessageWire[]): UIMessage[] {
 		} else if (m.role === "tool" && m.tool_call_id) {
 			const loc = toolLoc.get(m.tool_call_id);
 			const part = loc ? out[loc.mi]?.parts[loc.pi] : undefined;
-			if (part?.type === "tool-call") part.result = m.content;
+			if (part?.type === "tool-call") {
+				part.result = m.content;
+				if (m.media?.length) part.media = m.media;
+			}
 		}
 	}
 	return out;
@@ -243,7 +295,12 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 					...m,
 					parts: m.parts.map((p) =>
 						p.type === "tool-call" && p.toolCallId === ev.toolCallId
-							? { ...p, result: ev.result ?? "", isError: Boolean(ev.is_error) }
+							? {
+									...p,
+									result: ev.result ?? "",
+									isError: Boolean(ev.is_error),
+									media: ev.media,
+								}
 							: p,
 					),
 				}));
@@ -475,10 +532,18 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 							(q) => q.type === "tool-call" && q.toolCallId === p.toolCallId,
 						) === i,
 				)
-				.map((p) => {
-					if (p.type === "text") return { type: "text" as const, text: p.text };
+				.flatMap((p): AuiPart[] => {
+					// Text → text, lifting any `MEDIA:<path>` lines into media parts.
+					if (p.type === "text")
+						return splitMediaMarkers(p.text).map((seg) =>
+							seg.kind === "text"
+								? { type: "text" as const, text: seg.text }
+								: urlMediaPart(mediaUrl(seg.path), baseName(seg.path)),
+						);
 					if (p.type === "reasoning")
-						return { type: "reasoning" as const, text: p.text };
+						return [{ type: "reasoning" as const, text: p.text }];
+					// Tool call, plus media it produced (write_file → workspace file) or
+					// returned (read_file → base64 blocks).
 					const base = {
 						type: "tool-call" as const,
 						toolCallId: p.toolCallId,
@@ -487,12 +552,26 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 						argsText: p.argsText,
 						result: p.result,
 					};
-					return p.result !== undefined
-						? base
-						: { ...base, status: { type: "running" as const } };
+					const extras: AuiMediaPart[] = [];
+					const fp = p.args?.file_path ?? p.args?.path;
+					if (
+						(p.toolName === "write_file" || p.toolName === "edit_file") &&
+						typeof fp === "string" &&
+						isMediaFile(fp)
+					)
+						extras.push(
+							urlMediaPart(workspaceRawUrl(threadId, fp), baseName(fp)),
+						);
+					for (const md of p.media ?? []) extras.push(blockMediaPart(md));
+					return [
+						p.result !== undefined
+							? base
+							: { ...base, status: { type: "running" as const } },
+						...extras,
+					];
 				}),
 		}),
-		[],
+		[threadId],
 	);
 
 	const runtime = useExternalStoreRuntime({

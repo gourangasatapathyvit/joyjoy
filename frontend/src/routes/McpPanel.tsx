@@ -1,5 +1,6 @@
 import { Plus } from "lucide-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useMcpMutations, useMcpServers, useMcpTools } from "@/api/queries";
 import type { McpServer } from "@/api/types";
 import { PanelLayout } from "@/components/layout/PanelLayout";
@@ -54,6 +55,7 @@ function McpServerDialog({
 	initial: McpServer | null;
 	onClose: () => void;
 }) {
+	const { t } = useTranslation();
 	const { save } = useMcpMutations();
 	const editing = !!initial;
 	const [name, setName] = useState(initial?.name ?? "");
@@ -92,8 +94,10 @@ function McpServerDialog({
 			{ name: name.trim(), cfg },
 			{
 				onSuccess: (res) =>
-					res?.ok === false ? setErr(res.error ?? "Save failed") : onClose(),
-				onError: () => setErr("Save failed"),
+					res?.ok === false
+						? setErr(res.error ?? t("providers.saveFailed"))
+						: onClose(),
+				onError: () => setErr(t("providers.saveFailed")),
 			},
 		);
 	};
@@ -103,12 +107,14 @@ function McpServerDialog({
 			<DialogContent className="max-w-lg">
 				<DialogHeader>
 					<DialogTitle>
-						{editing ? `Edit ${initial?.name}` : "Add MCP server"}
+						{editing
+							? t("mcp.editTitle", { name: initial?.name })
+							: t("mcp.addTitle")}
 					</DialogTitle>
 				</DialogHeader>
 				<div className="space-y-3">
 					<div className="space-y-1.5">
-						<Label htmlFor="mcp-name">Name</Label>
+						<Label htmlFor="mcp-name">{t("mcp.name")}</Label>
 						<Input
 							id="mcp-name"
 							value={name}
@@ -118,7 +124,7 @@ function McpServerDialog({
 						/>
 					</div>
 					<div className="space-y-1.5">
-						<Label htmlFor="mcp-transport">Transport</Label>
+						<Label htmlFor="mcp-transport">{t("mcp.transport")}</Label>
 						<Select
 							value={transport}
 							onValueChange={(v) => v && setTransport(v as "stdio" | "http")}
@@ -135,7 +141,7 @@ function McpServerDialog({
 					{transport === "stdio" ? (
 						<>
 							<div className="space-y-1.5">
-								<Label htmlFor="mcp-cmd">Command</Label>
+								<Label htmlFor="mcp-cmd">{t("mcp.command")}</Label>
 								<Input
 									id="mcp-cmd"
 									value={command}
@@ -144,7 +150,7 @@ function McpServerDialog({
 								/>
 							</div>
 							<div className="space-y-1.5">
-								<Label htmlFor="mcp-args">Args (one per line)</Label>
+								<Label htmlFor="mcp-args">{t("mcp.argsField")}</Label>
 								<Textarea
 									id="mcp-args"
 									value={argsText}
@@ -155,7 +161,7 @@ function McpServerDialog({
 								/>
 							</div>
 							<div className="space-y-1.5">
-								<Label htmlFor="mcp-env">Env (KEY=value per line)</Label>
+								<Label htmlFor="mcp-env">{t("mcp.env")}</Label>
 								<Textarea
 									id="mcp-env"
 									value={envText}
@@ -169,7 +175,7 @@ function McpServerDialog({
 					) : (
 						<>
 							<div className="space-y-1.5">
-								<Label htmlFor="mcp-url">URL</Label>
+								<Label htmlFor="mcp-url">{t("mcp.url")}</Label>
 								<Input
 									id="mcp-url"
 									value={url}
@@ -178,9 +184,7 @@ function McpServerDialog({
 								/>
 							</div>
 							<div className="space-y-1.5">
-								<Label htmlFor="mcp-headers">
-									Headers (KEY=value per line)
-								</Label>
+								<Label htmlFor="mcp-headers">{t("mcp.headers")}</Label>
 								<Textarea
 									id="mcp-headers"
 									value={headersText}
@@ -194,10 +198,10 @@ function McpServerDialog({
 					{err && <p className="text-xs text-destructive">{err}</p>}
 					<div className="flex justify-end gap-2 pt-1">
 						<Button variant="ghost" onClick={onClose}>
-							Cancel
+							{t("common.cancel")}
 						</Button>
 						<Button onClick={onSave} disabled={!valid || save.isPending}>
-							{save.isPending ? "Saving…" : "Save"}
+							{save.isPending ? t("common.saving") : t("common.save")}
 						</Button>
 					</div>
 				</div>
@@ -207,6 +211,7 @@ function McpServerDialog({
 }
 
 export function McpPanel() {
+	const { t } = useTranslation();
 	const { data: serverData, isLoading } = useMcpServers();
 	const { data: toolData } = useMcpTools();
 	const { toggle, remove } = useMcpMutations();
@@ -225,18 +230,19 @@ export function McpPanel() {
 	};
 
 	return (
-		<PanelLayout
-			title="MCP"
-			description="Model Context Protocol servers and their tools."
-		>
+		<PanelLayout title={t("mcp.title")} description={t("mcp.subtitle")}>
 			<section className="space-y-2">
 				<div className="flex items-center justify-between">
-					<h2 className="text-sm font-medium text-muted-foreground">Servers</h2>
+					<h2 className="text-sm font-medium text-muted-foreground">
+						{t("mcp.servers")}
+					</h2>
 					<Button size="sm" variant="outline" onClick={openNew}>
-						<Plus className="size-3.5" /> Add server
+						<Plus className="size-3.5" /> {t("mcp.addServer")}
 					</Button>
 				</div>
-				{isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+				{isLoading && (
+					<p className="text-sm text-muted-foreground">{t("common.loading")}</p>
+				)}
 				{!isLoading && servers.length === 0 && (
 					<p className="text-sm text-muted-foreground">
 						No MCP servers configured.
@@ -261,7 +267,7 @@ export function McpPanel() {
 								</Badge>
 								{s.tool_count != null && (
 									<span className="text-xs text-muted-foreground">
-										{s.tool_count} tools
+										{s.tool_count} {t("mcp.toolsSuffix")}
 									</span>
 								)}
 							</div>
@@ -278,19 +284,19 @@ export function McpPanel() {
 									}
 								/>
 								<Button size="sm" variant="ghost" onClick={() => openEdit(s)}>
-									Edit
+									{t("common.edit")}
 								</Button>
 								<Button
 									size="sm"
 									variant="ghost"
 									onClick={() => remove.mutate(s.name)}
 								>
-									Delete
+									{t("common.delete")}
 								</Button>
 							</div>
 						) : (
 							<Badge variant="secondary" className="shrink-0 text-[10px]">
-								read-only
+								{t("common.readOnly")}
 							</Badge>
 						)}
 					</Card>
@@ -299,23 +305,25 @@ export function McpPanel() {
 
 			<section className="space-y-2">
 				<h2 className="text-sm font-medium text-muted-foreground">
-					Tools ({tools.length})
+					{t("mcp.tools")} ({tools.length})
 				</h2>
-				{tools.map((t) => (
-					<Card key={`${t.server}-${t.name}`} className="gap-1 p-3">
+				{tools.map((tool) => (
+					<Card key={`${tool.server}-${tool.name}`} className="gap-1 p-3">
 						<div className="flex flex-wrap items-center gap-2">
-							<span className="font-mono text-sm font-medium">{t.name}</span>
+							<span className="font-mono text-sm font-medium">{tool.name}</span>
 							<Badge variant="outline" className="text-[10px]">
-								{t.server}
+								{tool.server}
 							</Badge>
 						</div>
-						{t.description && (
-							<p className="text-xs text-muted-foreground">{t.description}</p>
+						{tool.description && (
+							<p className="text-xs text-muted-foreground">
+								{tool.description}
+							</p>
 						)}
-						{t.schema_summary?.length > 0 && (
+						{tool.schema_summary?.length > 0 && (
 							<p className="text-[11px] text-muted-foreground">
-								args:{" "}
-								{t.schema_summary
+								{t("mcp.args")}{" "}
+								{tool.schema_summary
 									.map((p) => `${p.name}${p.required ? "*" : ""}`)
 									.join(", ")}
 							</p>

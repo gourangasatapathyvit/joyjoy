@@ -1,5 +1,6 @@
 import { Check, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useSessionMutations, useSessions } from "@/api/sessions";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/store/chat";
@@ -8,6 +9,7 @@ import { useChatStore } from "@/store/chat";
 // active item, hover-reveal rename/delete). Selecting a thread updates the
 // shared store; the runtime loads that thread's messages in response.
 export function ConversationSidebar() {
+	const { t } = useTranslation();
 	const { data, isLoading } = useSessions();
 	const { rename, remove } = useSessionMutations();
 	const threadId = useChatStore((s) => s.threadId);
@@ -42,12 +44,12 @@ export function ConversationSidebar() {
 		<aside className="flex w-[300px] shrink-0 flex-col border-r border-border bg-sidebar">
 			<div className="flex items-center justify-between px-4 py-3">
 				<span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-					Conversations
+					{t("conversations.heading")}
 				</span>
 				<button
 					type="button"
 					onClick={() => newChat()}
-					title="New chat"
+					title={t("conversations.newChat")}
 					className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
 				>
 					<Plus className="size-4" />
@@ -59,14 +61,14 @@ export function ConversationSidebar() {
 				<input
 					value={query}
 					onChange={(e) => setQuery(e.target.value)}
-					placeholder="Search conversations"
+					placeholder={t("conversations.searchPlaceholder")}
 					className="w-full rounded-lg border border-border bg-background py-[7px] pr-8 pl-8 text-[13px] outline-none transition-[box-shadow,border-color] placeholder:text-muted-foreground focus:border-primary focus:ring-[3px] focus:ring-primary/15"
 				/>
 				{query && (
 					<button
 						type="button"
 						onClick={() => setQuery("")}
-						title="Clear"
+						title={t("conversation.clear")}
 						className="-translate-y-1/2 absolute top-1/2 right-[18px] inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
 					>
 						<X className="size-3.5" />
@@ -76,12 +78,12 @@ export function ConversationSidebar() {
 
 			<div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
 				{isLoading ? (
-					<p className="px-2 py-4 text-xs text-muted-foreground">Loading…</p>
+					<p className="px-2 py-4 text-xs text-muted-foreground">
+						{t("common.loading")}
+					</p>
 				) : sessions.length === 0 ? (
 					<p className="px-2 py-4 text-xs leading-relaxed text-muted-foreground">
-						{q
-							? "No matches."
-							: "No conversations yet. Start chatting to create one."}
+						{q ? t("common.noMatches") : t("conversations.empty")}
 					</p>
 				) : (
 					<ul className="flex flex-col gap-0.5">
@@ -104,7 +106,7 @@ export function ConversationSidebar() {
 											<button
 												type="button"
 												onClick={() => commitEdit(s.thread_id)}
-												title="Save"
+												title={t("common.save")}
 												className="text-muted-foreground hover:text-foreground"
 											>
 												<Check className="size-4" />
@@ -112,7 +114,7 @@ export function ConversationSidebar() {
 											<button
 												type="button"
 												onClick={() => setEditing(null)}
-												title="Cancel"
+												title={t("common.cancel")}
 												className="text-muted-foreground hover:text-foreground"
 											>
 												<X className="size-4" />
@@ -137,12 +139,12 @@ export function ConversationSidebar() {
 											className="min-w-0 flex-1 truncate text-left"
 											title={s.title}
 										>
-											{s.title || "Untitled"}
+											{s.title || t("conversations.untitled")}
 										</button>
 										<button
 											type="button"
 											onClick={() => startEdit(s.thread_id, s.title)}
-											title="Rename"
+											title={t("common.rename")}
 											className="shrink-0 opacity-0 transition-opacity hover:text-primary group-hover:opacity-100"
 										>
 											<Pencil className="size-3.5" />
@@ -150,7 +152,7 @@ export function ConversationSidebar() {
 										<button
 											type="button"
 											onClick={() => onDelete(s.thread_id)}
-											title="Delete"
+											title={t("common.delete")}
 											className="shrink-0 opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
 										>
 											<Trash2 className="size-3.5" />

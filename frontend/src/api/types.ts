@@ -5,6 +5,16 @@
 
 export type Role = "user" | "assistant" | "system" | "tool";
 
+// A media artifact surfaced by the agent (base64 read_file blocks → data URL).
+// Path-based media (MEDIA: markers, written workspace files) is resolved to URLs
+// on the client instead — see lib/media.ts.
+export interface MediaItem {
+	kind: "image" | "audio" | "video" | "file";
+	mime_type: string;
+	filename?: string | null;
+	data_url: string;
+}
+
 export interface ChatMessage {
 	id: string;
 	role: Role;
@@ -33,6 +43,7 @@ export type RunEvent =
 			status?: string;
 			is_error?: boolean;
 			result?: string;
+			media?: MediaItem[];
 	  }
 	| {
 			event: "approval.request";
@@ -168,6 +179,7 @@ export interface SessionMessageWire {
 	tool_calls?: { id: string; name: string; args: Record<string, unknown> }[];
 	tool_call_id?: string;
 	name?: string;
+	media?: MediaItem[];
 }
 
 // ── Models / Providers config (Providers panel CRUD) ───────────────────────

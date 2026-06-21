@@ -34,12 +34,14 @@ import {
 	type PropsWithChildren,
 	useContext,
 } from "react";
+import { useTranslation } from "react-i18next";
 import {
 	ComposerAddAttachment,
 	ComposerAttachments,
 	UserMessageAttachments,
 } from "@/components/assistant-ui/attachment";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
+import { MediaFile, MediaImage } from "@/components/assistant-ui/media-part";
 import {
 	Reasoning,
 	ReasoningContent,
@@ -56,6 +58,7 @@ import {
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useSettingsStore } from "@/store/settings";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
 
@@ -105,6 +108,7 @@ export const Thread: FC<ThreadProps> = ({ components = EMPTY_COMPONENTS }) => {
 
 const ThreadRoot: FC<{ isEmpty: boolean }> = ({ isEmpty }) => {
 	const { Welcome = ThreadWelcome } = useContext(ThreadComponentsContext);
+	const autoFollow = useSettingsStore((s) => s.autoFollow);
 
 	return (
 		<ThreadPrimitive.Root
@@ -119,6 +123,7 @@ const ThreadRoot: FC<{ isEmpty: boolean }> = ({ isEmpty }) => {
 		>
 			<ThreadPrimitive.Viewport
 				turnAnchor="top"
+				autoScroll={autoFollow}
 				data-slot="aui_thread-viewport"
 				className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth"
 			>
@@ -188,10 +193,11 @@ const ThreadScrollToBottom: FC = () => {
 };
 
 const ThreadWelcome: FC = () => {
+	const { t } = useTranslation();
 	return (
 		<div className="aui-thread-welcome-root mb-6 flex flex-col items-center px-4 text-center">
 			<h1 className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in fill-mode-both text-2xl font-semibold duration-200">
-				How can I help you today?
+				{t("chat.welcome")}
 			</h1>
 		</div>
 	);
@@ -227,6 +233,7 @@ const ThreadSuggestionItem: FC = () => {
 };
 
 const Composer: FC = () => {
+	const { t } = useTranslation();
 	return (
 		<ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
 			<ComposerPrimitive.AttachmentDropzone
@@ -239,7 +246,7 @@ const Composer: FC = () => {
 			>
 				<ComposerAttachments />
 				<ComposerPrimitive.Input
-					placeholder="Send a message..."
+					placeholder={t("chat.placeholder")}
 					className="aui-composer-input placeholder:text-muted-foreground/80 max-h-32 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base outline-none"
 					rows={1}
 					autoFocus
@@ -252,6 +259,7 @@ const Composer: FC = () => {
 };
 
 const ComposerAction: FC = () => {
+	const { t } = useTranslation();
 	return (
 		<div className="aui-composer-action-wrapper relative flex items-center justify-between">
 			<ComposerAddAttachment />
@@ -296,13 +304,13 @@ const ComposerAction: FC = () => {
 					<ComposerPrimitive.Send
 						render={
 							<TooltipIconButton
-								tooltip="Send message"
+								tooltip={t("chat.send")}
 								side="bottom"
 								type="button"
 								variant="default"
 								size="icon"
 								className="aui-composer-send size-7 rounded-full"
-								aria-label="Send message"
+								aria-label={t("chat.send")}
 							/>
 						}
 					>
@@ -317,7 +325,7 @@ const ComposerAction: FC = () => {
 								variant="default"
 								size="icon"
 								className="aui-composer-cancel size-7 rounded-full"
-								aria-label="Stop generating"
+								aria-label={t("chat.stop")}
 							/>
 						}
 					>
@@ -345,6 +353,7 @@ const AssistantMessage: FC = () => {
 		ToolGroup,
 		ReasoningGroup,
 	} = useContext(ThreadComponentsContext);
+	const activityDisplay = useSettingsStore((s) => s.activityDisplay);
 
 	// reserves space for action bar and compensates with `-mb` for consistent msg spacing
 	// keeps hovered action bar from shifting layout (autohide doesn't support absolute positioning well)
@@ -379,7 +388,10 @@ const AssistantMessage: FC = () => {
 									return <ToolGroup group={part}>{children}</ToolGroup>;
 								}
 								return (
-									<ToolGroupRoot variant="ghost" defaultOpen>
+									<ToolGroupRoot
+										variant="ghost"
+										defaultOpen={activityDisplay === "stream"}
+									>
 										<ToolGroupTrigger
 											count={part.indices.length}
 											active={part.status.type === "running"}
@@ -405,6 +417,18 @@ const AssistantMessage: FC = () => {
 							}
 							case "text":
 								return <MarkdownText />;
+							case "image":
+								return (
+									<MediaImage image={part.image} filename={part.filename} />
+								);
+							case "file":
+								return (
+									<MediaFile
+										data={part.data}
+										mimeType={part.mimeType}
+										filename={part.filename}
+									/>
+								);
 							case "reasoning":
 								return <Reasoning {...part} />;
 							case "tool-call":

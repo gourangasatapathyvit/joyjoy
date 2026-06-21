@@ -3,9 +3,12 @@ import type { ReasoningEffort } from "@/api/types";
 
 const newThreadId = () => `t-${crypto.randomUUID()}`;
 
-// Persist the workspace dock's open/closed state (webui parity — it keeps the
-// panel state in localStorage too).
+// Persisted UI state (webui parity): the workspace dock's open/closed flag and
+// the ACTIVE thread/session — so the last conversation (and therefore its
+// workspace) is restored across screen navigation and full reloads.
 const WS_KEY = "joyjoy-workspace-open";
+const TID_KEY = "joyjoy-active-thread";
+
 const readWorkspaceOpen = (): boolean => {
 	try {
 		return localStorage.getItem(WS_KEY) === "1";
@@ -14,9 +17,30 @@ const readWorkspaceOpen = (): boolean => {
 	}
 };
 
+const persistThreadId = (id: string) => {
+	try {
+		localStorage.setItem(TID_KEY, id);
+	} catch {
+		// localStorage unavailable — keep in-memory only
+	}
+};
+
+const readThreadId = (): string => {
+	try {
+		const v = localStorage.getItem(TID_KEY);
+		if (v) return v;
+	} catch {
+		// fall through to a fresh id
+	}
+	const id = newThreadId();
+	persistThreadId(id);
+	return id;
+};
+
 // UI selection state shared between the pickers/sidebar and the chat runtime,
 // which reads the current values at send time via getState(). `threadId` is the
-// active conversation; the runtime loads its messages when it changes.
+// active conversation; the runtime loads its messages when it changes and the
+// workspace dock shows that session's files.
 interface ChatState {
 	model: string;
 	reasoningEffort: ReasoningEffort;
@@ -32,12 +56,19 @@ interface ChatState {
 export const useChatStore = create<ChatState>((set) => ({
 	model: "gpt-5",
 	reasoningEffort: "off",
-	threadId: newThreadId(),
+	threadId: readThreadId(),
 	workspaceOpen: readWorkspaceOpen(),
 	setModel: (model) => set({ model }),
 	setReasoningEffort: (reasoningEffort) => set({ reasoningEffort }),
-	selectThread: (threadId) => set({ threadId }),
-	newChat: () => set({ threadId: newThreadId() }),
+	selectThread: (threadId) => {
+		persistThreadId(threadId);
+		set({ threadId });
+	},
+	newChat: () => {
+		const threadId = newThreadId();
+		persistThreadId(threadId);
+		set({ threadId });
+	},
 	toggleWorkspace: () =>
 		set((s) => {
 			const workspaceOpen = !s.workspaceOpen;

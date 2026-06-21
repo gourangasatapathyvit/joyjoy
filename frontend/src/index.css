@@ -227,3 +227,71 @@
 	border: 1px solid var(--border);
 	padding: 0.3rem 0.6rem;
 }
+
+/* ── Accent skins (Settings → Appearance → Skin) ──
+   `data-skin` is set on <html>; the `.dark[data-skin]` variant wins in dark mode.
+   Default (gold) needs no rule — it uses the base :root/.dark accent vars. */
+[data-skin="ares"] {
+	--primary: #c0392b;
+	--primary-foreground: #fff;
+	--ring: #c0392b;
+	--sidebar-primary: #c0392b;
+	--sidebar-ring: #c0392b;
+	--chart-1: #c0392b;
+}
+.dark[data-skin="ares"] {
+	--primary: #ff4444;
+	--primary-foreground: #fff;
+	--ring: #ff4444;
+	--sidebar-primary: #ff4444;
+	--sidebar-ring: #ff4444;
+	--chart-1: #ff4444;
+}
+[data-skin="poseidon"] {
+	--primary: #0369a1;
+	--primary-foreground: #fff;
+	--ring: #0369a1;
+	--sidebar-primary: #0369a1;
+	--sidebar-ring: #0369a1;
+	--chart-1: #0369a1;
+}
+.dark[data-skin="poseidon"] {
+	--primary: #0ea5e9;
+	--primary-foreground: #fff;
+	--ring: #0ea5e9;
+	--sidebar-primary: #0ea5e9;
+	--sidebar-ring: #0ea5e9;
+	--chart-1: #0ea5e9;
+}
+[data-skin="sisyphus"] {
+	--primary: #7c3aed;
+	--primary-foreground: #fff;
+	--ring: #7c3aed;
+	--sidebar-primary: #7c3aed;
+	--sidebar-ring: #7c3aed;
+	--chart-1: #7c3aed;
+}
+.dark[data-skin="sisyphus"] {
+	--primary: #a78bfa;
+	--primary-foreground: #0d0d1a;
+	--ring: #a78bfa;
+	--sidebar-primary: #a78bfa;
+	--sidebar-ring: #a78bfa;
+	--chart-1: #a78bfa;
+}
+[data-skin="mono"] {
+	--primary: #555555;
+	--primary-foreground: #fff;
+	--ring: #555555;
+	--sidebar-primary: #555555;
+	--sidebar-ring: #555555;
+	--chart-1: #666666;
+}
+.dark[data-skin="mono"] {
+	--primary: #cccccc;
+	--primary-foreground: #0d0d1a;
+	--ring: #cccccc;
+	--sidebar-primary: #cccccc;
+	--sidebar-ring: #cccccc;
+	--chart-1: #cccccc;
+}

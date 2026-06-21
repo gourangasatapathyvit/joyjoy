@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useModels, useModelsConfig } from "@/api/queries";
 import type { ModelInfo, ReasoningEffort } from "@/api/types";
 import {
@@ -11,19 +12,21 @@ import {
 } from "@/components/ui/select";
 import { useChatStore } from "@/store/chat";
 
-const EFFORTS: { value: ReasoningEffort; label: string }[] = [
-	{ value: "off", label: "No reasoning" },
-	{ value: "minimal", label: "Minimal" },
-	{ value: "low", label: "Low" },
-	{ value: "medium", label: "Medium" },
-	{ value: "high", label: "High" },
-	{ value: "extra_high", label: "Extra High" },
+// Reasoning-effort values → i18n key suffix (under `model.*`).
+const EFFORTS: { value: ReasoningEffort; key: string }[] = [
+	{ value: "off", key: "off" },
+	{ value: "minimal", key: "minimal" },
+	{ value: "low", key: "low" },
+	{ value: "medium", key: "medium" },
+	{ value: "high", key: "high" },
+	{ value: "extra_high", key: "extraHigh" },
 ];
 
 // Model + reasoning-effort selectors, wired to the Zustand store the chat
 // runtime reads at send time. Models are grouped by provider (webui-style
 // optgroups); effort is disabled for non-reasoning models.
 export function ModelPicker() {
+	const { t } = useTranslation();
 	const { data } = useModels();
 	const { data: cfg } = useModelsConfig();
 	const models = data?.data ?? [];
@@ -55,7 +58,7 @@ export function ModelPicker() {
 		<div className="flex items-center gap-2">
 			<Select value={model} onValueChange={(v) => v && setModel(v)}>
 				<SelectTrigger size="sm" className="w-[180px] text-xs">
-					<SelectValue placeholder="Select model" />
+					<SelectValue placeholder={t("model.selectModel")} />
 				</SelectTrigger>
 				<SelectContent className="max-w-[320px]">
 					{groupKeys.map((key) => (
@@ -79,12 +82,12 @@ export function ModelPicker() {
 				disabled={!supportsReasoning}
 			>
 				<SelectTrigger size="sm" className="w-[150px] text-xs">
-					<SelectValue placeholder="Reasoning" />
+					<SelectValue placeholder={t("model.reasoning")} />
 				</SelectTrigger>
 				<SelectContent>
 					{EFFORTS.map((e) => (
 						<SelectItem key={e.value} value={e.value} className="text-xs">
-							{e.label}
+							{t(`model.${e.key}`)}
 						</SelectItem>
 					))}
 				</SelectContent>

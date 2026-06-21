@@ -22,6 +22,11 @@ export const sessionApi = {
 		}),
 	remove: (tid: string) =>
 		http<Ok>(`/v1/sessions/${encodeURIComponent(tid)}`, { method: "DELETE" }),
+	importConversation: (messages: unknown[], title?: string) =>
+		http<{ ok: boolean; thread_id?: string; count?: number; error?: string }>(
+			"/v1/sessions/import",
+			{ method: "POST", body: JSON.stringify({ messages, title }) },
+		),
 };
 
 export function useSessions() {

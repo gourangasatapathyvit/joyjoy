@@ -12,6 +12,7 @@ import {
 	X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { WorkspaceNode } from "@/api/types";
@@ -70,6 +71,7 @@ function TreeNode({
 	depth: number;
 	ctx: TreeCtx;
 }) {
+	const { t } = useTranslation();
 	const [open, setOpen] = useState(depth < 1);
 	const pad = depth * 12 + 6;
 	const active = node.type === "file" && ctx.selected === node.path;
@@ -131,7 +133,7 @@ function TreeNode({
 					<button
 						type="button"
 						onClick={() => ctx.onStartRename(node.path)}
-						title="Rename"
+						title={t("common.rename")}
 						className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-primary group-hover:opacity-100"
 					>
 						<Pencil className="size-3" />
@@ -139,7 +141,7 @@ function TreeNode({
 					<button
 						type="button"
 						onClick={() => ctx.onDelete(node.path)}
-						title="Delete"
+						title={t("common.delete")}
 						className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
 					>
 						<Trash2 className="size-3" />
@@ -170,6 +172,7 @@ function FileView({
 	path: string;
 	onBack: () => void;
 }) {
+	const { t } = useTranslation();
 	const name = path.split("/").pop() ?? path;
 	const ext = extOf(name);
 	const isImage = IMAGE_EXT.includes(ext);
@@ -200,7 +203,7 @@ function FileView({
 				<button
 					type="button"
 					onClick={onBack}
-					title="Back"
+					title={t("workspace.back")}
 					className="shrink-0 text-muted-foreground hover:text-foreground"
 				>
 					<ChevronLeft className="size-4" />
@@ -215,7 +218,7 @@ function FileView({
 						rel="noreferrer"
 						className="shrink-0 text-xs text-primary hover:underline"
 					>
-						Open
+						{t("common.open")}
 					</a>
 				) : editable && editing ? (
 					<span className="flex shrink-0 items-center gap-2">
@@ -227,7 +230,7 @@ function FileView({
 							}}
 							className="text-xs text-muted-foreground hover:text-foreground"
 						>
-							Cancel
+							{t("common.cancel")}
 						</button>
 						<button
 							type="button"
@@ -235,14 +238,14 @@ function FileView({
 							disabled={save.isPending}
 							className="text-xs font-medium text-primary hover:underline"
 						>
-							{save.isPending ? "Saving…" : "Save"}
+							{save.isPending ? t("common.saving") : t("common.save")}
 						</button>
 					</span>
 				) : editable ? (
 					<button
 						type="button"
 						onClick={() => setEditing(true)}
-						title="Edit"
+						title={t("common.edit")}
 						className="shrink-0 text-muted-foreground hover:text-primary"
 					>
 						<Pencil className="size-3.5" />
@@ -257,7 +260,6 @@ function FileView({
 			<div className="min-h-0 flex-1 overflow-auto">
 				{isImage ? (
 					<div className="flex h-full items-center justify-center p-3">
-						{/* biome-ignore lint/a11y/useAltText: alt set to filename */}
 						<img
 							src={raw}
 							alt={name}
@@ -267,7 +269,9 @@ function FileView({
 				) : isPdf ? (
 					<iframe src={raw} title={name} className="h-full w-full border-0" />
 				) : isLoading ? (
-					<p className="p-3 text-xs text-muted-foreground">Loading…</p>
+					<p className="p-3 text-xs text-muted-foreground">
+						{t("common.loading")}
+					</p>
 				) : data?.binary ? (
 					<p className="p-3 text-xs text-muted-foreground">
 						Binary file ({formatSize(data.size)}) —{" "}
@@ -302,6 +306,7 @@ function FileView({
 // format-aware viewing of the agent's per-user working dir. Lives in AppShell
 // so it's reachable from every screen; toggled from the rail.
 export function WorkspaceDock() {
+	const { t } = useTranslation();
 	const open = useChatStore((s) => s.workspaceOpen);
 	const toggle = useChatStore((s) => s.toggleWorkspace);
 	const threadId = useChatStore((s) => s.threadId);
@@ -380,8 +385,11 @@ export function WorkspaceDock() {
 	return (
 		<aside className="flex w-[360px] shrink-0 flex-col border-l border-border bg-sidebar">
 			<div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-				<span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-					<Folder className="size-3.5" /> Workspace
+				<span
+					title={`Session: ${threadId}`}
+					className="flex cursor-help items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground"
+				>
+					<Folder className="size-3.5" /> {t("workspace.title")}
 				</span>
 				<div className="flex items-center gap-0.5">
 					<button
@@ -391,7 +399,7 @@ export function WorkspaceDock() {
 							setCreating("file");
 							setDraftName("");
 						}}
-						title="New file"
+						title={t("workspace.newFile")}
 						className={cn(iconBtn, "hover:bg-primary/10 hover:text-primary")}
 					>
 						<FilePlus className="size-3.5" />
@@ -403,7 +411,7 @@ export function WorkspaceDock() {
 							setCreating("folder");
 							setDraftName("");
 						}}
-						title="New folder"
+						title={t("workspace.newFolder")}
 						className={cn(iconBtn, "hover:bg-primary/10 hover:text-primary")}
 					>
 						<FolderPlus className="size-3.5" />
@@ -411,7 +419,7 @@ export function WorkspaceDock() {
 					<button
 						type="button"
 						onClick={() => fileInputRef.current?.click()}
-						title="Upload file"
+						title={t("workspace.upload")}
 						className={cn(iconBtn, "hover:bg-primary/10 hover:text-primary")}
 					>
 						<Upload className="size-3.5" />
@@ -419,7 +427,7 @@ export function WorkspaceDock() {
 					<button
 						type="button"
 						onClick={() => refetch()}
-						title="Refresh"
+						title={t("workspace.refresh")}
 						className={cn(iconBtn, "hover:bg-primary/10 hover:text-primary")}
 					>
 						<RefreshCw
@@ -429,7 +437,7 @@ export function WorkspaceDock() {
 					<button
 						type="button"
 						onClick={() => toggle()}
-						title="Close panel"
+						title={t("common.close")}
 						className={cn(
 							iconBtn,
 							"hover:bg-foreground/5 hover:text-foreground",
@@ -479,11 +487,12 @@ export function WorkspaceDock() {
 						</div>
 					)}
 					{isLoading ? (
-						<p className="px-2 py-4 text-xs text-muted-foreground">Loading…</p>
+						<p className="px-2 py-4 text-xs text-muted-foreground">
+							{t("common.loading")}
+						</p>
 					) : tree.length === 0 && !creating ? (
 						<p className="px-2 py-4 text-xs leading-relaxed text-muted-foreground">
-							No files yet. Use the buttons above to add files, or they'll
-							appear as the agent works.
+							{t("workspace.empty")}
 						</p>
 					) : (
 						<ul className="flex flex-col">

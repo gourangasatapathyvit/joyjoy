@@ -1,5 +1,6 @@
 import { Plus } from "lucide-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useModelMutations, useModelsConfig } from "@/api/queries";
 import type {
 	ModelConfigItem,
@@ -37,6 +38,7 @@ function ProviderModelDialog({
 	initial: ModelConfigItem | null;
 	onClose: () => void;
 }) {
+	const { t } = useTranslation();
 	const { save } = useModelMutations();
 	const editing = !!initial;
 	const [provider, setProvider] = useState<string>(
@@ -72,14 +74,16 @@ function ProviderModelDialog({
 			if (val) entry[f.key] = val;
 		}
 		if (!entry.id) {
-			setErr("Model ID is required");
+			setErr(t("providers.idRequired"));
 			return;
 		}
 		setErr(null);
 		save.mutate(entry, {
 			onSuccess: (res) =>
-				res?.ok === false ? setErr(res.error ?? "Save failed") : onClose(),
-			onError: () => setErr("Save failed"),
+				res?.ok === false
+					? setErr(res.error ?? t("providers.saveFailed"))
+					: onClose(),
+			onError: () => setErr(t("providers.saveFailed")),
 		});
 	};
 
@@ -88,12 +92,14 @@ function ProviderModelDialog({
 			<DialogContent className="max-w-lg">
 				<DialogHeader>
 					<DialogTitle>
-						{editing ? `Edit ${initial?.id}` : "Add model"}
+						{editing
+							? t("providers.editTitle", { id: initial?.id })
+							: t("providers.addTitle")}
 					</DialogTitle>
 				</DialogHeader>
 				<div className="space-y-3">
 					<div className="space-y-1.5">
-						<Label htmlFor="prov">Provider</Label>
+						<Label htmlFor="prov">{t("providers.provider")}</Label>
 						<Select value={provider} onValueChange={(v) => v && setProvider(v)}>
 							<SelectTrigger id="prov">
 								<SelectValue />
@@ -121,7 +127,7 @@ function ProviderModelDialog({
 								onChange={(e) => setField(f.key, e.target.value)}
 								placeholder={
 									f.secret && editing && initial?.has_key
-										? "•••• (unchanged)"
+										? t("providers.unchanged")
 										: f.placeholder
 								}
 							/>
@@ -130,10 +136,10 @@ function ProviderModelDialog({
 					{err && <p className="text-xs text-destructive">{err}</p>}
 					<div className="flex justify-end gap-2">
 						<Button variant="ghost" onClick={onClose}>
-							Cancel
+							{t("common.cancel")}
 						</Button>
 						<Button onClick={onSave} disabled={save.isPending}>
-							{save.isPending ? "Saving…" : "Save"}
+							{save.isPending ? t("common.saving") : t("common.save")}
 						</Button>
 					</div>
 				</div>
@@ -143,6 +149,7 @@ function ProviderModelDialog({
 }
 
 export function ProvidersPanel() {
+	const { t } = useTranslation();
 	const { data, isLoading } = useModelsConfig();
 	const { remove, test } = useModelMutations();
 	const models = data?.models ?? [];
@@ -173,15 +180,17 @@ export function ProvidersPanel() {
 
 	return (
 		<PanelLayout
-			title="Providers"
-			description="Model providers and credentials (global models are read-only)."
+			title={t("providers.title")}
+			description={t("providers.subtitle")}
 		>
 			<div className="flex justify-end">
 				<Button size="sm" variant="outline" onClick={openNew}>
-					<Plus className="size-3.5" /> Add model
+					<Plus className="size-3.5" /> {t("providers.addModel")}
 				</Button>
 			</div>
-			{isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+			{isLoading && (
+				<p className="text-sm text-muted-foreground">{t("common.loading")}</p>
+			)}
 			{models.map((m) => {
 				const tr = testResults[m.id];
 				return (
@@ -198,17 +207,26 @@ export function ProvidersPanel() {
 								<Badge variant="outline" className="text-[10px]">
 									{m.scope}
 								</Badge>
-								{m.supports_reasoning && (
-									<Badge variant="secondary" className="text-[10px]">
-										reasoning
-									</Badge>
-								)}
 								{tr && (
 									<Badge
 										variant={tr.standard.ok ? "default" : "destructive"}
 										className="text-[10px]"
 									>
-										{tr.standard.ok ? "test ok" : "test fail"}
+										{tr.standard.ok
+											? t("providers.testOk")
+											: t("providers.testFail")}
+									</Badge>
+								)}
+								{/* Reasoning support is reported by the live Test probe (like
+								    "test ok"), not the static config — only shown once tested. */}
+								{tr?.standard.ok && (
+									<Badge
+										variant={tr.reasoning.supported ? "secondary" : "outline"}
+										className="text-[10px]"
+									>
+										{tr.reasoning.supported
+											? t("providers.reasoning")
+											: t("providers.noReasoning")}
 									</Badge>
 								)}
 							</div>
@@ -230,24 +248,26 @@ export function ProvidersPanel() {
 								disabled={testing === m.id}
 								onClick={() => runTest(m.id)}
 							>
-								{testing === m.id ? "Testing…" : "Test"}
+								{testing === m.id
+									? t("providers.testing")
+									: t("providers.test")}
 							</Button>
 							{m.editable ? (
 								<>
 									<Button size="sm" variant="ghost" onClick={() => openEdit(m)}>
-										Edit
+										{t("common.edit")}
 									</Button>
 									<Button
 										size="sm"
 										variant="ghost"
 										onClick={() => remove.mutate(m.id)}
 									>
-										Delete
+										{t("common.delete")}
 									</Button>
 								</>
 							) : (
 								<Badge variant="secondary" className="text-[10px]">
-									read-only
+									{t("common.readOnly")}
 								</Badge>
 							)}
 						</div>
