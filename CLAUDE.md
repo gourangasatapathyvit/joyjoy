@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-joyjoy is a single-process, multi-tenant **Deep Agents** backend (FastAPI + LangGraph, `backend/`) fronted by a patched copy of **hermes-webui** running in **gateway mode** (`webui/`). One `create_deep_agent()` serves all users; per-user isolation is by LangGraph store namespace `(user_id, "fs")` + `thread_id`. Dev = SQLite + local files; prod = everything in Postgres (stateless pods). `README.md` and `PLAN.md` hold the original design — but PLAN.md's phase checklist is **stale**: phases 0–3, the runs/approval API, and multi-provider models are all done.
+joyjoy is a single-process, multi-tenant **Deep Agents** app: a FastAPI + LangGraph backend (`backend/`) that **also serves the React SPA** (`frontend/`, built to `frontend/dist`, mounted via `app.frontend()`) — one process, one origin. One `create_deep_agent()` serves all users; per-user isolation is by the authenticated identity **`User.id` (uuid)** + `thread_id`. **All application data lives in one relational DB** (dev SQLite / prod Postgres, selected by `APP_ENV`); chat messages stay in the LangGraph checkpointer; provider secrets are Fernet-encrypted at rest. The legacy hermes-webui has been **removed**. See `README.md`, `PLAN.md`, and `docs/RUNNING.md`.
 
 ## Environment: this project lives in WSL
 
@@ -17,10 +17,11 @@ The repo is at `~/joyjoy` inside **WSL Ubuntu**; you may be launched from Window
 
 ## Running the stack
 
-- **Bring everything up** (idempotent; starts jira MCP :9000 → backend :8080 → webui :8788, skips what's already running): `bash ~/joyjoy/scripts/start_all.sh`
-- **Restart one service** after edits: `scripts/restart_backend.sh` · `scripts/restart_webui.sh`. The scripts' own "UP/DOWN" check fires too early (webui needs ~10s) — re-check the port if it says DOWN.
+- **Build SPA + serve everything** on `:8080` (one FastAPI process serves the SPA *and* `/v1`): `bash ~/joyjoy/scripts/serve.sh`
+- **Bring everything up** (idempotent; jira MCP :9000 → backend :8080; build the SPA first if stale): `bash ~/joyjoy/scripts/start_all.sh`
+- **Restart the backend** after edits: `scripts/restart_backend.sh`. When iterating on the UI only, `cd frontend && npm run dev` (Vite :5173, proxies `/v1` → :8080).
 - The backend reads `~/joyjoy/.env` via pydantic `env_file="../.env"`, so it **must be started from `backend/`** (the restart script handles this).
-- UI: http://127.0.0.1:8788. Test users `alice` / `bob` (in `webui-state/users.json`).
+- UI: http://127.0.0.1:8080 — sign up / log in (accounts are in the `users` table). Dev falls back to a seeded dev user when not signed in.
 
 ## venvs are uv-managed — there is no `pip`
 
@@ -30,42 +31,43 @@ The repo is at `~/joyjoy` inside **WSL Ubuntu**; you may be launched from Window
 cd ~/joyjoy/backend && VIRTUAL_ENV="$PWD/.venv" ~/.local/bin/uv pip install <pkg>
 ```
 
-(run it from a script file, not inline). Backend deps are in `backend/pyproject.toml`, **but the provider SDKs `langchain-anthropic`, `langchain-aws`+`boto3`, and `langchain-google-genai` were installed ad-hoc** and are not yet in pyproject — re-run `scripts/install_bedrock.sh` / `install_gemini.sh` if the venv is rebuilt. `webui/.venv` is independent (pyyaml + cryptography); rebuild with `scripts/make_webui_venv.sh`.
+(run it from a script file, not inline). Backend deps are in `backend/pyproject.toml`, **but the provider SDKs `langchain-anthropic`, `langchain-aws`+`boto3`, and `langchain-google-genai` were installed ad-hoc** and are not yet in pyproject — re-run `scripts/install_bedrock.sh` / `install_gemini.sh` if the venv is rebuilt. The frontend is plain npm (`cd frontend && npm install`).
 
 ## Lint / tests
 
 - Lint: `ruff` (a dev extra in pyproject).
-- There is **no backend unit-test suite**. Validation is done with **integration scripts in `scripts/`** run against a live backend: `test_providers_crud.sh`, `test_peruser_chat.sh`, `test_openai_gemini.sh`, `test_azure_selfcontained.sh`, `validate_models.py`. They curl the gateway with `Authorization: Bearer dev-gateway-key-change-me` and `X-User-Id: <user>`. (`webui/tests/` is hermes's own pytest suite, not joyjoy's.)
-- **Never `import app.main` from a standalone script** — it opens a DB connection at import and hangs. Replicate env by parsing `.env` into `os.environ` yourself (see `validate_models.py`).
+- There is **no backend unit-test suite**. Validation is done with **integration scripts in `scripts/`** run against a live backend: `test_providers_crud.sh`, `test_peruser_chat.sh`, `test_openai_gemini.sh`, `test_azure_selfcontained.sh`, `validate_models.py`. They curl the gateway with `Authorization: Bearer dev-gateway-key-change-me` and `X-User-Id: <user>`.- **Never `import app.main` from a standalone script** — it opens a DB connection at import and hangs. Replicate env by parsing `.env` into `os.environ` yourself (see `validate_models.py`).
 
 ## Architecture
 
-### Gateway contract (webui ↔ backend)
+### Frontend ↔ backend (same-origin)
 
-`webui` runs with `HERMES_WEBUI_CHAT_BACKEND=gateway` → `http://127.0.0.1:8080`. It forwards `Authorization: Bearer <gateway key>`, **`X-User-Id`** (logged-in user → isolation), and `X-Hermes-Session-Id` (→ deepagents `thread_id`). Chat flows through `/v1/runs` + `/v1/runs/{id}/events` (SSE runs API with HITL tool approvals) or `/v1/chat/completions` (plain SSE). All endpoints are in `backend/app/main.py`.
+The React SPA calls `/v1/*` same-origin with `credentials: "include"`. Identity comes from an **httpOnly session cookie** whose `sub` is the user's `User.id` (set by `/v1/auth/*`); `resolve_user_id` also accepts an `X-User-Id` header / JWT and, in dev, falls back to a seeded dev user. Chat flows through `/v1/runs` + `/v1/runs/{id}/events` (SSE runs API with HITL tool approvals) or `/v1/chat/completions` (plain SSE). All endpoints are in `backend/app/main.py`; the SPA build is mounted last via `app.frontend()`.
 
 ### Backend (`backend/app/`)
 
-- `agent.py` — the core (largest file). `_get_or_build()` compiles one `create_deep_agent()` per `(kind, user_id, model_id)` and caches it (`_AGENT_CACHE`); **`_invalidate_user_cache(uid)` is called on every write** so skill/MCP/model/memory edits take effect on the next message. `build_model_for(settings, model_id, uid)` dispatches by `spec["provider"]` to the right LangChain chat model with lazy imports. MCP loading + per-run approval gating also live here.
-- `config.py` — `Settings` (pydantic-settings). `model_specs` = the **global** model catalog read from `config/models.json`; `normalize_model()` adds the provider, `${VAR}` expansion, and Azure fallbacks.
-- `persistence.py` — dev↔prod swap keyed on `APP_ENV` (SQLite saver + FilesystemBackend ↔ Postgres saver + StoreBackend). Pinned to `deepagents==0.6.10` (uses its private `StoreBackend._convert_file_data_to_store_value`).
-- `context.py` `AgentContext(user_id, thread_id)`; `auth.py` `verify_gateway_key` + `resolve_user_id` (reads `X-User-Id`); `runs.py` the runs/approval engine.
+- `db/` — the relational layer: `models.py` (13 SQLAlchemy models), `engine.py` (async engine + `db_session()`; SQLite gets a `PRAGMA foreign_keys=ON` connect listener), `crypto.py` (Fernet secrets), `seed.py` (idempotent shipped-catalog seeds). `app_db_url` (in `config.py`) derives dev SQLite / prod Postgres from `APP_ENV`.
+- `dbfs.py` — the **DB→agent bridge**: `MemoryBackend` (`/memory/`) + `UserSkillsBackend` (`/skills/user/`) deepagents backends mounted in `build_backend`'s `CompositeBackend`. They override the async methods (CompositeBackend calls those) with async DB I/O; global skills stay on disk (FilesystemBackend).
+- `agent.py` — the core (largest file). `_get_or_build()` compiles one `create_deep_agent()` per `(kind, user_id, model_id, reasoning)` and caches it (`_AGENT_CACHE`); **`_invalidate_user_cache(uid)` on every write**. `build_model_for` / `resolve_model` / `merged_model_specs` / the model·MCP·skill CRUD are **async** (they read the DB) and decrypt secrets via `db.crypto`. MCP loading + per-run approval gating live here.
+- `users.py` accounts + OTP (`users`/`password_resets`); `usersettings.py` UI prefs + memory ↔ `user_configs`; `sessions.py` the `sessions` table.
+- `config.py` — `Settings` (pydantic-settings). `model_specs` (config/models.json) is now only the **seed source** + a health-info list. `persistence.py` — LangGraph saver+store, dev↔prod by `APP_ENV` (pinned `deepagents==0.6.10`).
+- `context.py` `AgentContext(user_id, thread_id)`; `auth.py` `verify_gateway_key` + `current_user_id`/`resolve_user_id`; `runs.py` the runs/approval engine.
 
 ### Capabilities = global (read-only) + per-user (CRUD) — one pattern, four times
 
-Skills, MCP servers, the model catalog, and memory all share the same shape:
+Skills, MCP servers, the model catalog, and memory all share the same shape — **all in the DB**:
 
-- **Global** = a shared file/dir, read-only in the UI: skills `skills/global/`, MCP `config/global.mcp.json`, models `config/models.json`.
-- **Per-user** = writable from the webui, under `data/users/<uid>/`: `mcp.json`, `models.json`; skills + memory live in the LangGraph **store** under namespace `(uid, "fs")`.
-- Backend CRUD lives in `agent.py` (`save_/delete_/toggle_user_*`, `describe_*`); gateway endpoints in `main.py` (`/v1/skills/*`, `/v1/mcp/servers/*`, `/v1/models/config*`, `/v1/memory*`); webui proxies in `webui/api/routes.py` via `_proxy_gateway_get` / `_proxy_gateway_send` (which forward `X-User-Id`). Writes to a **global** id are rejected as read-only. The effective set a user sees = global merged with their own (`merged_model_specs`, etc.).
+- **Global** = shipped, read-only catalogs seeded on first boot from disk/config: `global_skills` (← `skills/global/`), `global_mcps` (← `config/global.mcp.json`), `global_models`/`global_providers` (← `config/models.json` + `PROVIDER_TYPES`), `skins`.
+- **Per-user** = writable rows keyed by `User.id`: `user_models`, `user_mcps`, `user_skills`(+`skill_files`), and `user_configs` (UI prefs + memory: `notes`/`about_you`/`persona`). Global skills' helper files still live on disk (shipped assets).
+- Backend CRUD lives in `agent.py` (`save_/delete_/toggle_user_*`, `describe_*` — async DB); endpoints in `main.py` (`/v1/skills/*`, `/v1/mcp/servers/*`, `/v1/models/config*`, `/v1/memory*`, `/v1/settings/ui`, `/v1/skins`). Writes to a **global** id are rejected as read-only. The effective set a user sees = global merged with their own (`merged_model_specs`, `_merged_mcp_servers`, `list_skills`).
 
 ### Model providers & picker
 
-Five provider types: `azure_openai`, `anthropic` (also serves Azure AI Foundry's `/anthropic` Claude endpoint), `bedrock`, `openai` (OpenAI-compatible — OpenAI/OpenRouter/DeepSeek/Groq/local via base_url), `gemini`. `PROVIDER_TYPES` in `agent.py` is the field-schema the Settings→Providers tab renders its add/edit forms from. `/v1/models` includes each model's `provider`; the webui `/api/models` proxy groups models into one optgroup per provider for the chat picker. **API keys are stored literally in the gitignored JSON catalog files and never sent to the browser** — `describe_models` masks them (`••••xxxx`), and on edit a blank/masked key field preserves the stored value.
+Five provider types: `azure_openai`, `anthropic` (also serves Azure AI Foundry's `/anthropic` Claude endpoint), `bedrock`, `openai` (OpenAI-compatible — OpenAI/OpenRouter/DeepSeek/Groq/local via base_url), `gemini`. `PROVIDER_TYPES` in `agent.py` is the field-schema the Settings→Providers tab renders its add/edit forms from (mirrored in the `global_providers` table). `/v1/models` includes each model's `provider` for the picker. **API keys are Fernet-encrypted at rest** inside the model rows' `settings` JSON and never sent to the browser — `describe_models` masks them (`••••xxxx`), and on edit a blank/masked key field preserves the stored (encrypted) value. (MCP secrets are NOT stored — use `${VAR}` refs; the real value lives in `.env`.)
 
-### webui (`webui/`) — patched hermes-webui
+### frontend (`frontend/`) — React SPA
 
-Gateway mode. joyjoy-specific surface: `api/routes.py` (gateway proxies, `/api/models` provider-grouping, `_static_cache_token` SW-cache bust), `static/panels.js` (Providers/Skills/MCP/Memory tabs + CRUD), `static/ui.js` (model picker `populateModelDropdown`). Editing any `static/*` file auto-busts the service-worker cache (mtime folded into the `?v=` token), but you still must `restart_webui.sh`.
+Vite + React 19 + TS, served by the backend. Per-user prefs (skin/theme/locale/activity/auto-follow/default model+reasoning) persist to `UserConfig` via `/v1/settings/ui`: `src/api/prefs.ts` `persistPref()` writes + keeps the query cache in sync; `src/components/PrefsSync.tsx` hydrates them once after login. Skins load from `/v1/skins`. i18n default = English (`src/i18n/`). See `frontend/README.md`. Rebuild what the backend serves with `cd frontend && npm run build`.
 
 ## Conventions & gotchas
 

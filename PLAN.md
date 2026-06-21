@@ -1,131 +1,122 @@
-# joyjoy — Multi-Tenant Deep Agents behind hermes-webui
+# joyjoy — Multi-Tenant Deep Agents (React SPA + relational DB)
 
-A **single FastAPI process** serving **many users** on one Deep Agents engine, with
-**all state in Postgres** (prod) or **SQLite + local files** (dev). `hermes-webui`
-is the chat UI, talking to the backend over its existing **"gateway"** contract.
+A **single FastAPI process** serving **many users** on one Deep Agents engine. It
+serves both the **React SPA** and the `/v1` API, with **all application data in one
+relational database** — **SQLite** (dev) or **Postgres** (prod), selected by
+`APP_ENV`. Chat *messages* stay in LangGraph's checkpointer.
 
 > This file is the living plan + checklist. Update the checkboxes as we go.
 
 ## 1. Goal & hard constraints
-- **Single process, many users** — no per-user subprocess. `asyncio` concurrency.
-- **Production multi-tenant; everything in Postgres** so a pod can die with **zero data loss**:
-  threads/checkpoints, conversation history, provider credentials, long-term memory, skills, virtual filesystem.
-- **Dev/prod parity** — dev = SQLite + local files; prod = Postgres. *Same agent code*; persistence swapped via a factory keyed on `APP_ENV`.
-- **Reuse hermes-webui UX** — patch only what is required.
+- **Single process, many users** — no per-user subprocess; `asyncio` concurrency.
+- **All app data relational, prod in Postgres** so a pod can die with zero data loss:
+  accounts, skins, providers, models, MCP servers, skills (+ files), sessions,
+  per-user config + memory. Chat threads/checkpoints stay in the LangGraph saver.
+- **Dev/prod parity** — dev = SQLite (`data/joyjoy.db`), prod = Postgres. *Same code*;
+  the SQLAlchemy URL is derived from `APP_ENV` (`Settings.app_db_url`).
+- **No file-based CRUD stores** — the old `models.json` / `mcp.json` / `ui.json` /
+  KV-store layout is gone; everything is read/written through the DB.
+- **Secrets at rest** — model `api_key`/AWS secrets are **Fernet-encrypted**
+  (`CREDENTIAL_ENCRYPTION_KEY`, generate-once). Passwords are bcrypt. MCP secrets
+  stay as `${VAR}` refs (real value in `.env`, never in the DB).
+- **First-class React UI** — the SPA is the product; it's built and served by the backend.
 
-## 2. Architecture (mirrors `deepagent/flow.txt`)
+## 2. Architecture
 ```
 Browser
-  │  (hermes login: cookie/JWT)
+  │  same-origin fetch /v1/*  (httpOnly session cookie set on sign-in)
   ▼
-hermes-webui  (auth, sessions, chat UI)   webui/   CHAT_BACKEND=gateway
-  │  HTTP gateway contract
-  │    POST /v1/chat/completions            (OpenAI SSE)        ← MVP
-  │    POST /v1/runs + GET /v1/runs/{id}/events (SSE)           ← tools + HITL approvals (phase 2)
-  │    headers: X-API-Key, X-User-Id, X-Thread-Id
-  ▼
-joyjoy-backend  (FastAPI, ONE process)     backend/app/
-  • auth.py        gateway key + per-user identity (X-User-Id / JWT sub)
-  • agent.py       create_deep_agent() cached per (kind,user,model); multi-provider build_model_for()
-  • context.py     AgentContext(user_id, thread_id) → store namespace (user_id,"fs")
-  • persistence.py dev: AsyncSqliteSaver + FilesystemBackend(local, per-user dir)
-  │               prod: AsyncPostgresSaver + StoreBackend(AsyncPostgresStore, ns=(user_id,…))
+joyjoy backend  (FastAPI, ONE process)   backend/app/
+  • app.frontend()  → serves the built React SPA (frontend/dist) at /
+  • auth.py        session cookie (sub = User.id) / JWT / dev fallback
+  • users.py       accounts + password-reset OTP (users / password_resets)
+  • agent.py       create_deep_agent() cached per (kind,user,model,reasoning);
+  │                multi-provider build_model_for(); model/MCP/skills CRUD (async, DB)
+  • dbfs.py        DB→agent bridge: MemoryBackend (/memory/) + UserSkillsBackend
+  │                (/skills/user/) mounted in the agent's CompositeBackend
+  • db/            13 SQLAlchemy models, async engine, Fernet crypto, seeds
+  • persistence.py LangGraph saver+store (dev SQLite / prod Postgres)
+  • runs.py        /v1/runs + SSE events + HITL approvals
   ▼
 Model providers (build_model_for): Azure OpenAI · Azure AI Foundry/Claude · Bedrock · OpenAI-compat · Gemini
   ▼
-Postgres `langgraph_db` (10.44.63.72)  — checkpoints + store(memory, skills, virtual FS) + creds table
+Databases:  app DB (SQLite dev / Postgres prod)  +  LangGraph checkpointer/store (same engine)
 ```
 
-## 3. "Everything in Postgres" mapping (replaces the dcode local files)
-| dcode local file | joyjoy **prod** | joyjoy **dev** |
-|---|---|---|
-| `~/.deepagents/.state/sessions.db` (threads) | `AsyncPostgresSaver` (langgraph_db) | `AsyncSqliteSaver` (`./data/dev_checkpoints.sqlite`) |
-| `history.jsonl` (input history) | thread messages in the checkpointer | same (sqlite) |
-| `auth.json` (provider creds) | encrypted `credentials` table (Fernet) | `.env` / local |
-| `agent/skills/`, `AGENTS.md` (memory), virtual FS | `AsyncPostgresStore` namespaces per user | `FilesystemBackend` local dirs |
+## 3. Data model — the relational schema (`app/db/models.py`, 13 tables)
+| Concern | Tables |
+|---|---|
+| Accounts / reset | `users` (uuid PK, bcrypt), `password_resets` |
+| Shipped catalogs (seeded, read-only) | `skins`, `global_providers`, `global_models`, `global_skills`, `global_mcps` |
+| Per-user | `user_configs` (1:1 — skin/theme/locale/activity/auto-follow/default model+reasoning/**memory: notes·about·persona**), `user_models`, `user_skills`, `user_mcps`, `skill_files` |
+| Conversations | `sessions` (thread_id PK, relative `workspace_path`) |
 
-## 4. Multi-tenant isolation model
-- `user_id` resolved from `X-User-Id` (hermes forwards the authenticated user) or JWT `sub` (direct clients per flow.txt).
-- Per-request `AgentContext(user_id, thread_id)` → `StoreBackend` namespace `(user_id, "fs")` for FS/memory; `(user_id, "skills")` for user skills.
-- **Global** (shared, read-only) skills/MCP live under a fixed namespace `("global", …)` / mounted dir; never writable by users.
-- `thread_id` = hermes session id (forwarded as `X-Thread-Id`) so the deepagents thread lines up with the UI sidebar.
+Chat **messages** are NOT here — they live in the LangGraph checkpointer (Postgres
+prod / SQLite dev). Provider secrets live Fernet-encrypted inside the model rows'
+`settings` JSON. Migrations: Alembic (`backend/alembic/`); fresh DBs are bootstrapped
+by `create_all` at startup, then `alembic stamp head` once for an existing DB.
+
+## 4. Multi-tenant isolation
+- Identity = **`User.id` (uuid)**, carried in the session-cookie `sub`. `resolve_user_id`
+  returns it; dev no-auth falls back to a seeded deterministic dev user.
+- Per-user tables FK → `users.id` (ON DELETE CASCADE). The agent's `/memory/` and
+  `/skills/user/` mounts (via `dbfs.py`) and the workspace dir are all scoped by it.
+- Global (shipped) skills/MCP/models are read-only; writes only ever touch the user's rows.
 
 ## 5. Repo layout
 ```
 joyjoy/
   backend/
-    app/{config,persistence,context,auth,agent,main}.py
+    app/{config,persistence,context,auth,users,agent,dbfs,sessions,usersettings,runs,workspace,media,main}.py
+    app/db/{models,engine,crypto,seed,__init__}.py
+    alembic/                relational migrations (baseline = all 13 tables)
     pyproject.toml
-  webui/                 patched copy of hermes-webui  (CHAT_BACKEND=gateway)
-  skills/global/         read-only global skills (SKILL.md dirs)
-  config/global.mcp.json global MCP servers (merged for every user)
-  data/                  dev sqlite + per-user files  (gitignored)
-  scripts/               run / db-init helpers
-  docs/  PLAN.md  .env  .env.example
+  frontend/                 React SPA (Vite + TS); built to frontend/dist, served by the backend
+  skills/global/            read-only global skills (SKILL.md dirs) — seeded into the DB
+  config/global.mcp.json    global MCP servers — seeded into the DB
+  data/                     dev SQLite DBs + per-user workspace files (gitignored)
+  docs/  PLAN.md  README.md  CLAUDE.md  .env
 ```
 
-## 6. Gateway contract the backend implements (for hermes)
-- `GET  /healthz`, `GET /v1/models`
-- `POST /v1/chat/completions` — OpenAI-compatible **SSE** (default gateway path) — **MVP**
-- `POST /v1/runs` + `GET /v1/runs/{id}/events` + `POST /v1/runs/{id}/approvals/{aid}/respond` — SSE with tool-progress + `approval.request`
-- Per-user CRUD/config (all `X-User-Id`-scoped; global ids are read-only): `/v1/skills/*`, `/v1/mcp/servers/*`, `/v1/models/config*`, `/v1/memory*`
+## 6. API surface (all `/v1`, user-scoped; global ids read-only)
+- `GET /v1/health`, `GET /v1/models`
+- Auth: `POST /v1/auth/{signup,login,logout,forgot,reset,change-password}`, `GET /v1/auth/{me,available}`
+- `POST /v1/runs` + `GET /v1/runs/{id}/events` (SSE) + `/approvals/{aid}/respond` + `/cancel`
+- Config/CRUD: `/v1/skills/*`, `/v1/skills/content`, `/v1/mcp/servers/*`, `/v1/mcp/tools`, `/v1/models/config*`, `/v1/memory*`, `/v1/settings/ui`, `/v1/skins`
+- Sessions: `/v1/sessions*` (list/create/rename/delete/import/messages) · Workspace: `/v1/workspace/*`
 
-## 7. Required hermes-webui patches (all in `webui/`)
-1. **Config only** (no code): `HERMES_WEBUI_CHAT_BACKEND=gateway`,
-   `HERMES_WEBUI_GATEWAY_BASE_URL=http://localhost:8080`,
-   `HERMES_WEBUI_GATEWAY_API_KEY=<GATEWAY_API_KEY>`,
-   (phase 2) `HERMES_WEBUI_GATEWAY_USE_RUNS_API=true`.
-2. **Forward user identity** → add `X-User-Id` header on the gateway request (true multi-tenant isolation).
-3. **Forward session id** → `X-Thread-Id` so deepagents thread == hermes session.
-4. **Skills/MCP panels** → point "global (read-only) + user" management at backend endpoints (phase 3).
+## 7. Status / checklist
+> Current architecture for contributors is in **[CLAUDE.md](./CLAUDE.md)**; run modes in **[docs/RUNNING.md](./docs/RUNNING.md)**.
 
-## 8. Status / phased checklist
-> Detailed, current architecture for contributors is in **[CLAUDE.md](./CLAUDE.md)**.
+- [x] **Scaffold** — persistence factory, agent factory, health, chat SSE, dev SQLite.
+- [x] **Runs API + HITL** — `/v1/runs` + SSE + approvals; every MCP/plugin tool gated in run mode.
+- [x] **Skills + MCP** — global (read-only) + per-user, runtime-loaded; full CRUD from the UI; 73 global skills; active MCP: jira (http), web-search (uvx duckduckgo), demo.
+- [x] **Models / providers** — DB catalog, 5 provider types via `build_model_for`; Settings → Providers CRUD; keys masked.
+- [x] **React SPA** — Vite + React 19 + TS (assistant-ui, Tailwind v4, shadcn, TanStack Query, i18n 16 langs, media rendering). **Single FastAPI server** via `app.frontend()`. Real auth (signup/login/forgot-OTP). **Legacy hermes-webui removed.**
+- [x] **Relational-DB refactor** — all app data → SQLAlchemy (dev SQLite / prod Postgres via `APP_ENV`); Fernet secrets-at-rest; identity = `User.id`; memory → `UserConfig`; DB→agent bridge `dbfs.py`; frontend prefs → `/v1/settings/ui`; Alembic baseline. **Validated live (HTTP + browser).**
+- [x] **Credentials** — provider secrets Fernet-encrypted at rest in the DB (no plaintext files).
+- [~] **Prod Postgres** — store+saver + app DB on isolated `joyjoy_db` proven; load test + sandboxed `execute` still pending.
+- [ ] **Ops** — docker-compose (backend + postgres), CI; pin provider SDKs (`langchain-anthropic`/`-aws`/`-google-genai`) into `pyproject.toml`.
 
-- [x] **Phase 0 — scaffold**: persistence factory, agent factory, `/healthz`, `/v1/chat/completions`, dev SQLite — **DONE & validated** (streaming SSE, cross-thread persistence, tenant isolation).
-- [x] **Phase 1 — wire UI**: gateway mode; multi-user accounts (`alice`/`bob`) with per-user **backend** isolation proven; gateway **heartbeat** endpoint added; **per-user conversation sidebar** (session→owner map, `/api/sessions` filtered). **DONE & validated in-browser**.
-- [x] **Phase 2 — runs API**: `/v1/runs` + `/v1/runs/{id}/events` (SSE) + `/respond` approvals + `/v1/capabilities`. HITL: every MCP/plugin tool is gated for approval in run mode. **DONE & validated** (live tool card → Allow once → resume).
-- [x] **Phase 3 — skills + MCP**: global (read-only) + per-user, runtime-loaded (no recompile). Skills = disk `skills/global/` + per-user store; MCP = `config/global.mcp.json` + `data/users/<uid>/mcp.json` (langchain-mcp-adapters). **Full CRUD from the UI** (Skills / MCP / Memory tabs). 72 Hermes skills copied into global. Active MCP: `jira` (http), `web-search` (uvx duckduckgo), demo. **DONE & validated**.
-- [x] **Models / providers** *(added beyond the original plan)*: store-backed catalog — global `config/models.json` + per-user `data/users/<uid>/models.json` — managed from **Settings → Providers** (CRUD; global read-only). Five provider types via `agent.build_model_for` dispatch: `azure_openai`, `anthropic` (Azure AI Foundry/Claude), `bedrock`, `openai` (OpenAI-compatible), `gemini`. Keys live in the gitignored JSON files, masked in the UI; chat picker grouped by provider. **DONE & validated**.
-- [~] **Phase 4 — credentials**: per-user provider keys are handled via the Providers-tab catalog (plain **gitignored** JSON files). The encrypted `credentials` table (Fernet, `CREDENTIAL_ENCRYPTION_KEY`) is scaffolded for prod but is **not yet** the active store.
-- [~] **Phase 5 — prod Postgres**: prod store+saver on isolated **`joyjoy_db`** proven (conn pool; write / cross-thread / isolation). Load test + sandboxed `execute` still pending.
-- [ ] **Phase 6 — ops**: docker-compose (backend + webui + postgres), CI; pin provider SDKs (`langchain-anthropic` / `-aws` / `-google-genai`) into `pyproject.toml` (currently installed ad-hoc).
-
-**Also done:** Hermes fully uninstalled — joyjoy is standalone (its own venvs for backend + webui); the UI was de-Hermes rebranded (user-facing strings → "joyjoy"; internal `hermes` / `HERMES_WEBUI_*` / `X-Hermes-*` identifiers deliberately kept — they are load-bearing).
-
-## 8b. Runs queue & streaming — current design + agreed prod hardening (note)
-
+## 7b. Runs queue & streaming — current design + agreed prod hardening
 **Current (single-process — correct for now):** `backend/app/runs.py` uses one in-process
-`asyncio.Queue` per run (producer = a `_drive` task via `asyncio.create_task`; consumer =
-the `/v1/runs/{id}/events` SSE generator), an in-memory `_RUNS` registry, and
-`asyncio.Future`s for HITL approvals. This is the standard single-process SSE pattern —
-confirmed in-house: the sibling app **`ai_sdlc_dashboard`** uses the same `asyncio.Queue`
-+ `asyncio.create_task` model (no Celery/arq/taskiq, explicit `replicas: 1`), and it
-matches how LangGraph Platform splits state.
+`asyncio.Queue` per run (producer = a `_drive` task; consumer = the `/v1/runs/{id}/events`
+SSE generator), an in-memory `_RUNS` registry, and `asyncio.Future`s for HITL approvals —
+the standard single-process SSE pattern (mirrors the sibling `ai_sdlc_dashboard`).
 
-**Known weak spots (NOT urgent; fine for dev/single-host):**
-1. The runs queue is **unbounded** (no backpressure) — a chatty run with a disconnected client can grow memory.
-2. `_RUNS` is **in-memory** — runs/approvals are lost on restart, and `_RUNS` cleanup relies on the client hitting `/events`.
+**Known weak spots (fine for dev/single-host):** the queue is unbounded (no backpressure);
+`_RUNS` is in-memory (runs/approvals lost on restart).
 
-**Agreed prod-hardening path — mirror `ai_sdlc_dashboard` (NOT a task broker, NOT multi-replica):**
-- **Bound the queue:** `asyncio.Queue(maxsize=256)` + drop-oldest on overflow (exactly what `ai_sdlc_dashboard`'s `sse_manager.py` does).
-- **Durable run state in Redis:** run records + paused snapshots (with TTL) so a pod restart can resume; keep durable agent state in **Postgres** (already done). Redis here is for durability + cross-process signaling (pub/sub), **not** cross-replica fan-out.
-- **Stay single-pod** (`Recreate` deploy strategy). Don't add Celery/arq/taskiq unless run execution genuinely needs a distributed worker pool.
-- **Heavier options only if ever needed:** adopt LangGraph Platform's `langgraph-api` (productized runs+streaming), or Redis Streams/NATS + an async task queue (arq / taskiq / Procrastinate-on-Postgres).
+**Agreed prod-hardening path (NOT a task broker, NOT multi-replica):** bound the queue
+(`maxsize`, drop-oldest); durable run state in Redis (records + paused snapshots w/ TTL)
+for restart-resume, durable agent state already in Postgres; stay single-pod (`Recreate`).
+Heavier options only if needed: LangGraph Platform `langgraph-api`, or Redis Streams/NATS + arq/taskiq.
 
-## 9. To verify on first run (scaffold is written defensively for these)
-- langgraph `context=` kwarg on `ainvoke`/`astream` in 1.2.6 (else config-metadata fallback — the namespace factory already handles both).
-- Azure `o4-mini` tool-calling through deepagents.
-- `StoreBackend` namespace receives `AgentContext.user_id`.
-- `AsyncPostgresSaver` / `AsyncPostgresStore` `.setup()` against `langgraph_db`.
-
-## 10. Dev run (after scaffold)
+## 8. Dev run
 ```bash
-cd ~/joyjoy/backend
-uv venv && source .venv/bin/activate
-uv pip install -e .
-# APP_ENV=dev by default → SQLite + local files
-uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
-# smoke test:
-curl -s localhost:8080/healthz
+bash ~/joyjoy/scripts/serve.sh           # build SPA + serve everything on :8080
+# or:
+cd ~/joyjoy/backend && uv venv && uv pip install -e .
+.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080   # APP_ENV=dev → SQLite
+curl -s 127.0.0.1:8080/v1/health
 ```

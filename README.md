@@ -4,57 +4,61 @@
 
 # joyjoy
 
-Multi-tenant **Deep Agents** backend (single process, Postgres-backed) with
-**hermes-webui** as the chat UI.
+Multi-tenant **Deep Agents** assistant: a **single FastAPI process** that serves both
+the **React SPA** and the `/v1` API to many users, with **all application data in one
+relational database**.
 
-- One FastAPI process serves many users; isolation via per-user store namespaces + thread ids.
-- **Dev** = SQLite + local files. **Prod** = everything in Postgres (pods are stateless).
-- Backend speaks hermes-webui's **gateway** contract, so the existing UI just points at it.
+- **One process, many users** — per-user isolation via the authenticated identity (`User.id`) + LangGraph thread ids.
+- **Dev = SQLite, Prod = Postgres** — flip with the `APP_ENV` env var; *same code*, the DB URL is derived from it.
+- **No file-based CRUD stores** — accounts, skins, providers, models, MCP servers, skills, sessions, and per-user config/memory all live in the DB. Chat *messages* stay in LangGraph's checkpointer. Provider secrets are **Fernet-encrypted at rest**.
+- **React SPA** (Vite + React 19 + TypeScript, assistant-ui, Tailwind v4, shadcn, TanStack Query, i18n) is built to `frontend/dist` and served by the backend — no separate UI server.
 
-See **[PLAN.md](./PLAN.md)** for the full architecture, the "everything-in-Postgres"
-mapping, the required hermes patches, and the phased checklist.
+See **[docs/RUNNING.md](./docs/RUNNING.md)** for dev/prod run modes + the data
+architecture, **[PLAN.md](./PLAN.md)** for the architecture & checklist, and
+**[CLAUDE.md](./CLAUDE.md)** for contributor details.
 
 ## Layout
-- `backend/` — FastAPI + deepagents engine (the new backend)
-- `webui/` — patched copy of hermes-webui (the UI)
-- `skills/global/`, `config/global.mcp.json` — shared, read-only global skills/MCP
-- `data/` — dev sqlite + per-user files (gitignored)
-- `docs/branding/` — brand kit: logos (`svg/`, `png/`), favicons, and the brand guide (`README.md`)
+- `backend/` — FastAPI + deepagents engine; `app/db/` (13 SQLAlchemy models, async engine, Fernet, seeds), `app/dbfs.py` (DB→agent backend bridge), `alembic/` (migrations)
+- `frontend/` — the React SPA (built to `frontend/dist`, served by the backend) — see [frontend/README.md](./frontend/README.md)
+- `skills/global/`, `config/global.mcp.json` — shared, read-only global skills/MCP (seeded into the DB on first boot)
+- `data/` — dev SQLite DBs + per-user workspace files (gitignored)
+- `docs/branding/` — brand kit: logos, favicons, brand guide
 
-## Quick start (dev)
+## Quick start (dev — SQLite, zero external deps)
 
-**Easiest — bring up the whole stack** (idempotent; starts jira MCP `:9000` → backend `:8080` → webui `:8788`, skipping anything already running):
+**Build the SPA and serve everything from one process** (`:8080`):
 ```bash
-bash ~/joyjoy/scripts/start_all.sh
-# then open  http://127.0.0.1:8788   and log in as  alice  or  bob
+bash ~/joyjoy/scripts/serve.sh          # builds frontend/ then starts the backend
+# open http://127.0.0.1:8080  → sign up, then log in
 ```
 
-Or run the two halves by hand:
-
-### 1. Backend — FastAPI + deepagents (`:8080`)
-Start it **from `backend/`** so it loads `../.env`:
+Or run the pieces by hand:
 ```bash
+# backend (APP_ENV=dev → SQLite at data/joyjoy.db; serves the prebuilt SPA + /v1)
 cd ~/joyjoy/backend
-uv venv && uv pip install -e .          # first time (uv-managed venv; no pip inside it)
-.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080   # APP_ENV=dev → SQLite + local files
-curl -s localhost:8080/healthz
+uv venv && uv pip install -e .          # first time (uv-managed venv)
+.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080
+curl -s 127.0.0.1:8080/v1/health
+
+# frontend (only when iterating on UI; Vite dev server with API proxy)
+cd ~/joyjoy/frontend && npm install && npm run dev      # :5173
+# or just rebuild the bundle the backend serves:  npm run build
 ```
 
-### 2. Frontend — patched hermes-webui in gateway mode (`:8788`)
-The webui has its **own** venv and talks to the backend over the gateway contract:
-```bash
-cd ~/joyjoy/webui
-bash ~/joyjoy/scripts/make_webui_venv.sh   # first time → creates webui/.venv
-HERMES_WEBUI_CHAT_BACKEND=gateway \
-HERMES_WEBUI_GATEWAY_BASE_URL=http://127.0.0.1:8080 \
-HERMES_WEBUI_GATEWAY_API_KEY=dev-gateway-key-change-me \
-HERMES_WEBUI_GATEWAY_USE_RUNS_API=true \
-HERMES_WEBUI_HOST=127.0.0.1 HERMES_WEBUI_PORT=8788 \
-HERMES_WEBUI_STATE_DIR="$HOME/joyjoy/webui-state" \
-.venv/bin/python server.py
-# open  http://127.0.0.1:8788
-```
+**Whole stack** (jira MCP `:9000` → backend `:8080`, idempotent):
+`bash ~/joyjoy/scripts/start_all.sh` (build the SPA first if it's stale).
 
-Restart just one service after edits: `scripts/restart_backend.sh` · `scripts/restart_webui.sh`.
+On first boot the backend creates the tables and seeds the shipped catalogs
+(skins, providers, base models, global MCP servers, 73 global skills). When not
+signed in, dev falls back to a seeded **dev user** so the agent works without login.
 
-**Models** are managed in the UI under **Settings → Providers** (Azure OpenAI, Azure AI Foundry/Claude, Bedrock, OpenAI-compatible, Gemini) or by editing `config/models.json` directly. Architecture details for contributors live in **[CLAUDE.md](./CLAUDE.md)**.
+**Models** are managed in the UI under **Settings → Providers** (Azure OpenAI,
+Azure AI Foundry/Claude, Bedrock, OpenAI-compatible, Gemini) — keys are
+Fernet-encrypted at rest and masked in the UI. **Skills**, **MCP**, and **Memory**
+have their own tabs (global = read-only; per-user = full CRUD).
+
+## Prod (Postgres)
+Set `APP_ENV=prod` + `DATABASE_URL=postgresql://…` (and `CREDENTIAL_ENCRYPTION_KEY`,
+`JWT_SECRET` — generated on first boot if blank). The app DB and the LangGraph
+checkpointer share one Postgres database via disjoint tables. Details in
+[docs/RUNNING.md](./docs/RUNNING.md).
