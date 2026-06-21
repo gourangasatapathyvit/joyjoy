@@ -32,12 +32,20 @@ def verify_gateway_key(request: Request, settings: Settings) -> None:
 
 
 def resolve_user_id(request: Request, settings: Settings) -> str:
-    # 1) explicit forwarded identity (preferred; set by the hermes patch)
+    # 1) explicit forwarded identity (preferred; set by a proxy / the dev Vite server)
     uid = request.headers.get(settings.user_id_header.lower())
     if uid:
         return uid.strip()
 
-    # 2) JWT subject (direct clients / production without a forwarding proxy)
+    # 2) same-origin SPA cookie. When FastAPI serves the built SPA itself (single-
+    #    server / Phase 4) there's no forwarding proxy and EventSource can't send a
+    #    header — the app sets a `joyjoy_uid` cookie on sign-in, sent on every
+    #    same-origin fetch *and* the SSE stream.
+    cookie_uid = request.cookies.get("joyjoy_uid")
+    if cookie_uid:
+        return cookie_uid.strip()
+
+    # 3) JWT subject (direct clients / production without a forwarding proxy)
     token = _bearer(request)
     if token and settings.jwt_secret:
         try:
@@ -54,7 +62,7 @@ def resolve_user_id(request: Request, settings: Settings) -> str:
         if sub:
             return str(sub)
 
-    # 3) dev fallback
+    # 4) dev fallback
     if not settings.is_prod:
         return settings.dev_default_user
 

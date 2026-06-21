@@ -26,8 +26,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
+from . import media as media_mod
 from . import runs as runs_mod
 from . import sessions as sessions_mod
+from . import usersettings as usersettings_mod
 from . import workspace as workspace_mod
 from .agent import (
     PROVIDER_TYPES,
@@ -366,6 +368,25 @@ async def workspace_file(request: Request):
     return JSONResponse(data)
 
 
+@app.get("/v1/media")
+async def media_get(request: Request):
+    """Serve a local media file referenced by an absolute path (a chat ``MEDIA:``
+    marker). Confined to the user's workspace / home / mounted drives, type- and
+    size-checked. Used for imported conversations + the LLM's MEDIA convention."""
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    res = media_mod.resolve_media(settings, uid, request.query_params.get("path") or "")
+    if res is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    full, mime = res
+    if request.query_params.get("convert") == "pdf" and media_mod.is_office(full):
+        pdf = await media_mod.office_to_pdf(full)
+        if not pdf:
+            return JSONResponse({"error": "conversion unavailable"}, status_code=502)
+        return FileResponse(pdf, media_type="application/pdf")
+    return FileResponse(full, media_type=mime)
+
+
 @app.get("/v1/workspace/raw")
 async def workspace_raw(request: Request):
     """Serve a workspace file's raw bytes (images, PDFs, downloads)."""
@@ -376,6 +397,11 @@ async def workspace_raw(request: Request):
     if res is None:
         return JSONResponse({"error": "not found"}, status_code=404)
     full, mime = res
+    if request.query_params.get("convert") == "pdf" and media_mod.is_office(full):
+        pdf = await media_mod.office_to_pdf(full)
+        if not pdf:
+            return JSONResponse({"error": "conversion unavailable"}, status_code=502)
+        return FileResponse(pdf, media_type="application/pdf")
     return FileResponse(full, media_type=mime)
 
 
@@ -432,6 +458,22 @@ async def workspace_upload(request: Request):
             settings, uid, ws, str(form.get("dir") or ""), getattr(up, "filename", "upload"), data
         )
     )
+
+
+# ── Per-user UI settings (sidebar tab order). Dev → JSON file, prod → Postgres. ──
+@app.get("/v1/settings/ui")
+async def settings_ui_get(request: Request):
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    return await usersettings_mod.read_ui(settings, request.app.state.store, uid)
+
+
+@app.put("/v1/settings/ui")
+async def settings_ui_put(request: Request):
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    body = await _json(request)
+    return JSONResponse(await usersettings_mod.write_ui(settings, request.app.state.store, uid, body))
 
 
 def _last_user_text(messages: list) -> str:
@@ -628,6 +670,22 @@ async def sessions_messages(thread_id: str, request: Request):
     return {"thread_id": thread_id, "messages": msgs}
 
 
+@app.post("/v1/sessions/import")
+async def sessions_import(request: Request):
+    """Create a new conversation from an imported messages array."""
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    body = await _json(request)
+    agent = await get_run_agent(
+        settings, request.app.state.checkpointer, request.app.state.store, resolve_model(settings, None, uid), uid
+    )
+    return JSONResponse(
+        await sessions_mod.import_session(
+            agent, request.app.state.store, uid, body.get("messages") or [], body.get("title")
+        )
+    )
+
+
 @app.patch("/v1/sessions/{thread_id}")
 async def sessions_rename(thread_id: str, request: Request):
     verify_gateway_key(request, settings)
@@ -650,3 +708,17 @@ async def sessions_delete(thread_id: str, request: Request):
             request.app.state.store, request.app.state.checkpointer, uid, thread_id
         )
     )
+
+
+# ── Serve the built React SPA (single-server / Phase 4) ──────────────────────
+# FastAPI 0.138+'s `app.frontend()` serves the Vite `dist` as LOW-PRIORITY routes:
+# the /v1 API, /static and favicons are matched first, and the frontend (hashed
+# assets + index.html) only if nothing else matched. `fallback="auto"` returns
+# index.html for unmatched client routes so /settings, /signin, … resolve on
+# direct navigation / refresh. Gated on the build existing so dev (no dist) is fine.
+_FRONTEND_DIST = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")
+)
+if os.path.isfile(os.path.join(_FRONTEND_DIST, "index.html")):
+    app.frontend("/", directory=_FRONTEND_DIST, fallback="auto")
+    logger.info("serving SPA from %s", _FRONTEND_DIST)

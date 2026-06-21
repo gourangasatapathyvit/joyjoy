@@ -8,6 +8,7 @@ Conversation messages are read straight from the checkpointer's saved state.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
@@ -176,7 +177,8 @@ async def owns_session(store, user_id: str, thread_id: str) -> bool:
 
 def _serialize_message(m: Any) -> dict | None:
     """Convert a stored LangChain BaseMessage (or raw dict) to a wire dict the
-    frontend can rebuild: {role, content, tool_calls?, tool_call_id?, name?}."""
+    frontend can rebuild: {role, content, tool_calls?, tool_call_id?, name?, media?}."""
+    from app import media as media_mod
     from app.agent import _content_to_text  # local import avoids any import cycle
 
     role_map = {"human": "user", "ai": "assistant", "tool": "tool", "system": "system"}
@@ -196,6 +198,9 @@ def _serialize_message(m: Any) -> dict | None:
             out["tool_call_id"] = m.tool_call_id
         if getattr(m, "name", None):
             out["name"] = m.name
+        media = media_mod.media_from_message(m)
+        if media:
+            out["media"] = media
         return out
     if isinstance(m, dict) and m.get("role"):
         return {"role": m["role"], "content": str(m.get("content") or "")}
@@ -213,3 +218,70 @@ async def get_thread_messages(agent, user_id: str, thread_id: str) -> list[dict]
     values = getattr(snap, "values", None)
     msgs = (values.get("messages") if isinstance(values, dict) else None) or []
     return [d for m in msgs if (d := _serialize_message(m))]
+
+
+def _deserialize_message(d: dict):
+    """Inverse of ``_serialize_message`` — a wire dict back to a LangChain message
+    for importing a previously-exported conversation. Accepts BOTH joyjoy's own
+    export shape (``tool_calls: [{id, name, args}]``) and the OpenAI / hermes shape
+    (``tool_calls: [{id, call_id, function: {name, arguments}}]`` where ``arguments``
+    is a JSON string)."""
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+
+    role = (d or {}).get("role")
+    content = (d or {}).get("content") or ""
+    if role == "user":
+        return HumanMessage(content=content)
+    if role == "assistant":
+        tool_calls = []
+        for t in d.get("tool_calls") or []:
+            fn = t.get("function") or {}
+            name = t.get("name") or fn.get("name")
+            if not name:
+                continue
+            args = t.get("args")
+            if args is None:
+                raw = fn.get("arguments")
+                if isinstance(raw, dict):
+                    args = raw
+                elif isinstance(raw, str) and raw.strip():
+                    try:
+                        args = json.loads(raw)
+                    except ValueError:
+                        args = {}
+                else:
+                    args = {}
+            tool_calls.append(
+                {"id": t.get("id") or t.get("call_id") or "", "name": name, "args": args or {}}
+            )
+        return AIMessage(content=content, tool_calls=tool_calls)
+    if role == "tool":
+        return ToolMessage(
+            content=content,
+            tool_call_id=d.get("tool_call_id") or d.get("call_id") or "imported",
+            name=d.get("name") or d.get("tool_name"),
+        )
+    if role == "system":
+        return SystemMessage(content=content)
+    return None
+
+
+async def import_session(agent, store, user_id: str, messages: list, title: str | None = None) -> dict:
+    """Create a NEW thread from imported messages (writes them to the graph state)."""
+    msgs = [m for d in (messages or []) if (m := _deserialize_message(d))]
+    if not msgs:
+        return {"ok": False, "error": "no messages to import"}
+    thread_id = "t-" + uuid.uuid4().hex
+    config = {"configurable": {"thread_id": thread_id, "user_id": user_id, "checkpoint_ns": ""}}
+    try:
+        await agent.aupdate_state(config, {"messages": msgs})
+    except Exception:
+        logger.warning("import aupdate_state failed", exc_info=True)
+        return {"ok": False, "error": "import failed"}
+    first_user = next(
+        (d.get("content") for d in messages if (d or {}).get("role") == "user"), ""
+    )
+    await record_session(
+        store, user_id, thread_id, first_text=(title or first_user or "Imported chat")
+    )
+    return {"ok": True, "thread_id": thread_id, "count": len(msgs)}

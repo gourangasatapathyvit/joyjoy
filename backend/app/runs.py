@@ -22,6 +22,7 @@ import uuid
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langgraph.types import Command
 
+from . import media as media_mod
 from .agent import _content_to_text, reasoning_text_from_message
 from .context import AgentContext
 
@@ -101,10 +102,14 @@ async def _stream_segment(run: _Run, agent_input):
                                         toolCallId=tc.get("id"), args=tc.get("args") or {}, label=tc.get("name"))
                     elif isinstance(m, ToolMessage):
                         err = getattr(m, "status", None) == "error"
+                        # Binary read_file results carry base64 media blocks (otherwise
+                        # flattened away by _content_to_text) — surface them for rendering.
+                        media = media_mod.media_from_message(m)
                         await _emit(run, "tool.completed", tool=getattr(m, "name", None),
                                     name=getattr(m, "name", None), toolCallId=getattr(m, "tool_call_id", None),
                                     status="error" if err else "completed", is_error=err,
-                                    result=_content_to_text(getattr(m, "content", ""))[:4000])
+                                    result=_content_to_text(getattr(m, "content", ""))[:4000],
+                                    media=media)
     return ("interrupt", interrupt_val) if interrupt_val is not None else ("done", None)
 
 
