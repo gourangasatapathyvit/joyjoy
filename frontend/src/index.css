@@ -146,3 +146,84 @@
 	content-visibility: visible !important;
 	contain-intrinsic-size: auto !important;
 }
+
+/* Rendered markdown (skill detail, and reusable elsewhere) — webui prose feel. */
+.markdown-body {
+	font-size: 0.875rem;
+	line-height: 1.7;
+	color: var(--foreground);
+}
+.markdown-body > :first-child {
+	margin-top: 0;
+}
+.markdown-body h1 {
+	font-size: 1.375rem;
+	font-weight: 700;
+	margin: 1.4rem 0 0.6rem;
+	padding-bottom: 0.3rem;
+	border-bottom: 1px solid var(--border);
+}
+.markdown-body h2 {
+	font-size: 1.15rem;
+	font-weight: 600;
+	margin: 1.2rem 0 0.5rem;
+}
+.markdown-body h3 {
+	font-size: 1rem;
+	font-weight: 600;
+	margin: 1rem 0 0.35rem;
+}
+.markdown-body p {
+	margin: 0 0 0.7rem;
+}
+.markdown-body ul {
+	list-style: disc;
+	margin: 0 0 0.7rem;
+	padding-left: 1.3rem;
+}
+.markdown-body ol {
+	list-style: decimal;
+	margin: 0 0 0.7rem;
+	padding-left: 1.3rem;
+}
+.markdown-body li {
+	margin-bottom: 0.25rem;
+}
+.markdown-body a {
+	color: var(--primary);
+	text-decoration: underline;
+}
+.markdown-body code {
+	background: var(--muted);
+	border-radius: 4px;
+	padding: 0.1rem 0.35rem;
+	font-size: 0.82em;
+}
+.markdown-body pre {
+	background: var(--muted);
+	border-radius: 8px;
+	padding: 0.8rem;
+	overflow-x: auto;
+	margin: 0 0 0.8rem;
+}
+.markdown-body pre code {
+	background: transparent;
+	padding: 0;
+	font-size: 0.8rem;
+}
+.markdown-body blockquote {
+	border-left: 3px solid var(--border);
+	padding-left: 0.8rem;
+	margin: 0 0 0.7rem;
+	color: var(--muted-foreground);
+}
+.markdown-body table {
+	border-collapse: collapse;
+	margin: 0 0 0.7rem;
+	font-size: 0.8rem;
+}
+.markdown-body th,
+.markdown-body td {
+	border: 1px solid var(--border);
+	padding: 0.3rem 0.6rem;
+}

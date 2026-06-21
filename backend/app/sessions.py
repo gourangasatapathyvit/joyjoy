@@ -37,10 +37,20 @@ def _value(item: Any) -> dict | None:
 
 
 async def record_session(
-    store, user_id: str, thread_id: str, *, first_text: str | None = None, model: str | None = None
+    store,
+    user_id: str,
+    thread_id: str,
+    *,
+    first_text: str | None = None,
+    model: str | None = None,
+    workspace_id: str | None = None,
 ) -> None:
     """Upsert a session on run start: create with a title derived from the first
-    message, or bump ``updated_at`` (and backfill the title) for an existing one."""
+    message, or bump ``updated_at`` (and backfill the title) for an existing one.
+
+    Each session carries a ``workspace_id`` (defaults to its own ``thread_id``) —
+    the key for its per-session workspace dir. A forked session shares the
+    parent's ``workspace_id`` so both point at the same files."""
     ns = _ns(user_id)
     existing = None
     try:
@@ -55,6 +65,8 @@ async def record_session(
             val["model"] = model
         if first_text and (not val.get("title") or val.get("title") == "New chat"):
             val["title"] = _title_from_text(first_text)
+        if not val.get("workspace_id"):
+            val["workspace_id"] = workspace_id or thread_id
     else:
         val = {
             "thread_id": thread_id,
@@ -62,11 +74,45 @@ async def record_session(
             "created_at": now,
             "updated_at": now,
             "model": model or "",
+            "workspace_id": workspace_id or thread_id,
         }
     try:
         await store.aput(ns, thread_id, val)
     except Exception:
         logger.warning("record_session failed", exc_info=True)
+
+
+async def workspace_id_for(store, user_id: str, thread_id: str) -> str:
+    """The workspace-dir key for a thread: the session's stored ``workspace_id``,
+    else the ``thread_id`` itself (so a brand-new chat gets its own workspace)."""
+    if not thread_id:
+        return "default"
+    try:
+        val = _value(await store.aget(_ns(user_id), thread_id))
+    except Exception:
+        val = None
+    return (val or {}).get("workspace_id") or thread_id
+
+
+async def fork_session(
+    store, user_id: str, src_thread_id: str, *, title: str | None = None
+) -> dict:
+    """Create a new session that SHARES the source session's workspace (same
+    files) by inheriting its ``workspace_id``."""
+    src = _value(await store.aget(_ns(user_id), src_thread_id)) or {}
+    thread_id = "t-" + uuid.uuid4().hex
+    now = time.time()
+    val = {
+        "thread_id": thread_id,
+        "title": (title or src.get("title") or "New chat"),
+        "created_at": now,
+        "updated_at": now,
+        "model": src.get("model", ""),
+        "workspace_id": src.get("workspace_id") or src_thread_id,
+        "forked_from": src_thread_id,
+    }
+    await store.aput(_ns(user_id), thread_id, val)
+    return val
 
 
 async def list_sessions(store, user_id: str, limit: int = 200) -> list[dict]:
@@ -89,6 +135,7 @@ async def create_session(store, user_id: str, title: str | None = None) -> dict:
         "created_at": now,
         "updated_at": now,
         "model": "",
+        "workspace_id": thread_id,
     }
     await store.aput(_ns(user_id), thread_id, val)
     return val

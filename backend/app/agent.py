@@ -18,12 +18,14 @@ import json
 import logging
 import os
 import re
+from pathlib import Path
 
 from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend, FilesystemBackend, StoreBackend
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_openai import AzureChatOpenAI
+from langgraph.runtime import get_runtime
 from langgraph.store.base import BaseStore
 
 from .config import Settings
@@ -218,6 +220,50 @@ def _user_namespace(rt: object) -> tuple[str, ...]:
     return (str(uid or "anonymous"), "fs")
 
 
+def _session_workspace_seg() -> str | None:
+    """The current session's workspace key from the runtime context
+    (``workspace_id`` or ``thread_id``), or None when called outside a run."""
+    try:
+        rt = get_runtime()
+    except Exception:
+        return None
+    ctx = getattr(rt, "context", None)
+    seg = getattr(ctx, "workspace_id", None) or getattr(ctx, "thread_id", None)
+    if not seg:
+        cfg = getattr(rt, "config", None)
+        conf = cfg.get("configurable", {}) if isinstance(cfg, dict) else {}
+        seg = conf.get("workspace_id") or conf.get("thread_id")
+    if not seg:
+        return None
+    seg = re.sub(r"[^A-Za-z0-9._-]", "_", str(seg))[:128]
+    return seg or None
+
+
+class SessionFilesystemBackend(FilesystemBackend):
+    """A ``FilesystemBackend`` whose root is ``<base>/<session>`` — resolved PER
+    OPERATION from the runtime (``workspace_id`` or ``thread_id``). Each chat thus
+    gets its own working dir, while ``/memory`` and ``/skills`` stay user-scoped.
+    Forked chats share a ``workspace_id`` → the same dir. One cached agent (per
+    user/model) still serves every session: the root is computed at file-op time,
+    not at construction."""
+
+    @property
+    def cwd(self) -> Path:
+        seg = _session_workspace_seg()
+        root = (self._base / seg) if seg else self._base
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            logger.debug("workspace mkdir failed: %s", root, exc_info=True)
+        return root
+
+    @cwd.setter
+    def cwd(self, value) -> None:
+        # FilesystemBackend.__init__ assigns self.cwd = root_dir; capture it as the
+        # per-user base, then the getter appends the per-session segment.
+        self._base = Path(value).resolve() if value else Path.cwd()
+
+
 def build_backend(settings: Settings, store: BaseStore, user_id: str = "default"):
     """Composite backend — per-user HOST workspace for the agent's files.
 
@@ -234,7 +280,7 @@ def build_backend(settings: Settings, store: BaseStore, user_id: str = "default"
     uid = str(user_id or "default")
     host_root = os.path.join(settings.user_data_root, uid, "workspace")
     os.makedirs(host_root, exist_ok=True)
-    working_fs = FilesystemBackend(root_dir=host_root, virtual_mode=True)
+    working_fs = SessionFilesystemBackend(root_dir=host_root, virtual_mode=True)
     routes: dict[str, object] = {
         "/memory/": user_store,
         "/skills/user/": user_store,

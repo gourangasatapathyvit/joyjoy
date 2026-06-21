@@ -215,3 +215,19 @@ export interface ModelTestResult {
 		error?: string;
 	};
 }
+
+// ── Workspace (the agent's per-user working-dir file browser) ──────────────
+export interface WorkspaceNode {
+	name: string;
+	path: string;
+	type: "dir" | "file";
+	size?: number;
+	children?: WorkspaceNode[];
+}
+export interface WorkspaceFileContent {
+	path: string;
+	content: string;
+	size: number;
+	truncated: boolean;
+	binary: boolean;
+}

@@ -28,6 +28,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from . import runs as runs_mod
 from . import sessions as sessions_mod
+from . import workspace as workspace_mod
 from .agent import (
     PROVIDER_TYPES,
     chunk_text,
@@ -336,6 +337,103 @@ async def memory_write(request: Request):
     return JSONResponse(await write_memory(request.app.state.store, uid, body.get("section"), body.get("content")))
 
 
+# ── Workspace (PER-SESSION file browser + CRUD over the agent's working dir) ──
+# Every route takes a thread_id and resolves it to the session's workspace_id
+# (defaults to the thread_id; a forked chat shares its parent's) so the dock
+# shows exactly the dir the agent reads/writes for that conversation.
+async def _ws_id(request: Request, uid: str, thread_id) -> str:
+    return await sessions_mod.workspace_id_for(request.app.state.store, uid, str(thread_id or ""))
+
+
+@app.get("/v1/workspace/tree")
+async def workspace_tree(request: Request):
+    """The session's workspace file tree (the dir the agent reads/writes)."""
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    ws = await _ws_id(request, uid, request.query_params.get("thread_id"))
+    return {"tree": workspace_mod.build_tree(settings, uid, ws)}
+
+
+@app.get("/v1/workspace/file")
+async def workspace_file(request: Request):
+    """Read one workspace file (UTF-8 text; binary files are flagged)."""
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    ws = await _ws_id(request, uid, request.query_params.get("thread_id"))
+    data = workspace_mod.read_file(settings, uid, ws, request.query_params.get("path") or "")
+    if data is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse(data)
+
+
+@app.get("/v1/workspace/raw")
+async def workspace_raw(request: Request):
+    """Serve a workspace file's raw bytes (images, PDFs, downloads)."""
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    ws = await _ws_id(request, uid, request.query_params.get("thread_id"))
+    res = workspace_mod.raw_file(settings, uid, ws, request.query_params.get("path") or "")
+    if res is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    full, mime = res
+    return FileResponse(full, media_type=mime)
+
+
+@app.post("/v1/workspace/save")
+async def workspace_save(request: Request):
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    body = await _json(request)
+    ws = await _ws_id(request, uid, body.get("thread_id"))
+    return JSONResponse(
+        workspace_mod.save_file(settings, uid, ws, body.get("path"), body.get("content", ""))
+    )
+
+
+@app.post("/v1/workspace/mkdir")
+async def workspace_mkdir(request: Request):
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    body = await _json(request)
+    ws = await _ws_id(request, uid, body.get("thread_id"))
+    return JSONResponse(workspace_mod.make_dir(settings, uid, ws, body.get("path")))
+
+
+@app.post("/v1/workspace/delete")
+async def workspace_delete(request: Request):
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    body = await _json(request)
+    ws = await _ws_id(request, uid, body.get("thread_id"))
+    return JSONResponse(workspace_mod.delete_path(settings, uid, ws, body.get("path")))
+
+
+@app.post("/v1/workspace/rename")
+async def workspace_rename(request: Request):
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    body = await _json(request)
+    ws = await _ws_id(request, uid, body.get("thread_id"))
+    return JSONResponse(workspace_mod.rename_path(settings, uid, ws, body.get("from"), body.get("to")))
+
+
+@app.post("/v1/workspace/upload")
+async def workspace_upload(request: Request):
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    form = await request.form()
+    up = form.get("file")
+    if up is None or not hasattr(up, "read"):
+        return JSONResponse({"ok": False, "error": "no file"}, status_code=400)
+    data = await up.read()
+    ws = await _ws_id(request, uid, form.get("thread_id"))
+    return JSONResponse(
+        workspace_mod.save_upload(
+            settings, uid, ws, str(form.get("dir") or ""), getattr(up, "filename", "upload"), data
+        )
+    )
+
+
 def _last_user_text(messages: list) -> str:
     for m in reversed(messages or []):
         if (m or {}).get("role") == "user":
@@ -453,12 +551,15 @@ async def create_run(request: Request):
     reasoning = body.get("reasoning_effort")
     if reasoning is None:
         reasoning = body.get("reasoning")
-    ctx = AgentContext(user_id=user_id, thread_id=thread_id)
+    ws_id = await sessions_mod.workspace_id_for(request.app.state.store, user_id, thread_id)
+    ctx = AgentContext(user_id=user_id, thread_id=thread_id, workspace_id=ws_id)
     agent = await get_run_agent(settings, request.app.state.checkpointer, request.app.state.store, model, user_id, reasoning=reasoning)
     run_id = await runs_mod.start_run(agent, ctx, text)
-    logger.info("run start id=%s user=%s thread=%s model=%s reasoning=%s", run_id, user_id, thread_id, model, reasoning)
+    logger.info("run start id=%s user=%s thread=%s ws=%s model=%s reasoning=%s", run_id, user_id, thread_id, ws_id, model, reasoning)
     try:
-        await sessions_mod.record_session(request.app.state.store, user_id, thread_id, first_text=text, model=model)
+        await sessions_mod.record_session(
+            request.app.state.store, user_id, thread_id, first_text=text, model=model, workspace_id=ws_id
+        )
     except Exception:  # noqa: BLE001
         logger.warning("record_session failed", exc_info=True)
     return JSONResponse({"run_id": run_id, "id": run_id, "status": "running", "model": model})

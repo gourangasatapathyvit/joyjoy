@@ -15,3 +15,6 @@ class AgentContext:
     user_id: str
     thread_id: str | None = None
     is_admin: bool = False
+    # Per-session workspace key (defaults to thread_id; a forked chat inherits the
+    # parent's so both share one workspace dir). Read by the filesystem backend.
+    workspace_id: str | None = None
