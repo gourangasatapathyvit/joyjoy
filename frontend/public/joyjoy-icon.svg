@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#FFD9E8"/>
+      <stop offset="50%"  stop-color="#E0D4FF"/>
+      <stop offset="100%" stop-color="#CDE7FF"/>
+    </linearGradient>
+    <linearGradient id="head-border" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#FF3D81"/>
+      <stop offset="33%"  stop-color="#A855D6"/>
+      <stop offset="66%"  stop-color="#3A7BD5"/>
+      <stop offset="100%" stop-color="#3DB665"/>
+    </linearGradient>
+    <radialGradient id="led-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#FFFAE5"/>
+      <stop offset="40%"  stop-color="#FFD93D"/>
+      <stop offset="100%" stop-color="#FF8C42"/>
+    </radialGradient>
+    <radialGradient id="led-halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#FFD93D" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#FFD93D" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="chest" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"   stop-color="#FF3D81"/>
+      <stop offset="50%"  stop-color="#A855D6"/>
+      <stop offset="100%" stop-color="#3A7BD5"/>
+    </linearGradient>
+    <filter id="soft-shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="6"/>
+      <feOffset dx="0" dy="7"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.22"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- iOS-style rounded square background -->
+  <rect x="0" y="0" width="512" height="512" rx="112" ry="112" fill="url(#bg-grad)"/>
+
+  <!-- mascot scaled & centered: original was 400x440, we want roughly 360 tall, centered -->
+  <g transform="translate(56, 50) scale(1.0)">
+    <circle cx="200" cy="42" r="36" fill="url(#led-halo)"/>
+    <line x1="200" y1="95" x2="200" y2="55" stroke="#A855D6" stroke-width="10" stroke-linecap="round"/>
+    <circle cx="200" cy="42" r="15" fill="url(#led-glow)" stroke="#FF8C42" stroke-width="2.5"/>
+    <circle cx="195" cy="37" r="4" fill="#FFFFFF" opacity="0.9"/>
+    <g filter="url(#soft-shadow)">
+      <rect x="60" y="100" width="280" height="260" rx="54" ry="54"
+            fill="#FFFFFF" stroke="url(#head-border)" stroke-width="12"/>
+    </g>
+    <circle cx="60"  cy="220" r="10" fill="#A855D6"/>
+    <circle cx="340" cy="220" r="10" fill="#A855D6"/>
+    <circle cx="60"  cy="220" r="3.5" fill="#FFFFFF" opacity="0.7"/>
+    <circle cx="340" cy="220" r="3.5" fill="#FFFFFF" opacity="0.7"/>
+    <circle cx="152" cy="208" r="40" fill="#FF3D81"/>
+    <circle cx="248" cy="208" r="40" fill="#3A7BD5"/>
+    <circle cx="140" cy="196" r="12" fill="#FFFFFF"/>
+    <circle cx="236" cy="196" r="12" fill="#FFFFFF"/>
+    <circle cx="162" cy="220" r="5.5"  fill="#FFFFFF" opacity="0.85"/>
+    <circle cx="258" cy="220" r="5.5"  fill="#FFFFFF" opacity="0.85"/>
+    <ellipse cx="108" cy="272" rx="17" ry="10" fill="#FFB8D4" opacity="0.75"/>
+    <ellipse cx="292" cy="272" rx="17" ry="10" fill="#FFB8D4" opacity="0.75"/>
+    <path d="M158 295 Q200 328 242 295"
+          stroke="#FF6B1A" stroke-width="9" stroke-linecap="round" fill="none"/>
+    <rect x="155" y="370" width="90" height="24" rx="9" fill="url(#chest)" opacity="0.9"/>
+    <circle cx="178" cy="382" r="4" fill="#FFFFFF" opacity="0.9"/>
+    <circle cx="200" cy="382" r="4" fill="#FFFFFF" opacity="0.9"/>
+    <circle cx="222" cy="382" r="4" fill="#FFFFFF" opacity="0.9"/>
+  </g>
+</svg>

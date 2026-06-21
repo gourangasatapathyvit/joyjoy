@@ -27,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
 from . import runs as runs_mod
+from . import sessions as sessions_mod
 from .agent import (
     PROVIDER_TYPES,
     chunk_text,
@@ -456,6 +457,10 @@ async def create_run(request: Request):
     agent = await get_run_agent(settings, request.app.state.checkpointer, request.app.state.store, model, user_id, reasoning=reasoning)
     run_id = await runs_mod.start_run(agent, ctx, text)
     logger.info("run start id=%s user=%s thread=%s model=%s reasoning=%s", run_id, user_id, thread_id, model, reasoning)
+    try:
+        await sessions_mod.record_session(request.app.state.store, user_id, thread_id, first_text=text, model=model)
+    except Exception:  # noqa: BLE001
+        logger.warning("record_session failed", exc_info=True)
     return JSONResponse({"run_id": run_id, "id": run_id, "status": "running", "model": model})
 
 
@@ -487,3 +492,60 @@ async def run_approval_respond(run_id: str, approval_id: str, request: Request):
 async def run_cancel(run_id: str, request: Request):
     verify_gateway_key(request, settings)
     return JSONResponse({"ok": runs_mod.cancel_run(run_id)})
+
+
+# ── Sessions (conversation threads) — registry in the store, messages from the
+# checkpointer. Per-user via X-User-Id. ──────────────────────────────────────
+@app.get("/v1/sessions")
+async def sessions_list(request: Request):
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    return {"sessions": await sessions_mod.list_sessions(request.app.state.store, uid)}
+
+
+@app.post("/v1/sessions")
+async def sessions_create(request: Request):
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    return JSONResponse(await sessions_mod.create_session(request.app.state.store, uid, body.get("title")))
+
+
+@app.get("/v1/sessions/{thread_id}/messages")
+async def sessions_messages(thread_id: str, request: Request):
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    if not await sessions_mod.owns_session(request.app.state.store, uid, thread_id):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    agent = await get_run_agent(
+        settings, request.app.state.checkpointer, request.app.state.store, resolve_model(settings, None, uid), uid
+    )
+    msgs = await sessions_mod.get_thread_messages(agent, uid, thread_id)
+    return {"thread_id": thread_id, "messages": msgs}
+
+
+@app.patch("/v1/sessions/{thread_id}")
+async def sessions_rename(thread_id: str, request: Request):
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    return JSONResponse(
+        await sessions_mod.rename_session(request.app.state.store, uid, thread_id, body.get("title", ""))
+    )
+
+
+@app.delete("/v1/sessions/{thread_id}")
+async def sessions_delete(thread_id: str, request: Request):
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    return JSONResponse(
+        await sessions_mod.delete_session(
+            request.app.state.store, request.app.state.checkpointer, uid, thread_id
+        )
+    )

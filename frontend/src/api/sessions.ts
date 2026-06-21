@@ -1,0 +1,45 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { http } from "@/api/client";
+import type { Session, SessionMessageWire } from "@/api/types";
+
+type Ok = { ok: boolean; error?: string };
+
+export const sessionApi = {
+	list: () => http<{ sessions: Session[] }>("/v1/sessions"),
+	messages: (tid: string) =>
+		http<{ thread_id: string; messages: SessionMessageWire[] }>(
+			`/v1/sessions/${encodeURIComponent(tid)}/messages`,
+		),
+	create: (title?: string) =>
+		http<Session>("/v1/sessions", {
+			method: "POST",
+			body: JSON.stringify({ title: title ?? "" }),
+		}),
+	rename: (tid: string, title: string) =>
+		http<Ok>(`/v1/sessions/${encodeURIComponent(tid)}`, {
+			method: "PATCH",
+			body: JSON.stringify({ title }),
+		}),
+	remove: (tid: string) =>
+		http<Ok>(`/v1/sessions/${encodeURIComponent(tid)}`, { method: "DELETE" }),
+};
+
+export function useSessions() {
+	return useQuery({ queryKey: ["sessions"], queryFn: sessionApi.list });
+}
+
+export function useSessionMutations() {
+	const qc = useQueryClient();
+	const onSuccess = () => qc.invalidateQueries({ queryKey: ["sessions"] });
+	return {
+		rename: useMutation({
+			mutationFn: ({ tid, title }: { tid: string; title: string }) =>
+				sessionApi.rename(tid, title),
+			onSuccess,
+		}),
+		remove: useMutation({
+			mutationFn: (tid: string) => sessionApi.remove(tid),
+			onSuccess,
+		}),
+	};
+}
