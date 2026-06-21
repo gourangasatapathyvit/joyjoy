@@ -41,13 +41,15 @@ class Base(DeclarativeBase):
 # ── Accounts ─────────────────────────────────────────────────────────────────
 class User(Base):
     __tablename__ = "users"
+    # id is the tenant identity threaded everywhere (session-cookie `sub`); a
+    # surrogate uuid so username/email can change without breaking per-user FKs.
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    display_name: Mapped[str] = mapped_column(String(128), default="")
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+    # display_name lives in UserConfig (it's surfaced via /v1/settings/ui, not /auth/me)
 
 
 class PasswordReset(Base):
@@ -116,7 +118,9 @@ class GlobalMcp(Base):
 class UserConfig(Base):
     __tablename__ = "user_configs"
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(128), default="")  # Profile "display name"
     skin_id: Mapped[str | None] = mapped_column(ForeignKey("skins.id"), nullable=True)
+    theme: Mapped[str] = mapped_column(String(16), default="dark")  # dark | light | system (joyjoy brand = dark)
     auto_follow: Mapped[bool] = mapped_column(Boolean, default=True)
     activity_display: Mapped[str] = mapped_column(String(16), default="compact")
     sidebar_order: Mapped[list] = mapped_column(JSON, default=list)

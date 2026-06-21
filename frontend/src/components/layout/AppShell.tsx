@@ -17,6 +17,7 @@ import { FolderTree, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { useUiSettings, useUpdateUiSettings } from "@/api/usersettings";
+import { PrefsSync } from "@/components/PrefsSync";
 import { WorkspaceDock } from "@/components/chat/WorkspaceDock";
 import { orderTabs, type RailTab } from "@/lib/nav";
 import { cn } from "@/lib/utils";
@@ -105,6 +106,7 @@ export function AppShell() {
 
 	return (
 		<div className="flex h-svh w-full bg-background text-foreground">
+			<PrefsSync />
 			<nav className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border bg-sidebar py-2">
 				<Link
 					to="/"

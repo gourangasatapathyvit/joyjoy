@@ -1,8 +1,10 @@
 import { create } from "zustand";
+import { persistPref } from "@/api/prefs";
 
-// Appearance/UX preferences (theme itself is handled by next-themes). All
-// persisted to localStorage; skin is applied as a `data-skin` attr on <html>
-// which the CSS in index.css maps to accent-color overrides.
+// Appearance/UX preferences (theme itself is handled by next-themes). Mirrored to
+// BOTH localStorage (instant first paint) and the server (UserConfig, via
+// persistPref) so prefs follow the user across devices. Skin is applied as a
+// `data-skin` attr on <html> which the CSS in index.css maps to accent overrides.
 // (Sidebar tab ORDER is server-backed — see api/usersettings.ts — not here.)
 export type Skin = "default" | "ares" | "poseidon" | "sisyphus" | "mono";
 export type ActivityDisplay = "compact" | "stream";
@@ -63,13 +65,16 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 		lsSet(K.skin, skin);
 		applySkin(skin);
 		set({ skin });
+		persistPref({ skin });
 	},
 	setActivityDisplay: (activityDisplay) => {
 		lsSet(K.act, activityDisplay);
 		set({ activityDisplay });
+		persistPref({ activity_display: activityDisplay });
 	},
 	setAutoFollow: (autoFollow) => {
 		lsSet(K.follow, autoFollow ? "1" : "0");
 		set({ autoFollow });
+		persistPref({ auto_follow: autoFollow });
 	},
 }));

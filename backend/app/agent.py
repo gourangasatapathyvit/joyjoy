@@ -21,15 +21,30 @@ import re
 from pathlib import Path
 
 from deepagents import create_deep_agent
-from deepagents.backends import CompositeBackend, FilesystemBackend, StoreBackend
+from deepagents.backends import CompositeBackend, FilesystemBackend
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_openai import AzureChatOpenAI
 from langgraph.runtime import get_runtime
-from langgraph.store.base import BaseStore
+
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import select
 
 from .config import Settings
 from .context import AgentContext
+from .db import db_session, decrypt_secrets, encrypt
+from .db.models import (
+    GlobalMcp,
+    GlobalModel,
+    GlobalProvider,
+    GlobalSkill,
+    SkillFile,
+    UserConfig,
+    UserMcp,
+    UserModel,
+    UserSkill,
+)
+from .dbfs import MemoryBackend, UserSkillsBackend
 
 logger = logging.getLogger("joyjoy.agent")
 
@@ -94,7 +109,7 @@ def model_supports_reasoning(spec: dict) -> bool:
     return False
 
 
-def build_model_for(settings: Settings, model_id: str, uid: str | None = None, reasoning=None) -> BaseChatModel:
+async def build_model_for(settings: Settings, model_id: str, uid: str | None = None, reasoning=None) -> BaseChatModel:
     """Chat model for a registry model id, dispatched by ``spec['provider']``.
 
     Supported providers:
@@ -110,7 +125,7 @@ def build_model_for(settings: Settings, model_id: str, uid: str | None = None, r
     Provider SDKs are imported lazily so a missing optional package (e.g.
     langchain-aws / langchain-google-genai) never breaks the installed providers.
     """
-    specs = merged_model_specs(settings, uid)
+    specs = await merged_model_specs(settings, uid)
     spec = specs.get(model_id) or specs.get(settings.default_model) or next(iter(specs.values()))
     provider = (spec.get("provider") or "azure_openai").lower()
     effort = normalize_reasoning_effort(reasoning) if model_supports_reasoning(spec) else None
@@ -205,21 +220,6 @@ def build_model_for(settings: Settings, model_id: str, uid: str | None = None, r
     return AzureChatOpenAI(**azure_kwargs)
 
 
-def _user_namespace(rt: object) -> tuple[str, ...]:
-    """Scope every store operation to the calling user — the isolation boundary."""
-    uid = None
-    ctx = getattr(rt, "context", None)
-    if ctx is not None:
-        uid = getattr(ctx, "user_id", None)
-        if uid is None and isinstance(ctx, dict):
-            uid = ctx.get("user_id")
-    if not uid:
-        cfg = getattr(rt, "config", None)
-        if isinstance(cfg, dict):
-            uid = (cfg.get("configurable") or {}).get("user_id")
-    return (str(uid or "anonymous"), "fs")
-
-
 def _session_workspace_seg() -> str | None:
     """The current session's workspace key from the runtime context
     (``workspace_id`` or ``thread_id``), or None when called outside a run."""
@@ -264,7 +264,7 @@ class SessionFilesystemBackend(FilesystemBackend):
         self._base = Path(value).resolve() if value else Path.cwd()
 
 
-def build_backend(settings: Settings, store: BaseStore, user_id: str = "default"):
+def build_backend(settings: Settings, user_id: str = "default"):
     """Composite backend — per-user HOST workspace for the agent's files.
 
     - default (the agent's working files) → ``FilesystemBackend`` rooted at a real
@@ -272,18 +272,18 @@ def build_backend(settings: Settings, store: BaseStore, user_id: str = "default"
       ``virtual_mode=True`` so every op is confined there (``..``/``~``/absolute
       escapes are blocked). This is the SAME dir the webui workspace panel browses,
       so whatever the agent reads/writes shows up there — and nowhere else.
-    - ``/memory/`` and ``/skills/user/`` → per-user ``StoreBackend`` (kept in the
-      store so the memory/skills CRUD endpoints stay authoritative).
+    - ``/memory/`` → ``MemoryBackend`` (DB ``user_configs``) and ``/skills/user/`` →
+      ``UserSkillsBackend`` (DB ``user_skills``/``skill_files``) so the agent shares
+      one source of truth with the memory/skills CRUD endpoints.
     - ``/skills/global/`` → read-only global skills from disk (shared by all users).
     """
-    user_store = StoreBackend(store=store, namespace=_user_namespace)
     uid = str(user_id or "default")
-    host_root = os.path.join(settings.user_data_root, uid, "workspace")
+    host_root = os.path.join(settings.workspace_root_dir, uid, "workspace")
     os.makedirs(host_root, exist_ok=True)
     working_fs = SessionFilesystemBackend(root_dir=host_root, virtual_mode=True)
     routes: dict[str, object] = {
-        "/memory/": user_store,
-        "/skills/user/": user_store,
+        "/memory/": MemoryBackend(uid),
+        "/skills/user/": UserSkillsBackend(uid),
     }
     gdir = settings.global_skills_dir
     if gdir and os.path.isdir(gdir):
@@ -291,10 +291,10 @@ def build_backend(settings: Settings, store: BaseStore, user_id: str = "default"
     return CompositeBackend(default=working_fs, routes=routes)
 
 
-def resolve_model(settings: Settings, requested: str | None, uid: str | None = None) -> str:
+async def resolve_model(settings: Settings, requested: str | None, uid: str | None = None) -> str:
     """Return a valid model id for the requested one (or the default), considering
     the user's per-user models merged on top of the global catalog."""
-    specs = merged_model_specs(settings, uid)
+    specs = await merged_model_specs(settings, uid)
     if requested and requested in specs:
         return requested
     return settings.default_model if settings.default_model in specs else next(iter(specs))
@@ -303,18 +303,6 @@ def resolve_model(settings: Settings, requested: str | None, uid: str | None = N
 # ---------------------------------------------------------------------------
 # MCP plugins (global + per-user) → tools
 # ---------------------------------------------------------------------------
-def _parse_mcp_servers(path: str) -> dict:
-    try:
-        if path and os.path.isfile(path):
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-            servers = data.get("mcpServers") if isinstance(data, dict) else None
-            return servers if isinstance(servers, dict) else {}
-    except Exception:
-        logger.debug("failed to read mcp config %s", path, exc_info=True)
-    return {}
-
-
 def _expand_env_vars(value):
     """Expand ``${VAR}``/``$VAR`` (from os.environ) in strings / lists / dicts."""
     if isinstance(value, str):
@@ -361,17 +349,50 @@ def _to_connections(servers: dict) -> dict:
     return conns
 
 
-def _user_mcp_config_path(settings: Settings, user_id: str) -> str:
-    return os.path.join(settings.user_data_root, str(user_id or "default"), "mcp.json")
+def _split_lines(text: str | None) -> list[str]:
+    return [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
 
 
-def _merged_mcp_servers(settings: Settings, user_id: str) -> dict:
+def _parse_kv(text: str | None) -> dict:
+    """Parse ``KEY=value`` lines (env / headers textareas) into a dict."""
+    out: dict[str, str] = {}
+    for ln in (text or "").splitlines():
+        ln = ln.strip()
+        if not ln or "=" not in ln:
+            continue
+        k, _sep, v = ln.partition("=")
+        if k.strip():
+            out[k.strip()] = v.strip()
+    return out
+
+
+def _mcp_row_to_cfg(row) -> dict:
+    """An MCP table row -> the ``.mcp.json``-shaped cfg dict the connection builder
+    and the UI describe path expect (args as a list; env/headers as dicts)."""
+    cfg: dict = {"enabled": bool(row.is_active)}
+    if row.url:
+        cfg["url"] = row.url
+        cfg["transport"] = row.transport or "streamable_http"
+        if row.headers:
+            cfg["headers"] = _parse_kv(row.headers)
+    elif row.command:
+        cfg["command"] = row.command
+        cfg["args"] = _split_lines(row.args)
+        if row.env:
+            cfg["env"] = _parse_kv(row.env)
+    return cfg
+
+
+async def _merged_mcp_servers(user_id: str) -> dict:
     """{name: (cfg, scope)} — global servers first, per-user entries override/extend."""
     merged: dict[str, tuple[dict, str]] = {}
-    for name, cfg in _parse_mcp_servers(settings.mcp_global_config).items():
-        merged[name] = (cfg, "global")
-    for name, cfg in _parse_mcp_servers(_user_mcp_config_path(settings, user_id)).items():
-        merged[name] = (cfg, "user")
+    async with db_session() as s:
+        for g in (await s.scalars(select(GlobalMcp).order_by(GlobalMcp.name))).all():
+            merged[g.name] = (_mcp_row_to_cfg(g), "global")
+        if user_id:
+            urows = (await s.scalars(select(UserMcp).where(UserMcp.user_id == str(user_id)))).all()
+            for u in urows:
+                merged[u.name] = (_mcp_row_to_cfg(u), "user")
     return merged
 
 
@@ -380,7 +401,7 @@ async def load_mcp_tools(settings: Settings, user_id: str) -> list:
     skipped). Each server is loaded independently so one unreachable provider (e.g. a
     copied-but-not-running server) can't blank out everyone's tools."""
     conns = _to_connections({
-        n: cfg for n, (cfg, _s) in _merged_mcp_servers(settings, user_id).items()
+        n: cfg for n, (cfg, _s) in (await _merged_mcp_servers(user_id)).items()
         if not (isinstance(cfg, dict) and cfg.get("enabled") is False)
     })
     if not conns:
@@ -431,7 +452,7 @@ async def describe_mcp(settings: Settings, user_id: str) -> tuple[list[dict], li
     """
     servers_out: list[dict] = []
     tools_out: list[dict] = []
-    for name, (cfg, scope) in _merged_mcp_servers(settings, user_id).items():
+    for name, (cfg, scope) in (await _merged_mcp_servers(user_id)).items():
         conn = _to_connections({name: cfg})  # expanded — used only to probe
         cfg_d = cfg if isinstance(cfg, dict) else {}
         transport = "http" if cfg_d.get("url") else ("stdio" if cfg_d.get("command") else "unknown")
@@ -443,13 +464,11 @@ async def describe_mcp(settings: Settings, user_id: str) -> tuple[list[dict], li
             "enabled": enabled,
             "status": "configured",
             "tool_count": None,
-            # Display the ORIGINAL config (e.g. ${TAVILY_API_KEY} reference), never the
-            # expanded secret value or the internal PATH/HOME we inject for the subprocess.
+            # Show only command/args/url for display. env/headers are NEVER returned
+            # (they may hold ${VAR} secret refs / inline values) — the UI doesn't use them.
             "command": cfg_d.get("command"),
             "args": cfg_d.get("args") or [],
             "url": cfg_d.get("url"),
-            "env": cfg_d.get("env"),
-            "headers": cfg_d.get("headers"),
         }
         if not conn:
             entry["status"] = "invalid_config"
@@ -502,46 +521,31 @@ def _parse_skill_frontmatter(text: str, fallback_name: str) -> dict:
     return {"name": name, "description": desc}
 
 
-def _parse_skill_md(path: str, fallback_name: str) -> dict:
-    """Extract name+description from a SKILL.md file (best-effort)."""
-    return _parse_skill_frontmatter(_read_text(path), fallback_name)
-
-
-async def list_skills(settings: Settings, store: BaseStore | None, user_id: str) -> list[dict]:
-    """Global skills (read-only, from disk) + per-user skills (from the store)."""
+async def list_skills(settings: Settings, user_id: str) -> list[dict]:
+    """Global skills (read-only, ``global_skills`` table) + per-user skills
+    (``user_skills`` table) for the UI Skills tab."""
     skills: list[dict] = []
-    gdir = settings.global_skills_dir
-    if gdir and os.path.isdir(gdir):
-        for entry in sorted(os.listdir(gdir)):
-            sd = os.path.join(gdir, entry)
-            md = os.path.join(sd, "SKILL.md")
-            if os.path.isdir(sd) and os.path.isfile(md):
-                meta = _parse_skill_md(md, entry)
-                skills.append({**meta, "scope": "global", "editable": False, "enabled": True, "builtin": True})
-    # Per-user skills live in the store under /skills/user/<name>/SKILL.md
-    # (enabled) or SKILL.md.disabled (toggled off).
-    if store is not None:
-        try:
-            ns = (str(user_id or "default"), "fs")
-            items = await store.asearch(ns, limit=1000)
-            found: dict[str, dict] = {}
-            for it in items or []:
-                key = str(getattr(it, "key", "") or "").replace("\\", "/")
-                if "/skills/user/" not in key:
-                    continue
-                low = key.lower()
-                if not (low.endswith("/skill.md") or low.endswith("/skill.md.disabled")):
-                    continue
-                sname = key.split("/skills/user/", 1)[1].split("/", 1)[0]
-                if not sname:
-                    continue
-                en = not low.endswith(".disabled")
-                desc = _parse_skill_frontmatter(_store_item_text(it), sname).get("description", "")
-                if sname not in found or en:  # prefer the enabled record
-                    found[sname] = {"name": sname, "description": desc, "scope": "user", "editable": True, "enabled": en}
-            skills.extend(found.values())
-        except Exception:  # noqa: BLE001 - store layout varies; never break the global list
-            logger.debug("user-skill store listing failed for user=%s", user_id, exc_info=True)
+    async with db_session() as s:
+        grows = (
+            await s.scalars(
+                select(GlobalSkill).where(GlobalSkill.is_active.is_(True)).order_by(GlobalSkill.name)
+            )
+        ).all()
+        for g in grows:
+            skills.append(
+                {"name": g.name, "description": g.description or "", "scope": "global",
+                 "editable": False, "enabled": True, "builtin": True}
+            )
+        urows = (
+            await s.scalars(
+                select(UserSkill).where(UserSkill.user_id == str(user_id)).order_by(UserSkill.name)
+            )
+        ).all()
+        for u in urows:
+            skills.append(
+                {"name": u.name, "description": u.description or "", "scope": "user",
+                 "editable": True, "enabled": bool(u.is_active)}
+            )
     return skills
 
 
@@ -565,14 +569,17 @@ def _safe_skill_dir(root: str, name: str) -> str | None:
     return p
 
 
-async def read_skill_content(settings: Settings, store: BaseStore | None, user_id: str, name: str, file: str | None = None) -> dict:
-    """Read a global skill's SKILL.md (read-only) or a linked file, for the UI viewer.
+async def read_skill_content(settings: Settings, user_id: str, name: str, file: str | None = None) -> dict:
+    """Read a global skill (read-only, from disk for full fidelity incl. linked
+    files) or a per-user skill (from the DB) for the UI viewer.
 
-    Returns the webui skill-view shape: ``{success, name, content, linked_files}``
-    on success, or ``{success: False, error}`` when not found.
+    Returns ``{success, name, content, linked_files}`` on success, or
+    ``{success: False, error}`` when not found.
     """
     if not name:
         return {"success": False, "error": "name required"}
+    # Global skills are shipped assets on disk (the global_skills table mirrors
+    # SKILL.md for listing; the dir has the helper files too).
     gdir = settings.global_skills_dir
     if gdir and os.path.isdir(gdir):
         sdir = _safe_skill_dir(gdir, name)
@@ -594,44 +601,28 @@ async def read_skill_content(settings: Settings, store: BaseStore | None, user_i
                     "success": True, "name": name, "scope": "global", "editable": False,
                     "content": _read_text(md), "linked_files": linked,
                 }
-    # Per-user skill from the store (read-only view; created/edited via the UI).
-    if store is not None:
-        try:
-            ns = (str(user_id or "default"), "fs")
-            for suffix in ("SKILL.md", "SKILL.md.disabled"):
-                item = await store.aget(ns, f"/skills/user/{name}/{suffix}")
-                if item is not None:
-                    return {
-                        "success": True, "name": name, "scope": "user", "editable": True,
-                        "enabled": suffix == "SKILL.md", "content": _store_item_text(item), "linked_files": {},
-                    }
-        except Exception:  # noqa: BLE001
-            logger.debug("user-skill content read failed for %s", name, exc_info=True)
+    # Per-user skill from the DB (created/edited via the UI).
+    async with db_session() as s:
+        sk = await s.scalar(select(UserSkill).where(UserSkill.user_id == str(user_id), UserSkill.name == name))
+        if sk:
+            if file:
+                f = await s.scalar(select(SkillFile).where(SkillFile.user_skill_id == sk.id, SkillFile.filename == file))
+                if not f:
+                    return {"success": False, "error": "File not found"}
+                return {"success": True, "name": name, "content": f.content or "", "path": file}
+            files = (await s.scalars(select(SkillFile).where(SkillFile.user_skill_id == sk.id))).all()
+            return {
+                "success": True, "name": name, "scope": "user", "editable": True,
+                "enabled": bool(sk.is_active), "content": sk.content or "",
+                "linked_files": {f.filename: True for f in files},
+            }
     return {"success": False, "error": f"Skill '{name}' not found.", "available_skills": [], "linked_files": {}}
 
 
 # ---------------------------------------------------------------------------
-# CRUD: per-user skills (store) + per-user MCP (mcp.json) + per-user memory.
-# Global skills/MCP are READ-ONLY here — writes only ever touch the user's space.
+# CRUD: per-user skills + MCP + models (all DB). Global is READ-ONLY here —
+# writes only ever touch the user's own rows.
 # ---------------------------------------------------------------------------
-def _store_item_text(item) -> str:
-    """Extract file text from a StoreBackend store Item (v1 list / v2 str)."""
-    v = getattr(item, "value", None) if item is not None else None
-    if isinstance(v, dict):
-        c = v.get("content")
-        if isinstance(c, list):
-            return "\n".join(str(x) for x in c)
-        if isinstance(c, str):
-            return c
-    return ""
-
-
-def _user_store_backend(store: BaseStore, user_id: str):
-    """A StoreBackend bound to the user's namespace, usable outside a graph run."""
-    ns = (str(user_id or "default"), "fs")
-    return StoreBackend(store=store, namespace=lambda _rt: ns), ns
-
-
 def _valid_name(name: str) -> bool:
     return bool(name) and not any(c in name for c in ("/", "\\")) and ".." not in name
 
@@ -643,121 +634,125 @@ def _invalidate_user_cache(user_id: str) -> None:
         _AGENT_CACHE.pop(k, None)
 
 
-def _file_store_value(sb, content: str) -> dict:
-    """Serialize content into the StoreBackend's on-store value format."""
-    from deepagents.backends.store import create_file_data
-
-    return sb._convert_file_data_to_store_value(create_file_data(content or ""))
-
-
-async def save_user_skill(store, user_id, name, content) -> dict:
-    """Create or overwrite a per-user skill's SKILL.md in the store (enables it)."""
+async def save_user_skill(user_id, name, content) -> dict:
+    """Create or overwrite a per-user skill (enables it). The description is parsed
+    from the SKILL.md frontmatter so the Skills list shows it."""
     name = (name or "").strip()
     if not _valid_name(name):
         return {"ok": False, "error": "invalid skill name"}
-    sb, ns = _user_store_backend(store, user_id)
-    path = f"/skills/user/{name}/SKILL.md"
-    await store.aput(ns, path, _file_store_value(sb, content or ""))
-    try:  # writing a fresh SKILL.md clears any disabled twin
-        await store.adelete(ns, path + ".disabled")
-    except Exception:  # noqa: BLE001
-        pass
+    desc = _parse_skill_frontmatter(content or "", name).get("description", "")
+    async with db_session() as s:
+        sk = await s.scalar(select(UserSkill).where(UserSkill.user_id == str(user_id), UserSkill.name == name))
+        if sk is None:
+            sk = UserSkill(user_id=str(user_id), name=name)
+            s.add(sk)
+        sk.content = content or ""
+        sk.description = desc
+        sk.is_active = True
     _invalidate_user_cache(user_id)
-    return {"ok": True, "name": name, "path": path}
+    return {"ok": True, "name": name, "path": f"/skills/user/{name}/SKILL.md"}
 
 
-async def delete_user_skill(store, user_id, name) -> dict:
+async def delete_user_skill(user_id, name) -> dict:
     name = (name or "").strip()
     if not _valid_name(name):
         return {"ok": False, "error": "invalid skill name"}
-    _sb, ns = _user_store_backend(store, user_id)
-    prefix = f"/skills/user/{name}/"
-    deleted = 0
-    try:
-        items = await store.asearch(ns, limit=1000)
-        for it in items or []:
-            k = str(getattr(it, "key", "") or "")
-            if k.replace("\\", "/").startswith(prefix):
-                await store.adelete(ns, k)
-                deleted += 1
-    except Exception:  # noqa: BLE001
-        logger.exception("delete_user_skill failed user=%s name=%s", user_id, name)
-        return {"ok": False, "error": "delete failed"}
-    _invalidate_user_cache(user_id)
+    async with db_session() as s:
+        res = await s.execute(
+            sa_delete(UserSkill).where(UserSkill.user_id == str(user_id), UserSkill.name == name)
+        )
+        deleted = res.rowcount or 0  # skill_files cascade via FK ondelete=CASCADE
+    if deleted:
+        _invalidate_user_cache(user_id)
     return {"ok": deleted > 0, "name": name, "deleted": deleted}
 
 
-async def toggle_user_skill(store, user_id, name, enabled) -> dict:
-    """Enable/disable a user skill by renaming SKILL.md <-> SKILL.md.disabled."""
+async def toggle_user_skill(user_id, name, enabled) -> dict:
+    """Enable/disable a user skill (is_active flag; disabled skills aren't loaded)."""
     name = (name or "").strip()
     if not _valid_name(name):
         return {"ok": False, "error": "invalid skill name"}
-    _sb, ns = _user_store_backend(store, user_id)
-    on = f"/skills/user/{name}/SKILL.md"
-    off = on + ".disabled"
-    src, dst = (off, on) if enabled else (on, off)
-    item = await store.aget(ns, src)
-    if item is not None:
-        await store.aput(ns, dst, getattr(item, "value"))
-        await store.adelete(ns, src)
+    async with db_session() as s:
+        sk = await s.scalar(select(UserSkill).where(UserSkill.user_id == str(user_id), UserSkill.name == name))
+        if sk is None:
+            return {"ok": False, "error": f"skill '{name}' not found"}
+        sk.is_active = bool(enabled)
     _invalidate_user_cache(user_id)
     return {"ok": True, "name": name, "enabled": bool(enabled)}
 
 
 # ---- per-user MCP CRUD (data/users/<uid>/mcp.json; global is read-only) ----
-def _read_user_mcp_servers(settings, user_id) -> dict:
-    return _parse_mcp_servers(_user_mcp_config_path(settings, user_id))
+async def _is_global_mcp(name) -> bool:
+    async with db_session() as s:
+        return (await s.scalar(select(GlobalMcp.id).where(GlobalMcp.name == name))) is not None
 
 
-def _write_user_mcp_servers(settings, user_id, servers: dict) -> None:
-    path = _user_mcp_config_path(settings, user_id)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"mcpServers": servers}, f, indent=2)
-    os.replace(tmp, path)
+def _cfg_to_mcp_columns(cfg: dict) -> dict:
+    """Frontend cfg (args list, env/headers dicts) -> UserMcp column values (text).
+    Secrets in MCP env are kept as ``${VAR}`` references — the real value lives in
+    .env (os.environ) and is expanded only when the connection is built."""
+    url = str(cfg.get("url") or "").strip()
+    command = str(cfg.get("command") or "").strip()
+    args, env, headers = cfg.get("args"), cfg.get("env"), cfg.get("headers")
+    return {
+        "transport": str(cfg.get("transport") or "").strip() or ("http" if url else "stdio"),
+        "command": command,
+        "url": url,
+        "args": "\n".join(str(a) for a in args) if isinstance(args, list) else str(args or ""),
+        "env": "\n".join(f"{k}={v}" for k, v in env.items()) if isinstance(env, dict) else str(env or ""),
+        "headers": "\n".join(f"{k}={v}" for k, v in headers.items()) if isinstance(headers, dict) else str(headers or ""),
+    }
 
 
-def _is_global_mcp(settings, name) -> bool:
-    return name in _parse_mcp_servers(settings.mcp_global_config)
-
-
-def save_user_mcp(settings, user_id, name, cfg) -> dict:
+async def save_user_mcp(settings, user_id, name, cfg) -> dict:
     name = (name or "").strip()
     if not _valid_name(name):
         return {"ok": False, "error": "invalid server name"}
-    if _is_global_mcp(settings, name):
+    if await _is_global_mcp(name):
         return {"ok": False, "error": f"'{name}' is a global (read-only) server"}
     if not isinstance(cfg, dict) or not (cfg.get("command") or cfg.get("url")):
         return {"ok": False, "error": "server needs a 'command' (stdio) or 'url' (http)"}
-    servers = _read_user_mcp_servers(settings, user_id)
-    servers[name] = {k: v for k, v in cfg.items() if v not in (None, "")}
-    _write_user_mcp_servers(settings, user_id, servers)
+    cols = _cfg_to_mcp_columns(cfg)
+    async with db_session() as s:
+        row = await s.scalar(
+            select(UserMcp).where(UserMcp.user_id == str(user_id), UserMcp.name == name)
+        )
+        if row is None:
+            row = UserMcp(user_id=str(user_id), name=name)
+            s.add(row)
+        for k, v in cols.items():
+            setattr(row, k, v)
+        if "enabled" in cfg:
+            row.is_active = bool(cfg["enabled"])
     _invalidate_user_cache(user_id)
     return {"ok": True, "name": name}
 
 
-def delete_user_mcp(settings, user_id, name) -> dict:
+async def delete_user_mcp(settings, user_id, name) -> dict:
     name = (name or "").strip()
-    if _is_global_mcp(settings, name):
+    if await _is_global_mcp(name):
         return {"ok": False, "error": f"'{name}' is a global (read-only) server"}
-    servers = _read_user_mcp_servers(settings, user_id)
-    existed = servers.pop(name, None) is not None
+    async with db_session() as s:
+        res = await s.execute(
+            sa_delete(UserMcp).where(UserMcp.user_id == str(user_id), UserMcp.name == name)
+        )
+        existed = (res.rowcount or 0) > 0
     if existed:
-        _write_user_mcp_servers(settings, user_id, servers)
         _invalidate_user_cache(user_id)
     return {"ok": existed, "name": name}
 
 
-def toggle_user_mcp(settings, user_id, name, enabled) -> dict:
+async def toggle_user_mcp(settings, user_id, name, enabled) -> dict:
     name = (name or "").strip()
-    if _is_global_mcp(settings, name):
+    if await _is_global_mcp(name):
         return {"ok": False, "error": f"'{name}' is a global (read-only) server"}
-    servers = _read_user_mcp_servers(settings, user_id)
-    if name not in servers or not isinstance(servers[name], dict):
-        return {"ok": False, "error": f"server '{name}' not found"}
-    servers[name]["enabled"] = bool(enabled)
-    _write_user_mcp_servers(settings, user_id, servers)
+    async with db_session() as s:
+        row = await s.scalar(
+            select(UserMcp).where(UserMcp.user_id == str(user_id), UserMcp.name == name)
+        )
+        if row is None:
+            return {"ok": False, "error": f"server '{name}' not found"}
+        row.is_active = bool(enabled)
     _invalidate_user_cache(user_id)
     return {"ok": True, "name": name, "enabled": bool(enabled)}
 
@@ -828,45 +823,45 @@ _SECRET_FIELDS = ("api_key", "aws_secret_access_key", "aws_session_token")
 _MASK = "••••"  # ••••
 
 
-def _user_models_path(settings: Settings, user_id: str) -> str:
-    return os.path.join(settings.user_data_root, str(user_id or "default"), "models.json")
+def _spec_from_row(settings: Settings, model_id: str, provider_name: str, settings_json: dict) -> dict:
+    """Reconstruct a normalized model spec from a DB row, decrypting its secrets.
+    Used for BOTH global and user models so build_model_for sees one shape."""
+    raw = decrypt_secrets(settings_json or {})
+    raw["id"] = model_id
+    raw["provider"] = provider_name
+    return settings.normalize_model(raw) or {}
 
 
-def read_user_models(settings, user_id) -> list[dict]:
-    """Per-user model entries (raw, unnormalized) from data/users/<uid>/models.json."""
-    path = _user_models_path(settings, user_id)
-    try:
-        if os.path.isfile(path):
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-            models = data.get("models") if isinstance(data, dict) else data
-            return models if isinstance(models, list) else []
-    except Exception:
-        logger.debug("read_user_models failed user=%s", user_id, exc_info=True)
-    return []
-
-
-def _write_user_models(settings, user_id, models: list) -> None:
-    path = _user_models_path(settings, user_id)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"models": models}, f, indent=2)
-    os.replace(tmp, path)
-
-
-def merged_model_specs(settings: Settings, user_id: str | None = None) -> dict[str, dict]:
-    """Global catalog (config/models.json or env) + the user's own models on top."""
-    specs = dict(settings.model_specs)  # global
-    for m in read_user_models(settings, user_id):
-        s = settings.normalize_model(m)
-        if s:
-            specs[s["id"]] = s  # a user entry adds to / overrides the catalog
+async def merged_model_specs(settings: Settings, user_id: str | None = None) -> dict[str, dict]:
+    """Global catalog + the user's own models on top, all from the DB (secrets
+    decrypted). A user entry with the same id overrides the global one."""
+    specs: dict[str, dict] = {}
+    async with db_session() as s:
+        grows = await s.execute(
+            select(GlobalModel, GlobalProvider.name)
+            .join(GlobalProvider, GlobalModel.provider_id == GlobalProvider.id)
+            .where(GlobalModel.is_active.is_(True))
+        )
+        for gm, pname in grows.all():
+            sp = _spec_from_row(settings, gm.model_id, pname, gm.settings)
+            if sp:
+                specs[sp["id"]] = sp
+        if user_id:
+            urows = await s.execute(
+                select(UserModel, GlobalProvider.name)
+                .join(GlobalProvider, UserModel.provider_id == GlobalProvider.id)
+                .where(UserModel.user_id == str(user_id), UserModel.is_active.is_(True))
+            )
+            for um, pname in urows.all():
+                sp = _spec_from_row(settings, um.model_id, pname, um.settings)
+                if sp:
+                    specs[sp["id"]] = sp
     return specs
 
 
-def _is_global_model(settings, mid) -> bool:
-    return mid in settings.model_specs
+async def _is_global_model(mid: str) -> bool:
+    async with db_session() as s:
+        return (await s.scalar(select(GlobalModel.id).where(GlobalModel.model_id == mid))) is not None
 
 
 def _mask_key(k) -> str:
@@ -892,15 +887,27 @@ def _public_model_spec(s: dict) -> dict:
     }
 
 
-def describe_models(settings: Settings, user_id: str) -> list[dict]:
+async def describe_models(settings: Settings, user_id: str) -> list[dict]:
     """Global (read-only) + per-user models for the Providers tab; keys masked."""
     out = []
-    for _mid, s in settings.model_specs.items():
-        out.append({**_public_model_spec(s), "scope": "global", "editable": False})
-    for m in read_user_models(settings, user_id):
-        s = settings.normalize_model(m)
-        if s:
-            out.append({**_public_model_spec(s), "scope": "user", "editable": True})
+    async with db_session() as s:
+        grows = await s.execute(
+            select(GlobalModel, GlobalProvider.name)
+            .join(GlobalProvider, GlobalModel.provider_id == GlobalProvider.id)
+            .order_by(GlobalModel.model_id)
+        )
+        for gm, pname in grows.all():
+            sp = _spec_from_row(settings, gm.model_id, pname, gm.settings)
+            out.append({**_public_model_spec(sp), "scope": "global", "editable": False})
+        urows = await s.execute(
+            select(UserModel, GlobalProvider.name)
+            .join(GlobalProvider, UserModel.provider_id == GlobalProvider.id)
+            .where(UserModel.user_id == str(user_id))
+            .order_by(UserModel.model_id)
+        )
+        for um, pname in urows.all():
+            sp = _spec_from_row(settings, um.model_id, pname, um.settings)
+            out.append({**_public_model_spec(sp), "scope": "user", "editable": True})
     return out
 
 
@@ -923,91 +930,112 @@ def _validate_model_entry(e: dict) -> str | None:
     return None
 
 
-def save_user_model(settings, user_id, raw: dict) -> dict:
-    """Create/update a per-user model. Secrets left blank/masked keep the old value."""
+async def save_user_model(settings, user_id, raw: dict) -> dict:
+    """Create/update a per-user model. Secrets left blank/masked keep the old value;
+    fresh secrets are Fernet-encrypted at rest (stored in the row's settings JSON)."""
     raw = raw or {}
     mid = str(raw.get("id") or "").strip()
     if not _valid_name(mid):
         return {"ok": False, "error": "invalid model id"}
-    if _is_global_model(settings, mid):
+    if await _is_global_model(mid):
         return {"ok": False, "error": f"'{mid}' is a global (read-only) model"}
     provider = str(raw.get("provider") or "azure_openai").strip().lower()
     if provider not in _VALID_PROVIDERS:
-        return {"ok": False, "error": "provider must be azure_openai | anthropic | bedrock"}
-    models = read_user_models(settings, user_id)
-    existing = next((m for m in models if str(m.get("id")) == mid), None)
-    entry: dict = {"id": mid, "provider": provider}
-    for k in ("deployment", "endpoint", "api_version", "region", "aws_access_key_id"):
-        v = raw.get(k)
-        if v not in (None, ""):
-            entry[k] = str(v).strip()
-    mt = raw.get("max_tokens")
-    if mt not in (None, ""):
-        try:
-            entry["max_tokens"] = int(mt)
-        except (TypeError, ValueError):
-            pass
-    # Secrets: accept only a fresh value; blank or the masked placeholder keeps the old one.
-    for sk in _SECRET_FIELDS:
-        v = str(raw.get(sk) or "").strip()
-        if v and not v.startswith(_MASK):
-            entry[sk] = v
-        elif existing and existing.get(sk):
-            entry[sk] = existing.get(sk)
-    err = _validate_model_entry(entry)
-    if err:
-        return {"ok": False, "error": err}
-    models = [m for m in models if str(m.get("id")) != mid] + [entry]
-    _write_user_models(settings, user_id, models)
+        return {"ok": False, "error": "provider must be azure_openai | anthropic | bedrock | openai | gemini"}
+    async with db_session() as s:
+        pid = await s.scalar(select(GlobalProvider.id).where(GlobalProvider.name == provider))
+        if not pid:
+            return {"ok": False, "error": f"unknown provider '{provider}'"}
+        row = await s.scalar(
+            select(UserModel).where(UserModel.user_id == str(user_id), UserModel.model_id == mid)
+        )
+        prev_dec = decrypt_secrets(dict(row.settings) if row else {})
+        detail: dict = {}
+        for k in ("deployment", "endpoint", "api_version", "region", "aws_access_key_id"):
+            v = raw.get(k)
+            if v not in (None, ""):
+                detail[k] = str(v).strip()
+        mt = raw.get("max_tokens")
+        if mt not in (None, ""):
+            try:
+                detail["max_tokens"] = int(mt)
+            except (TypeError, ValueError):
+                pass
+        # Secrets: a fresh (non-masked) value is encrypted; blank/masked keeps the prior.
+        for sk in _SECRET_FIELDS:
+            v = str(raw.get(sk) or "").strip()
+            if v and not v.startswith(_MASK):
+                detail[sk] = encrypt(v)
+            elif prev_dec.get(sk):
+                detail[sk] = encrypt(prev_dec[sk])
+        err = _validate_model_entry({"provider": provider, **decrypt_secrets(detail)})
+        if err:
+            return {"ok": False, "error": err}
+        if row is None:
+            row = UserModel(user_id=str(user_id), model_id=mid)
+            s.add(row)
+        row.provider_id = pid
+        row.settings = detail
+        row.is_active = True
     _invalidate_user_cache(user_id)
     return {"ok": True, "id": mid}
 
 
-def delete_user_model(settings, user_id, mid) -> dict:
+async def delete_user_model(settings, user_id, mid) -> dict:
     mid = str(mid or "").strip()
-    if _is_global_model(settings, mid):
+    if await _is_global_model(mid):
         return {"ok": False, "error": f"'{mid}' is a global (read-only) model"}
-    models = read_user_models(settings, user_id)
-    new = [m for m in models if str(m.get("id")) != mid]
-    existed = len(new) != len(models)
+    async with db_session() as s:
+        res = await s.execute(
+            sa_delete(UserModel).where(UserModel.user_id == str(user_id), UserModel.model_id == mid)
+        )
+        existed = (res.rowcount or 0) > 0
     if existed:
-        _write_user_models(settings, user_id, new)
         _invalidate_user_cache(user_id)
     return {"ok": existed, "id": mid}
 
 
-# ---- per-user memory docs (notes / profile / soul), stored per user ----
-MEMORY_FILES = {"memory": "/memory/MEMORY.md", "user": "/memory/USER.md", "soul": "/memory/SOUL.md"}
+# ---- per-user memory docs (notes / profile / soul) — UserConfig columns ----
+# API section -> UserConfig column. Section keys are the frontend's contract.
+MEMORY_FIELDS = {"memory": "notes", "user": "about_you", "soul": "persona"}
 
 
-async def read_memory(store, user_id) -> dict:
+async def read_memory(user_id) -> dict:
     """Return {memory, user, soul} text for a user (empty strings if unset)."""
-    out = {k: "" for k in MEMORY_FILES}
-    if store is None:
-        return out
-    _sb, ns = _user_store_backend(store, user_id)
-    for sec, path in MEMORY_FILES.items():
-        try:
-            out[sec] = _store_item_text(await store.aget(ns, path))
-        except Exception:  # noqa: BLE001
-            logger.debug("read_memory %s failed", sec, exc_info=True)
+    out = {k: "" for k in MEMORY_FIELDS}
+    try:
+        async with db_session() as s:
+            cfg = await s.get(UserConfig, str(user_id or ""))
+            if cfg:
+                for sec, col in MEMORY_FIELDS.items():
+                    out[sec] = getattr(cfg, col, "") or ""
+    except Exception:  # noqa: BLE001
+        logger.debug("read_memory failed", exc_info=True)
     return out
 
 
-async def write_memory(store, user_id, section, content) -> dict:
-    if section not in MEMORY_FILES:
+async def write_memory(user_id, section, content) -> dict:
+    if section not in MEMORY_FIELDS:
         return {"ok": False, "error": "section must be memory|user|soul"}
-    sb, ns = _user_store_backend(store, user_id)
-    await store.aput(ns, MEMORY_FILES[section], _file_store_value(sb, content or ""))
+    try:
+        async with db_session() as s:
+            cfg = await s.get(UserConfig, str(user_id or ""))
+            if cfg is None:
+                cfg = UserConfig(user_id=str(user_id))
+                s.add(cfg)
+            setattr(cfg, MEMORY_FIELDS[section], content or "")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("write_memory failed", exc_info=True)
+        return {"ok": False, "error": str(e)}
     _invalidate_user_cache(user_id)  # soul/profile/notes feed the system prompt
     return {"ok": True, "section": section}
 
 
-async def _system_prompt_for(store, user_id) -> str:
+async def _system_prompt_for(user_id) -> str:
     """Base prompt + the user's soul/profile/notes so memory actually shapes the agent."""
     base = DEFAULT_SYSTEM_PROMPT
     try:
-        mem = await read_memory(store, user_id)
+        mem = await read_memory(user_id)
     except Exception:  # noqa: BLE001
         return base
     parts = []
@@ -1022,17 +1050,17 @@ async def _system_prompt_for(store, user_id) -> str:
 
 async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run_mode, reasoning=None):
     uid = str(user_id or "default")
-    mid = resolve_model(settings, model_id, uid)
+    mid = await resolve_model(settings, model_id, uid)
     # Reasoning is per-request: bake the (normalized, support-gated) effort into the
     # cache key so a thinking-enabled model is a distinct compiled agent.
-    spec = merged_model_specs(settings, uid).get(mid) or {}
+    spec = (await merged_model_specs(settings, uid)).get(mid) or {}
     effort = normalize_reasoning_effort(reasoning) if model_supports_reasoning(spec) else None
     key = ("run" if run_mode else "chat", uid, mid, effort)
     agent = _AGENT_CACHE.get(key)
     if agent is not None:
         return agent
     mcp_tools = await load_mcp_tools(settings, uid)
-    system_prompt = await _system_prompt_for(store, uid)
+    system_prompt = await _system_prompt_for(uid)
     interrupt_on = None
     if run_mode:
         # Approval policy: gate all MCP/plugin tools, plus any configured built-ins.
@@ -1040,10 +1068,10 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
         gated |= {getattr(t, "name", None) for t in mcp_tools if getattr(t, "name", None)}
         interrupt_on = {t: True for t in gated if t} or None
     agent = create_deep_agent(
-        model=build_model_for(settings, mid, uid, reasoning=effort),
+        model=await build_model_for(settings, mid, uid, reasoning=effort),
         tools=mcp_tools,
         system_prompt=system_prompt,
-        backend=build_backend(settings, store, uid),
+        backend=build_backend(settings, uid),
         checkpointer=checkpointer,
         store=store,
         context_schema=AgentContext,
@@ -1178,21 +1206,21 @@ async def test_model(settings: Settings, user_id: str, model_id: str) -> dict:
         "standard": {"ok": False},
         "reasoning": {"supported": False, "ok": False, "visible_text": False},
     }
-    spec = merged_model_specs(settings, user_id).get(model_id)
+    spec = (await merged_model_specs(settings, user_id)).get(model_id)
     if not spec:
         out["error"] = "unknown model"
         return out
     supported = model_supports_reasoning(spec)
     out["reasoning"]["supported"] = supported
     try:
-        m = build_model_for(settings, model_id, user_id, reasoning=None)
+        m = await build_model_for(settings, model_id, user_id, reasoning=None)
         r = await asyncio.wait_for(m.ainvoke([HumanMessage("Reply with the single word: pong")]), timeout=45)
         out["standard"] = {"ok": True, "sample": _content_to_text(getattr(r, "content", ""))[:60]}
     except Exception as e:  # noqa: BLE001
         out["standard"] = {"ok": False, "error": str(e)[:300]}
     if supported:
         try:
-            mr = build_model_for(settings, model_id, user_id, reasoning="high")
+            mr = await build_model_for(settings, model_id, user_id, reasoning="high")
             visible = False
 
             async def _probe():

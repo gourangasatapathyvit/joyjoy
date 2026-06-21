@@ -59,13 +59,14 @@ from .agent import (
     write_memory,
 )
 from .auth import (
-    current_username,
+    current_user_id,
     make_session_token,
     resolve_user_id,
     verify_gateway_key,
 )
 from .config import get_settings
 from .context import AgentContext
+from .db import ensure_encryption_key, init_db, seed_all
 from .persistence import open_persistence
 
 logging.basicConfig(level=logging.INFO)
@@ -106,6 +107,12 @@ def _load_env_file_into_environ() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _load_env_file_into_environ()
+    # App relational DB: resolve the encryption key (generate+persist on first
+    # run), create tables, seed the global catalogs. Dev → SQLite, prod → Postgres.
+    ensure_encryption_key(settings)
+    await init_db()
+    await seed_all(settings)
+    await users_mod.ensure_dev_user(settings)  # dev no-auth tenancy bucket
     async with open_persistence(settings) as (checkpointer, store):
         app.state.checkpointer = checkpointer
         app.state.store = store
@@ -177,10 +184,10 @@ async def v1_health():
 
 
 # ── Auth: username/password accounts, signed session cookie, email-OTP reset ──
-def _set_session(resp: JSONResponse, username: str) -> JSONResponse:
+def _set_session(resp: JSONResponse, user_id: str) -> JSONResponse:
     resp.set_cookie(
         settings.session_cookie,
-        make_session_token(settings, username),
+        make_session_token(settings, user_id),
         max_age=settings.session_ttl_hours * 3600,
         httponly=True,
         samesite="lax",
@@ -193,23 +200,20 @@ def _set_session(resp: JSONResponse, username: str) -> JSONResponse:
 @app.post("/v1/auth/signup")
 async def auth_signup(request: Request):
     body = await _json(request)
-    res = await users_mod.create_user(
-        request.app.state.store, body.get("username"), body.get("email"), body.get("password")
-    )
+    res = await users_mod.create_user(body.get("username"), body.get("email"), body.get("password"))
     if not res.get("ok"):
         return JSONResponse(res, status_code=409 if res.get("field") in ("username", "email") else 400)
-    return _set_session(JSONResponse({"ok": True, "user": res["user"]}), res["user"]["username"])
+    user = res["user"]
+    return _set_session(JSONResponse({"ok": True, "user": user}), user["id"])
 
 
 @app.post("/v1/auth/login")
 async def auth_login(request: Request):
     body = await _json(request)
-    user = await users_mod.verify_credentials(
-        request.app.state.store, body.get("username"), body.get("password")
-    )
+    user = await users_mod.verify_credentials(body.get("username"), body.get("password"))
     if not user:
         return JSONResponse({"ok": False, "error": "Invalid username or password."}, status_code=401)
-    return _set_session(JSONResponse({"ok": True, "user": user}), user["username"])
+    return _set_session(JSONResponse({"ok": True, "user": user}), user["id"])
 
 
 @app.post("/v1/auth/logout")
@@ -221,11 +225,13 @@ async def auth_logout():
 
 @app.get("/v1/auth/me")
 async def auth_me(request: Request):
-    u = current_username(request, settings)
-    if not u:
+    uid = current_user_id(request, settings)
+    if not uid:
         return JSONResponse({"error": "unauthenticated"}, status_code=401)
-    rec = await users_mod.get_user(request.app.state.store, u)
-    return {"username": u, "email": (rec or {}).get("email")}
+    rec = await users_mod.get_user_by_id(uid)
+    if not rec:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    return {"username": rec["username"], "email": rec.get("email")}
 
 
 @app.get("/v1/auth/available")
@@ -234,9 +240,9 @@ async def auth_available(request: Request):
     q = request.query_params
     out: dict = {}
     if q.get("username"):
-        out["username_taken"] = await users_mod.username_taken(request.app.state.store, q["username"])
+        out["username_taken"] = await users_mod.username_taken(q["username"])
     if q.get("email"):
-        out["email_taken"] = await users_mod.email_taken(request.app.state.store, q["email"])
+        out["email_taken"] = await users_mod.email_taken(q["email"])
     return out
 
 
@@ -246,9 +252,9 @@ async def auth_forgot(request: Request):
     body = await _json(request)
     email = body.get("email") or ""
     out: dict = {"ok": True}
-    res = await users_mod.create_reset_otp(request.app.state.store, settings, email)
+    res = await users_mod.create_reset_otp(settings, email)
     if res:
-        otp, _username = res
+        otp, _user_id = res
         emailed = await users_mod.send_otp_email(settings, email, otp)
         if not emailed and not settings.is_prod:
             out["dev_otp"] = otp  # dev convenience when SMTP isn't configured
@@ -260,24 +266,20 @@ async def auth_reset(request: Request):
     body = await _json(request)
     if not users_mod.valid_password(body.get("password") or ""):
         return JSONResponse({"ok": False, "error": "Password must be at least 8 characters."}, status_code=400)
-    res = await users_mod.verify_and_consume_otp(
-        request.app.state.store, body.get("email"), body.get("otp")
-    )
+    res = await users_mod.verify_and_consume_otp(body.get("email"), body.get("otp"))
     if not res.get("ok"):
         return JSONResponse(res, status_code=400)
-    await users_mod.set_password(request.app.state.store, res["username"], body.get("password"))
-    return _set_session(JSONResponse({"ok": True}), res["username"])  # auto-login after reset
+    await users_mod.set_password(res["user_id"], body.get("password"))
+    return _set_session(JSONResponse({"ok": True}), res["user_id"])  # auto-login after reset
 
 
 @app.post("/v1/auth/change-password")
 async def auth_change_password(request: Request):
-    u = current_username(request, settings)
-    if not u:
+    uid = current_user_id(request, settings)
+    if not uid:
         return JSONResponse({"ok": False, "error": "Not signed in."}, status_code=401)
     body = await _json(request)
-    res = await users_mod.change_password(
-        request.app.state.store, u, body.get("current") or "", body.get("new") or ""
-    )
+    res = await users_mod.change_password(uid, body.get("current") or "", body.get("new") or "")
     return JSONResponse(res, status_code=200 if res.get("ok") else 400)
 
 
@@ -286,7 +288,7 @@ async def list_models(request: Request):
     """Global catalog + the calling user's own models, so the picker is per-user.
     Each item carries its ``provider`` so the UI can group/label the picker."""
     uid = resolve_user_id(request, settings)
-    specs = merged_model_specs(settings, uid)
+    specs = await merged_model_specs(settings, uid)
     return {
         "object": "list",
         "data": [
@@ -323,7 +325,7 @@ async def skills(request: Request):
     """Global skills (read-only) + per-user skills for the calling user (UI Skills tab)."""
     verify_gateway_key(request, settings)
     user_id = resolve_user_id(request, settings)
-    items = await list_skills(settings, request.app.state.store, user_id)
+    items = await list_skills(settings, user_id)
     return {"skills": items}
 
 
@@ -334,7 +336,7 @@ async def skill_content(request: Request):
     user_id = resolve_user_id(request, settings)
     name = request.query_params.get("name") or ""
     file = request.query_params.get("file") or None
-    data = await read_skill_content(settings, request.app.state.store, user_id, name, file)
+    data = await read_skill_content(settings, user_id, name, file)
     return JSONResponse(data)
 
 
@@ -352,7 +354,7 @@ async def skills_save(request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
     body = await _json(request)
-    return JSONResponse(await save_user_skill(request.app.state.store, uid, body.get("name"), body.get("content")))
+    return JSONResponse(await save_user_skill(uid, body.get("name"), body.get("content")))
 
 
 @app.post("/v1/skills/delete")
@@ -360,7 +362,7 @@ async def skills_delete(request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
     body = await _json(request)
-    return JSONResponse(await delete_user_skill(request.app.state.store, uid, body.get("name")))
+    return JSONResponse(await delete_user_skill(uid, body.get("name")))
 
 
 @app.post("/v1/skills/toggle")
@@ -368,7 +370,7 @@ async def skills_toggle(request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
     body = await _json(request)
-    return JSONResponse(await toggle_user_skill(request.app.state.store, uid, body.get("name"), bool(body.get("enabled"))))
+    return JSONResponse(await toggle_user_skill(uid, body.get("name"), bool(body.get("enabled"))))
 
 
 # ── MCP CRUD (user servers writable; global servers read-only) ──
@@ -378,14 +380,14 @@ async def mcp_server_save(name: str, request: Request):
     uid = resolve_user_id(request, settings)
     body = await _json(request)
     cfg = {k: body.get(k) for k in ("command", "args", "url", "headers", "env", "transport", "timeout", "enabled") if body.get(k) not in (None, "")}
-    return JSONResponse(save_user_mcp(settings, uid, name, cfg))
+    return JSONResponse(await save_user_mcp(settings, uid, name, cfg))
 
 
 @app.delete("/v1/mcp/servers/{name}")
 async def mcp_server_delete(name: str, request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
-    return JSONResponse(delete_user_mcp(settings, uid, name))
+    return JSONResponse(await delete_user_mcp(settings, uid, name))
 
 
 @app.patch("/v1/mcp/servers/{name}")
@@ -393,7 +395,7 @@ async def mcp_server_toggle(name: str, request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
     body = await _json(request)
-    return JSONResponse(toggle_user_mcp(settings, uid, name, bool(body.get("enabled"))))
+    return JSONResponse(await toggle_user_mcp(settings, uid, name, bool(body.get("enabled"))))
 
 
 # ── Models / Providers CRUD (user models writable; global models read-only) ──
@@ -403,7 +405,7 @@ async def models_config(request: Request):
     provider field-schema the UI renders its add/edit forms from. Keys are masked."""
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
-    return {"models": describe_models(settings, uid), "providers": PROVIDER_TYPES}
+    return {"models": await describe_models(settings, uid), "providers": PROVIDER_TYPES}
 
 
 @app.post("/v1/models/config/save")
@@ -411,7 +413,7 @@ async def models_config_save(request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
     body = await _json(request)
-    return JSONResponse(save_user_model(settings, uid, body))
+    return JSONResponse(await save_user_model(settings, uid, body))
 
 
 @app.post("/v1/models/config/delete")
@@ -419,7 +421,7 @@ async def models_config_delete(request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
     body = await _json(request)
-    return JSONResponse(delete_user_model(settings, uid, body.get("id")))
+    return JSONResponse(await delete_user_model(settings, uid, body.get("id")))
 
 
 @app.post("/v1/models/config/test")
@@ -438,7 +440,7 @@ async def models_config_test(request: Request):
 async def memory_get(request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
-    mem = await read_memory(request.app.state.store, uid)
+    mem = await read_memory(uid)
     return {**mem, "external_notes_enabled": False}
 
 
@@ -447,7 +449,7 @@ async def memory_write(request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
     body = await _json(request)
-    return JSONResponse(await write_memory(request.app.state.store, uid, body.get("section"), body.get("content")))
+    return JSONResponse(await write_memory(uid, body.get("section"), body.get("content")))
 
 
 # ── Workspace (PER-SESSION file browser + CRUD over the agent's working dir) ──
@@ -455,7 +457,7 @@ async def memory_write(request: Request):
 # (defaults to the thread_id; a forked chat shares its parent's) so the dock
 # shows exactly the dir the agent reads/writes for that conversation.
 async def _ws_id(request: Request, uid: str, thread_id) -> str:
-    return await sessions_mod.workspace_id_for(request.app.state.store, uid, str(thread_id or ""))
+    return await sessions_mod.workspace_id_for(uid, str(thread_id or ""))
 
 
 @app.get("/v1/workspace/tree")
@@ -576,7 +578,7 @@ async def workspace_upload(request: Request):
 async def settings_ui_get(request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
-    return await usersettings_mod.read_ui(settings, request.app.state.store, uid)
+    return await usersettings_mod.read_ui(uid)
 
 
 @app.put("/v1/settings/ui")
@@ -584,7 +586,14 @@ async def settings_ui_put(request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
     body = await _json(request)
-    return JSONResponse(await usersettings_mod.write_ui(settings, request.app.state.store, uid, body))
+    return JSONResponse(await usersettings_mod.write_ui(uid, body))
+
+
+@app.get("/v1/skins")
+async def skins_catalog(request: Request):
+    """The shipped skin catalog (DB) for the Appearance picker."""
+    verify_gateway_key(request, settings)
+    return {"skins": await usersettings_mod.list_skins()}
 
 
 def _last_user_text(messages: list) -> str:
@@ -627,7 +636,7 @@ async def chat_completions(request: Request):
     user_id = resolve_user_id(request, settings)
     body = await request.json()
     do_stream = bool(body.get("stream", True))
-    model = resolve_model(settings, body.get("model"), user_id)  # passthrough (validated)
+    model = await resolve_model(settings, body.get("model"), user_id)  # passthrough (validated)
     thread_id = _thread_id(request, body)
     text = _last_user_text(body.get("messages") or [])
     reasoning = body.get("reasoning_effort")
@@ -698,20 +707,20 @@ async def create_run(request: Request):
     verify_gateway_key(request, settings)
     user_id = resolve_user_id(request, settings)
     body = await request.json()
-    model = resolve_model(settings, body.get("model"), user_id)
+    model = await resolve_model(settings, body.get("model"), user_id)
     thread_id = _thread_id(request, body)
     text = _run_input_text(body)
     reasoning = body.get("reasoning_effort")
     if reasoning is None:
         reasoning = body.get("reasoning")
-    ws_id = await sessions_mod.workspace_id_for(request.app.state.store, user_id, thread_id)
+    ws_id = await sessions_mod.workspace_id_for(user_id, thread_id)
     ctx = AgentContext(user_id=user_id, thread_id=thread_id, workspace_id=ws_id)
     agent = await get_run_agent(settings, request.app.state.checkpointer, request.app.state.store, model, user_id, reasoning=reasoning)
     run_id = await runs_mod.start_run(agent, ctx, text)
     logger.info("run start id=%s user=%s thread=%s ws=%s model=%s reasoning=%s", run_id, user_id, thread_id, ws_id, model, reasoning)
     try:
         await sessions_mod.record_session(
-            request.app.state.store, user_id, thread_id, first_text=text, model=model, workspace_id=ws_id
+            user_id, thread_id, first_text=text, model=model, reasoning=reasoning, workspace_id=ws_id
         )
     except Exception:  # noqa: BLE001
         logger.warning("record_session failed", exc_info=True)
@@ -754,7 +763,7 @@ async def run_cancel(run_id: str, request: Request):
 async def sessions_list(request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
-    return {"sessions": await sessions_mod.list_sessions(request.app.state.store, uid)}
+    return {"sessions": await sessions_mod.list_sessions(uid)}
 
 
 @app.post("/v1/sessions")
@@ -765,17 +774,17 @@ async def sessions_create(request: Request):
         body = await request.json()
     except Exception:  # noqa: BLE001
         body = {}
-    return JSONResponse(await sessions_mod.create_session(request.app.state.store, uid, body.get("title")))
+    return JSONResponse(await sessions_mod.create_session(uid, body.get("title")))
 
 
 @app.get("/v1/sessions/{thread_id}/messages")
 async def sessions_messages(thread_id: str, request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
-    if not await sessions_mod.owns_session(request.app.state.store, uid, thread_id):
+    if not await sessions_mod.owns_session(uid, thread_id):
         return JSONResponse({"error": "not found"}, status_code=404)
     agent = await get_run_agent(
-        settings, request.app.state.checkpointer, request.app.state.store, resolve_model(settings, None, uid), uid
+        settings, request.app.state.checkpointer, request.app.state.store, await resolve_model(settings, None, uid), uid
     )
     msgs = await sessions_mod.get_thread_messages(agent, uid, thread_id)
     return {"thread_id": thread_id, "messages": msgs}
@@ -788,11 +797,11 @@ async def sessions_import(request: Request):
     uid = resolve_user_id(request, settings)
     body = await _json(request)
     agent = await get_run_agent(
-        settings, request.app.state.checkpointer, request.app.state.store, resolve_model(settings, None, uid), uid
+        settings, request.app.state.checkpointer, request.app.state.store, await resolve_model(settings, None, uid), uid
     )
     return JSONResponse(
         await sessions_mod.import_session(
-            agent, request.app.state.store, uid, body.get("messages") or [], body.get("title")
+            agent, uid, body.get("messages") or [], body.get("title")
         )
     )
 
@@ -806,7 +815,7 @@ async def sessions_rename(thread_id: str, request: Request):
     except Exception:  # noqa: BLE001
         body = {}
     return JSONResponse(
-        await sessions_mod.rename_session(request.app.state.store, uid, thread_id, body.get("title", ""))
+        await sessions_mod.rename_session(uid, thread_id, body.get("title", ""))
     )
 
 
@@ -816,7 +825,7 @@ async def sessions_delete(thread_id: str, request: Request):
     uid = resolve_user_id(request, settings)
     return JSONResponse(
         await sessions_mod.delete_session(
-            request.app.state.store, request.app.state.checkpointer, uid, thread_id
+            request.app.state.checkpointer, uid, thread_id
         )
     )
 

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persistPref } from "@/api/prefs";
 import type { ReasoningEffort } from "@/api/types";
 
 const newThreadId = () => `t-${crypto.randomUUID()}`;
@@ -58,8 +59,15 @@ export const useChatStore = create<ChatState>((set) => ({
 	reasoningEffort: "off",
 	threadId: readThreadId(),
 	workspaceOpen: readWorkspaceOpen(),
-	setModel: (model) => set({ model }),
-	setReasoningEffort: (reasoningEffort) => set({ reasoningEffort }),
+	// The picker's choice is remembered as the user's default (server-persisted).
+	setModel: (model) => {
+		set({ model });
+		persistPref({ default_model: model });
+	},
+	setReasoningEffort: (reasoningEffort) => {
+		set({ reasoningEffort });
+		persistPref({ default_reasoning: reasoningEffort });
+	},
 	selectThread: (threadId) => {
 		persistThreadId(threadId);
 		set({ threadId });

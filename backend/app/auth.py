@@ -5,7 +5,8 @@
 - Identity resolution for tenant isolation, in priority order:
   ``X-User-Id`` header (dev proxy) > signed **session cookie** (real login) >
   ``Authorization: Bearer`` JWT (direct clients) > dev default.
-  ``current_username`` does the same WITHOUT the dev fallback — it backs
+  The identity is the user's surrogate uuid (``User.id``), carried in the cookie
+  ``sub``. ``current_user_id`` does the same WITHOUT the dev fallback — it backs
   ``/v1/auth/me`` and the login gate so an unauthenticated visitor is a real 401.
 - Session tokens are short JWTs signed with ``JWT_SECRET``, set as an httpOnly
   cookie by the ``/v1/auth/*`` routes.
@@ -34,17 +35,17 @@ def verify_gateway_key(request: Request, settings: Settings) -> None:
         raise HTTPException(status_code=401, detail="invalid gateway api key")
 
 
-# ── Session cookie (signed JWT) ──────────────────────────────────────────────
-def make_session_token(settings: Settings, username: str) -> str:
+# ── Session cookie (signed JWT; sub = User.id) ───────────────────────────────
+def make_session_token(settings: Settings, user_id: str) -> str:
     now = int(time.time())
     return jwt.encode(
-        {"sub": str(username), "iat": now, "exp": now + settings.session_ttl_hours * 3600},
+        {"sub": str(user_id), "iat": now, "exp": now + settings.session_ttl_hours * 3600},
         settings.jwt_secret,
         algorithm="HS256",
     )
 
 
-def read_session_username(settings: Settings, request: Request) -> str | None:
+def read_session_user_id(settings: Settings, request: Request) -> str | None:
     tok = request.cookies.get(settings.session_cookie)
     if not tok or not settings.jwt_secret:
         return None
@@ -72,21 +73,24 @@ def _bearer_sub(settings: Settings, request: Request) -> str | None:
     return str(sub) if sub else None
 
 
-def current_username(request: Request, settings: Settings) -> str | None:
-    """Authenticated identity with NO dev fallback — for /v1/auth/me and gating."""
+def current_user_id(request: Request, settings: Settings) -> str | None:
+    """Authenticated identity (User.id) with NO dev fallback — for /v1/auth/me
+    and gating."""
     uid = request.headers.get(settings.user_id_header.lower())
     if uid:
         return uid.strip()
-    sess = read_session_username(settings, request)
+    sess = read_session_user_id(settings, request)
     if sess:
         return sess
     return _bearer_sub(settings, request)
 
 
 def resolve_user_id(request: Request, settings: Settings) -> str:
-    u = current_username(request, settings)
+    u = current_user_id(request, settings)
     if u:
         return u
     if not settings.is_prod:
-        return settings.dev_default_user
+        from .users import DEV_USER_ID  # lazy: avoids import cycle
+
+        return DEV_USER_ID
     raise HTTPException(status_code=401, detail="missing user identity (session or JWT)")

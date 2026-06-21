@@ -5,6 +5,19 @@ export interface UiSettings {
 	sidebar_order?: string[];
 	display_name?: string;
 	email?: string;
+	skin?: string;
+	theme?: string;
+	locale?: string;
+	activity_display?: string;
+	auto_follow?: boolean;
+	default_model?: string;
+	default_reasoning?: string;
+}
+
+export interface SkinOption {
+	id: string;
+	label: string;
+	color: string;
 }
 
 const KEY = ["ui-settings"];
@@ -20,6 +33,15 @@ export const uiSettingsApi = {
 
 export function useUiSettings() {
 	return useQuery({ queryKey: KEY, queryFn: uiSettingsApi.get });
+}
+
+// Shipped skin catalog (from the DB `skins` table) for the Appearance picker.
+export function useSkins() {
+	return useQuery({
+		queryKey: ["skins"],
+		queryFn: () => http<{ skins: SkinOption[] }>("/v1/skins"),
+		staleTime: Number.POSITIVE_INFINITY,
+	});
 }
 
 export function useUpdateUiSettings() {

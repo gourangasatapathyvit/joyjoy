@@ -1,10 +1,10 @@
-"""User accounts + password-reset OTP.
+"""User accounts + password-reset OTP — backed by the relational app DB
+(``users`` + ``password_resets`` tables).
 
-Accounts (bcrypt-hashed password, email) live in the LangGraph store — the same
-sqlite(dev)/Postgres(prod) backing as sessions/settings/memory — so no extra DB
-wiring. Usernames are canonicalised to lowercase and ARE the tenant ``user_id``
-used everywhere else. Password reset uses a hashed, expiring, single-use email OTP
-(emailed via SMTP when configured; logged in dev otherwise).
+The tenant identity threaded everywhere is the user's surrogate uuid
+(``User.id``), set as the session-cookie ``sub`` at login. Usernames/emails are
+canonicalised to lowercase and unique. Password reset uses a hashed, expiring,
+single-use email OTP (emailed via SMTP when configured; logged in dev).
 """
 
 from __future__ import annotations
@@ -14,17 +14,22 @@ import logging
 import re
 import secrets
 import smtplib
-import time
+import uuid
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import Any
 
 import bcrypt
+from sqlalchemy import delete, select
+
+from .db import db_session
+from .db.models import PasswordReset, User, UserConfig
 
 logger = logging.getLogger("joyjoy.users")
 
-_USERS = ("_auth", "users")  # username(lower) -> {username,email,password_hash,created_at}
-_EMAILS = ("_auth", "emails")  # email(lower)   -> username(lower)   (uniqueness + lookup)
-_OTPS = ("_auth", "otps")  # email(lower)       -> {hash,exp,attempts}
+# Deterministic identity for the no-auth dev fallback (seeded by ensure_dev_user).
+DEV_USERNAME = "dev-user"
+DEV_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, "joyjoy:dev-user").hex
 
 _USERNAME_RE = re.compile(r"^[a-zA-Z0-9._-]{3,32}$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -63,122 +68,159 @@ def verify_pw(pw: str, hashed: str) -> bool:
         return False
 
 
-def _val(item) -> dict | None:
-    v = getattr(item, "value", None)
-    return dict(v) if isinstance(v, dict) else None
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_naive_utc(dt: datetime) -> datetime:
+    """SQLite returns naive datetimes; Postgres returns aware. Coerce to naive UTC
+    so comparisons never raise on a mixed offset."""
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _user_dict(u: User) -> dict:
+    return {"id": u.id, "username": u.username, "email": u.email}
 
 
 # ── User CRUD ──────────────────────────────────────────────────────────────
-async def get_user(store, username: str) -> dict | None:
-    try:
-        return _val(await store.aget(_USERS, _nu(username)))
-    except Exception:
-        logger.debug("get_user failed", exc_info=True)
-        return None
+async def get_user(username: str) -> dict | None:
+    """Look up by username (canonicalised). Backs the signup availability check."""
+    async with db_session() as s:
+        u = await s.scalar(select(User).where(User.username == _nu(username)))
+        return _user_dict(u) if u else None
 
 
-async def username_taken(store, username: str) -> bool:
-    return (await get_user(store, username)) is not None
+async def get_user_by_id(uid: str) -> dict | None:
+    async with db_session() as s:
+        u = await s.get(User, str(uid or ""))
+        return _user_dict(u) if u else None
 
 
-async def email_taken(store, email: str) -> bool:
-    try:
-        return getattr(await store.aget(_EMAILS, _ne(email)), "value", None) is not None
-    except Exception:
-        return False
+async def username_taken(username: str) -> bool:
+    async with db_session() as s:
+        return (await s.scalar(select(User.id).where(User.username == _nu(username)))) is not None
 
 
-async def create_user(store, username: str, email: str, password: str) -> dict:
-    """Create an account. Returns {ok:True, user} or {ok:False, error, field?}."""
+async def email_taken(email: str) -> bool:
+    async with db_session() as s:
+        return (await s.scalar(select(User.id).where(User.email == _ne(email)))) is not None
+
+
+async def create_user(username: str, email: str, password: str) -> dict:
+    """Create an account (+ its 1:1 UserConfig). Returns {ok, user} or
+    {ok:False, error, field?}."""
     if not valid_username(username):
         return {"ok": False, "error": "Username must be 3–32 characters (letters, numbers, . _ -).", "field": "username"}
     if not valid_email(email):
         return {"ok": False, "error": "Enter a valid email address.", "field": "email"}
     if not valid_password(password):
         return {"ok": False, "error": "Password must be at least 8 characters.", "field": "password"}
-    if await username_taken(store, username):
-        return {"ok": False, "error": "That username is already taken.", "field": "username"}
-    if await email_taken(store, email):
-        return {"ok": False, "error": "An account with that email already exists.", "field": "email"}
-    uid, em = _nu(username), _ne(email)
-    rec = {"username": uid, "email": em, "password_hash": hash_pw(password), "created_at": time.time()}
-    await store.aput(_USERS, uid, rec)
-    await store.aput(_EMAILS, em, uid)
-    return {"ok": True, "user": {"username": uid, "email": em}}
+    uid_name, em = _nu(username), _ne(email)
+    async with db_session() as s:
+        if await s.scalar(select(User.id).where(User.username == uid_name)):
+            return {"ok": False, "error": "That username is already taken.", "field": "username"}
+        if await s.scalar(select(User.id).where(User.email == em)):
+            return {"ok": False, "error": "An account with that email already exists.", "field": "email"}
+        u = User(username=uid_name, email=em, password_hash=hash_pw(password))
+        s.add(u)
+        await s.flush()  # populate u.id
+        s.add(UserConfig(user_id=u.id, display_name=username.strip()))
+        user = _user_dict(u)
+    return {"ok": True, "user": user}
 
 
-async def verify_credentials(store, username: str, password: str) -> dict | None:
-    rec = await get_user(store, username)
-    if not rec or not verify_pw(password, rec.get("password_hash", "")):
-        return None
-    return {"username": rec["username"], "email": rec.get("email")}
+async def verify_credentials(username: str, password: str) -> dict | None:
+    async with db_session() as s:
+        u = await s.scalar(select(User).where(User.username == _nu(username)))
+        if not u or not verify_pw(password, u.password_hash):
+            return None
+        return _user_dict(u)
 
 
-async def set_password(store, username: str, new_password: str) -> bool:
-    rec = await get_user(store, username)
-    if not rec:
-        return False
-    rec["password_hash"] = hash_pw(new_password)
-    await store.aput(_USERS, _nu(username), rec)
-    return True
+async def set_password(user_id: str, new_password: str) -> bool:
+    async with db_session() as s:
+        u = await s.get(User, str(user_id or ""))
+        if not u:
+            return False
+        u.password_hash = hash_pw(new_password)
+        return True
 
 
-async def change_password(store, username: str, current: str, new: str) -> dict:
+async def change_password(user_id: str, current: str, new: str) -> dict:
     if not valid_password(new):
         return {"ok": False, "error": "New password must be at least 8 characters."}
-    rec = await get_user(store, username)
-    if not rec or not verify_pw(current, rec.get("password_hash", "")):
-        return {"ok": False, "error": "Current password is incorrect."}
-    await set_password(store, username, new)
+    async with db_session() as s:
+        u = await s.get(User, str(user_id or ""))
+        if not u or not verify_pw(current, u.password_hash):
+            return {"ok": False, "error": "Current password is incorrect."}
+        u.password_hash = hash_pw(new)
     return {"ok": True}
 
 
 # ── Password-reset OTP ───────────────────────────────────────────────────────
-async def create_reset_otp(store, settings, email: str) -> tuple[str, str] | None:
-    """Generate + store a hashed, expiring OTP. Returns (otp, username) if the
-    email is registered, else None (caller stays silent either way)."""
+async def create_reset_otp(settings, email: str) -> tuple[str, str] | None:
+    """Generate + store a hashed, expiring OTP (one active per user). Returns
+    (otp, user_id) if the email is registered, else None (caller stays silent)."""
     em = _ne(email)
-    try:
-        username = getattr(await store.aget(_EMAILS, em), "value", None)
-    except Exception:
-        username = None
-    if not username:
-        return None
-    otp = f"{secrets.randbelow(1_000_000):06d}"
-    await store.aput(
-        _OTPS,
-        em,
-        {"hash": hash_pw(otp), "exp": time.time() + settings.otp_ttl_minutes * 60, "attempts": 0},
-    )
-    return otp, username
+    async with db_session() as s:
+        u = await s.scalar(select(User).where(User.email == em))
+        if not u:
+            return None
+        otp = f"{secrets.randbelow(1_000_000):06d}"
+        await s.execute(delete(PasswordReset).where(PasswordReset.user_id == u.id))
+        s.add(
+            PasswordReset(
+                user_id=u.id, otp_hash=hash_pw(otp),
+                expires_at=_now() + timedelta(minutes=settings.otp_ttl_minutes), attempts=0,
+            )
+        )
+        return otp, u.id
 
 
-async def verify_and_consume_otp(store, email: str, otp: str) -> dict:
+async def verify_and_consume_otp(email: str, otp: str) -> dict:
     em = _ne(email)
-    try:
-        rec = _val(await store.aget(_OTPS, em))
-    except Exception:
-        rec = None
-    if not rec:
-        return {"ok": False, "error": "No reset code requested — request a new one."}
-    if time.time() > rec.get("exp", 0):
-        await store.adelete(_OTPS, em)
-        return {"ok": False, "error": "Reset code expired — request a new one."}
-    if rec.get("attempts", 0) >= _OTP_MAX_ATTEMPTS:
-        await store.adelete(_OTPS, em)
-        return {"ok": False, "error": "Too many attempts — request a new code."}
-    if not verify_pw(str(otp or ""), rec.get("hash", "")):
-        rec["attempts"] = rec.get("attempts", 0) + 1
-        await store.aput(_OTPS, em, rec)
-        return {"ok": False, "error": "Incorrect code."}
-    await store.adelete(_OTPS, em)
-    try:
-        username = getattr(await store.aget(_EMAILS, em), "value", None)
-    except Exception:
-        username = None
-    if not username:
-        return {"ok": False, "error": "Account not found."}
-    return {"ok": True, "username": username}
+    async with db_session() as s:
+        u = await s.scalar(select(User).where(User.email == em))
+        if not u:
+            return {"ok": False, "error": "No reset code requested — request a new one."}
+        pr = await s.scalar(
+            select(PasswordReset)
+            .where(PasswordReset.user_id == u.id)
+            .order_by(PasswordReset.created_at.desc())
+        )
+        if not pr:
+            return {"ok": False, "error": "No reset code requested — request a new one."}
+        if datetime.utcnow() > _as_naive_utc(pr.expires_at):
+            await s.execute(delete(PasswordReset).where(PasswordReset.user_id == u.id))
+            return {"ok": False, "error": "Reset code expired — request a new one."}
+        if pr.attempts >= _OTP_MAX_ATTEMPTS:
+            await s.execute(delete(PasswordReset).where(PasswordReset.user_id == u.id))
+            return {"ok": False, "error": "Too many attempts — request a new code."}
+        if not verify_pw(str(otp or ""), pr.otp_hash):
+            pr.attempts += 1
+            return {"ok": False, "error": "Incorrect code."}
+        await s.execute(delete(PasswordReset).where(PasswordReset.user_id == u.id))
+        return {"ok": True, "user_id": u.id}
+
+
+# ── Dev fallback user (no-auth dev mode tenancy bucket) ──────────────────────
+async def ensure_dev_user(settings) -> None:
+    """In dev, make sure the deterministic dev user (+ its config) exists so the
+    no-auth fallback identity satisfies every per-user FK. No-op in prod."""
+    if settings.is_prod:
+        return
+    async with db_session() as s:
+        if not await s.get(User, DEV_USER_ID):
+            s.add(
+                User(
+                    id=DEV_USER_ID, username=DEV_USERNAME, email="dev@dev.local",
+                    password_hash=hash_pw(secrets.token_urlsafe(24)),
+                )
+            )
+        if not await s.get(UserConfig, DEV_USER_ID):
+            s.add(UserConfig(user_id=DEV_USER_ID, display_name="Dev User"))
 
 
 # ── Email (SMTP when configured; dev logs the OTP) ───────────────────────────

@@ -29,8 +29,11 @@ def _seg(value: str) -> str:
 
 
 def workspace_root(settings, user_id: str, workspace_id: str) -> str:
+    # Root is config-driven (WORKSPACE_ROOT, defaults to USER_DATA_ROOT) so the
+    # agent's files and this panel always resolve to the SAME dir — and the root
+    # can be repointed at a shared volume / mount for multi-node deployments.
     return os.path.join(
-        settings.user_data_root, str(user_id or "default"), "workspace", _seg(workspace_id)
+        settings.workspace_root_dir, str(user_id or "default"), "workspace", _seg(workspace_id)
     )
 
 

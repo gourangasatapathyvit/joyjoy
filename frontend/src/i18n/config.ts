@@ -1,5 +1,6 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
+import { persistPref } from "@/api/prefs";
 import { DEFAULT_LANGUAGE, LANGUAGE_CODES } from "./languages";
 import { af } from "./locales/af";
 import { de } from "./locales/de";
@@ -59,7 +60,7 @@ i18n.use(initReactI18next).init({
 	returnNull: false,
 });
 
-// Switch language + persist the choice (read back by initialLng on next load).
+// Switch language + persist the choice locally (instant) and to the server.
 export function setLanguage(code: string): void {
 	try {
 		localStorage.setItem(STORAGE_KEY, code);
@@ -67,6 +68,7 @@ export function setLanguage(code: string): void {
 		// localStorage unavailable — in-memory switch still applies
 	}
 	i18n.changeLanguage(code);
+	persistPref({ locale: code });
 }
 
 export default i18n;

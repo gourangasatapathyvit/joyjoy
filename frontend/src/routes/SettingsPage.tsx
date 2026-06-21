@@ -6,8 +6,9 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { authApi, useMe } from "@/api/auth";
+import { persistPref } from "@/api/prefs";
 import { sessionApi, useSessionMutations } from "@/api/sessions";
-import { useUiSettings, useUpdateUiSettings } from "@/api/usersettings";
+import { useSkins, useUiSettings, useUpdateUiSettings } from "@/api/usersettings";
 import { ModelPicker } from "@/components/chat/ModelPicker";
 import { LanguageSwitcher } from "@/components/settings/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import { ProvidersPanel } from "@/routes/ProvidersPanel";
 import { useChatStore } from "@/store/chat";
 import {
 	type ActivityDisplay,
+	type Skin,
 	SKINS,
 	useSettingsStore,
 } from "@/store/settings";
@@ -178,6 +180,8 @@ function ConversationPane() {
 function AppearancePane() {
 	const { t } = useTranslation();
 	const { theme, setTheme } = useTheme();
+	const { data: skinData } = useSkins();
+	const skins = skinData?.skins ?? SKINS;
 	const skin = useSettingsStore((s) => s.skin);
 	const setSkin = useSettingsStore((s) => s.setSkin);
 	const activityDisplay = useSettingsStore((s) => s.activityDisplay);
@@ -212,7 +216,10 @@ function AppearancePane() {
 						<button
 							key={opt.id}
 							type="button"
-							onClick={() => setTheme(opt.id)}
+							onClick={() => {
+								setTheme(opt.id);
+								persistPref({ theme: opt.id });
+							}}
 							className={cn(
 								"flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
 								theme === opt.id
@@ -228,11 +235,11 @@ function AppearancePane() {
 
 			<Field label={t("appearance.skin")} desc={t("appearance.skinDesc")}>
 				<div className="flex flex-wrap gap-2">
-					{SKINS.map((s) => (
+					{skins.map((s) => (
 						<button
 							key={s.id}
 							type="button"
-							onClick={() => setSkin(s.id)}
+							onClick={() => setSkin(s.id as Skin)}
 							className={cn(
 								"flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors",
 								skin === s.id
