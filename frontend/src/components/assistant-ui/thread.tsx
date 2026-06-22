@@ -8,6 +8,7 @@ import {
 	ErrorPrimitive,
 	groupPartByType,
 	MessagePrimitive,
+	SelectionToolbarPrimitive,
 	SuggestionPrimitive,
 	ThreadPrimitive,
 	type ToolCallMessagePartComponent,
@@ -24,8 +25,10 @@ import {
 	MicIcon,
 	MoreHorizontalIcon,
 	PencilIcon,
+	QuoteIcon,
 	RefreshCwIcon,
 	SquareIcon,
+	XIcon,
 } from "lucide-react";
 import {
 	type ComponentType,
@@ -40,6 +43,7 @@ import {
 	ComposerAttachments,
 	UserMessageAttachments,
 } from "@/components/assistant-ui/attachment";
+import { ComposerTriggers } from "@/components/assistant-ui/composer-triggers";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import { MediaFile, MediaImage } from "@/components/assistant-ui/media-part";
 import {
@@ -121,6 +125,7 @@ const ThreadRoot: FC<{ isEmpty: boolean }> = ({ isEmpty }) => {
 				["--composer-padding" as string]: "8px",
 			}}
 		>
+			<MessageSelectionToolbar />
 			<ThreadPrimitive.Viewport
 				turnAnchor="top"
 				autoScroll={autoFollow}
@@ -232,29 +237,83 @@ const ThreadSuggestionItem: FC = () => {
 	);
 };
 
-const Composer: FC = () => {
-	const { t } = useTranslation();
+// Floating "Quote" button shown when text is selected inside a message — sets
+// the selection as the composer quote (rendered in ComposerQuotePreview and the
+// user bubble, and prepended to the prompt). Stable assistant-ui API.
+const MessageSelectionToolbar: FC = () => {
 	return (
-		<ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
-			<ComposerPrimitive.AttachmentDropzone
+		<SelectionToolbarPrimitive.Root className="aui-selection-toolbar bg-popover text-popover-foreground border-border animate-in fade-in zoom-in-95 z-50 flex items-center gap-1 rounded-lg border p-1 shadow-lg duration-100">
+			<SelectionToolbarPrimitive.Quote
 				render={
-					<div
-						data-slot="aui_composer-shell"
-						className="border-border/60 data-[dragging=true]:border-ring focus-within:border-border dark:border-muted-foreground/15 dark:focus-within:border-muted-foreground/30 flex w-full flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) shadow-[0_4px_16px_-8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] transition-[border-color,box-shadow] focus-within:shadow-[0_6px_24px_-8px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.05)] data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))] dark:shadow-none"
+					<Button
+						type="button"
+						variant="ghost"
+						size="sm"
+						className="aui-selection-toolbar-quote h-7 gap-1.5 rounded-md px-2 text-xs"
+						aria-label="Quote selection"
 					/>
 				}
 			>
-				<ComposerAttachments />
-				<ComposerPrimitive.Input
-					placeholder={t("chat.placeholder")}
-					className="aui-composer-input placeholder:text-muted-foreground/80 max-h-32 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base outline-none"
-					rows={1}
-					autoFocus
-					aria-label="Message input"
-				/>
-				<ComposerAction />
-			</ComposerPrimitive.AttachmentDropzone>
-		</ComposerPrimitive.Root>
+				<QuoteIcon className="size-3.5" />
+				Quote
+			</SelectionToolbarPrimitive.Quote>
+		</SelectionToolbarPrimitive.Root>
+	);
+};
+
+// Preview of the pending quote, shown above the input with a dismiss button.
+const ComposerQuotePreview: FC = () => {
+	return (
+		<ComposerPrimitive.Quote className="aui-composer-quote bg-muted/60 border-muted-foreground/40 text-muted-foreground mx-1 mt-1 flex items-start gap-2 rounded-md border-l-2 px-2.5 py-1.5 text-sm">
+			<ComposerPrimitive.QuoteText className="line-clamp-3 flex-1 whitespace-pre-wrap italic" />
+			<ComposerPrimitive.QuoteDismiss
+				render={
+					<TooltipIconButton
+						tooltip="Remove quote"
+						side="top"
+						type="button"
+						variant="ghost"
+						size="icon"
+						className="aui-composer-quote-dismiss size-5 shrink-0 rounded-full"
+						aria-label="Remove quote"
+					/>
+				}
+			>
+				<XIcon className="size-3.5" />
+			</ComposerPrimitive.QuoteDismiss>
+		</ComposerPrimitive.Quote>
+	);
+};
+
+const Composer: FC = () => {
+	const { t } = useTranslation();
+	return (
+		<ComposerPrimitive.Unstable_TriggerPopoverRoot>
+			<div className="aui-composer-trigger-anchor relative flex w-full flex-col">
+				<ComposerTriggers />
+				<ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
+					<ComposerPrimitive.AttachmentDropzone
+						render={
+							<div
+								data-slot="aui_composer-shell"
+								className="border-border/60 data-[dragging=true]:border-ring focus-within:border-border dark:border-muted-foreground/15 dark:focus-within:border-muted-foreground/30 flex w-full flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) shadow-[0_4px_16px_-8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] transition-[border-color,box-shadow] focus-within:shadow-[0_6px_24px_-8px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.05)] data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))] dark:shadow-none"
+							/>
+						}
+					>
+						<ComposerAttachments />
+						<ComposerQuotePreview />
+						<ComposerPrimitive.Input
+							placeholder={t("chat.placeholder")}
+							className="aui-composer-input placeholder:text-muted-foreground/80 max-h-32 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base outline-none"
+							rows={1}
+							autoFocus
+							aria-label="Message input"
+						/>
+						<ComposerAction />
+					</ComposerPrimitive.AttachmentDropzone>
+				</ComposerPrimitive.Root>
+			</div>
+		</ComposerPrimitive.Unstable_TriggerPopoverRoot>
 	);
 };
 
@@ -523,6 +582,14 @@ const UserMessage: FC = () => {
 			data-role="user"
 		>
 			<UserMessageAttachments />
+
+			<MessagePrimitive.Quote>
+				{({ text }) => (
+					<blockquote className="aui-user-message-quote text-muted-foreground border-muted-foreground/40 bg-muted/40 col-start-2 mb-1 line-clamp-4 max-w-full rounded-md border-l-2 px-3 py-1.5 text-sm whitespace-pre-wrap italic">
+						{text}
+					</blockquote>
+				)}
+			</MessagePrimitive.Quote>
 
 			<div className="aui-user-message-content-wrapper relative col-start-2 min-w-0">
 				<div className="aui-user-message-content peer bg-muted text-foreground rounded-xl px-4 py-2 wrap-break-word empty:hidden">

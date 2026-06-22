@@ -40,6 +40,7 @@ RUN uv pip install --system -e .
 COPY --from=frontend /frontend/dist /app/frontend/dist
 
 EXPOSE 8080
-# data/ (agent workspace files) is a volume in compose; ensure it exists.
-RUN mkdir -p /app/backend/data
+# WORKSPACE_ROOT (agent files) is mounted at /data in compose; ensure it exists so
+# a plain `docker run` without a volume still works. The app makedirs subdirs on demand.
+RUN mkdir -p /data
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

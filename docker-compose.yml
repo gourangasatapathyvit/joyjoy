@@ -46,12 +46,24 @@ services:
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?set CREDENTIAL_ENCRYPTION_KEY in .env}
       # Base/global model API key — the seeded models reference ${AZURE_OPENAI_API_KEY}.
       AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      # Agent workspace files (the ONLY on-disk state in prod). The sessions table
+      # stores a RELATIVE workspace_path; this root resolves it — point it at a shared
+      # mount for multi-node. (SQLITE_CHECKPOINT_PATH/APP_DB_PATH are dev-only and
+      # unused in prod — and must NOT live on a network FS: SQLite locking corrupts.)
+      # Literal (NOT ${WORKSPACE_ROOT}) so the dev .env's absolute path can't leak in —
+      # this must be the in-container mount path below. Change both together to relocate.
+      WORKSPACE_ROOT: /data
       BACKEND_HOST: 0.0.0.0
       BACKEND_PORT: "8080"
     ports:
       - "${PORT:-8080}:8080"
     volumes:
-      - workspaces:/app/backend/data    # per-session agent workspace files (the only on-disk state in prod)
+      # Named volume by default. For a REMOTE/shared mount (NFS/EFS/SMB/object-FUSE),
+      # replace this with a bind/driver-mounted path at /data, e.g.:
+      #   - type: volume
+      #     source: nfs-workspaces   # defined under top-level `volumes:` with driver_opts
+      #     target: /data
+      - workspaces:/data    # → WORKSPACE_ROOT
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/v1/health"]
       interval: 15s

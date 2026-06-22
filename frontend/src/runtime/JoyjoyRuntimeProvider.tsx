@@ -1,6 +1,7 @@
 import {
 	type AppendMessage,
 	AssistantRuntimeProvider,
+	type QuoteInfo,
 	type ThreadMessageLike,
 	useExternalStoreRuntime,
 } from "@assistant-ui/react";
@@ -102,6 +103,9 @@ interface UIMessage {
 	role: "user" | "assistant";
 	parts: UIPart[];
 	createdAt: number;
+	// Set on user messages created from a "Quote" selection — rendered as a
+	// quote block above the bubble and prepended to the text sent to the agent.
+	quote?: QuoteInfo;
 }
 
 // Tracks the in-flight run so onCancel can stop it.
@@ -139,6 +143,19 @@ const textOf = (m: UIMessage): string =>
 		.map((p) => (p.type === "text" ? p.text : ""))
 		.join("")
 		.trim();
+
+// The Python agent has no notion of assistant-ui's JS quote injection, so we
+// fold a quoted selection into the prompt as a markdown blockquote ahead of the
+// user's text — the agent then sees exactly what the user was replying to.
+const buildSendText = (text: string, quote?: QuoteInfo): string => {
+	const q = quote?.text.trim();
+	if (!q) return text;
+	const block = q
+		.split("\n")
+		.map((line) => `> ${line}`)
+		.join("\n");
+	return `${block}\n\n${text}`;
+};
 
 // Rebuild a saved thread (GET /v1/sessions/{tid}/messages) into UI messages,
 // re-attaching each ToolMessage's output to the AI tool-call it answers.
@@ -430,6 +447,11 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 				.join("")
 				.trim();
 			if (!text) return;
+			// The composer attaches a "Quote" selection at metadata.custom.quote
+			// (see assistant-ui's base composer send()).
+			const quote = (
+				message.metadata?.custom as { quote?: QuoteInfo } | undefined
+			)?.quote;
 			const assistantId = newId("a");
 			setMessages((prev) => [
 				...prev,
@@ -438,6 +460,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 					role: "user",
 					parts: [{ type: "text", text }],
 					createdAt: Date.now(),
+					...(quote ? { quote } : {}),
 				},
 				{
 					id: assistantId,
@@ -446,7 +469,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 					createdAt: Date.now(),
 				},
 			]);
-			await runTurn(assistantId, text);
+			await runTurn(assistantId, buildSendText(text, quote));
 		},
 		[runTurn],
 	);
@@ -466,6 +489,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 		if (userIdx < 0) return;
 		const text = textOf(msgs[userIdx]);
 		if (!text) return;
+		const quote = msgs[userIdx].quote;
 		const assistantId = newId("a");
 		setMessages((prev) => {
 			let ui = -1;
@@ -486,7 +510,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 				},
 			];
 		});
-		await runTurn(assistantId, text);
+		await runTurn(assistantId, buildSendText(text, quote));
 	}, [runTurn]);
 
 	// Stop the in-flight run (wires the composer's "Stop generating" button).
@@ -524,6 +548,9 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 			id: m.id,
 			role: m.role,
 			createdAt: new Date(m.createdAt),
+			// Surfaces the quote block above the user bubble (useMessageQuote reads
+			// metadata.custom.quote).
+			...(m.quote ? { metadata: { custom: { quote: m.quote } } } : {}),
 			content: m.parts
 				.filter(
 					(p, i, arr) =>
