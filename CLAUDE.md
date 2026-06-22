@@ -51,14 +51,14 @@ The React SPA calls `/v1/*` same-origin with `credentials: "include"`. Identity 
 - `dbfs.py` — the **DB→agent bridge**: `MemoryBackend` (`/memory/`) + `DbSkillsBackend` (serves BOTH `/skills/user/` with `user_id=uid` and `/skills/global/` with `user_id=None`) deepagents backends mounted in `build_backend`'s `CompositeBackend`. They override the async methods (which CompositeBackend calls) with async DB I/O — **no disk** for skills/memory. Helper files come from `skill_files` (base64-decoded for binaries).
 - `agent.py` — the core (largest file). `_get_or_build()` compiles one `create_deep_agent()` per `(kind, user_id, model_id, reasoning)` and caches it (`_AGENT_CACHE`); **`_invalidate_user_cache(uid)` on every write**. `build_model_for` / `resolve_model` / `merged_model_specs` / the model·MCP·skill CRUD are **async** (they read the DB) and decrypt secrets via `db.crypto`. MCP loading + per-run approval gating live here.
 - `users.py` accounts + OTP (`users`/`password_resets`); `usersettings.py` UI prefs + memory ↔ `user_configs`; `sessions.py` the `sessions` table.
-- `config.py` — `Settings` (pydantic-settings). `model_specs` (config/models.json) is now only the **seed source** + a health-info list. `persistence.py` — LangGraph saver+store, dev↔prod by `APP_ENV` (pinned `deepagents==0.6.10`).
+- `config.py` — `Settings` (pydantic-settings). `model_specs` no longer seeds (the DB does, from `global_seed.sql`); it only feeds `default_model` + the health-info model list, falling back to the `AZURE_OPENAI_*` env. `persistence.py` — LangGraph saver+store, dev↔prod by `APP_ENV` (pinned `deepagents==0.6.10`).
 - `context.py` `AgentContext(user_id, thread_id)`; `auth.py` `verify_gateway_key` + `current_user_id`/`resolve_user_id`; `runs.py` the runs/approval engine.
 
 ### Capabilities = global (read-only) + per-user (CRUD) — one pattern, four times
 
 Skills, MCP servers, the model catalog, and memory all share the same shape — **all in the DB**:
 
-- **Global** = shipped, read-only catalogs seeded on first boot: `global_skills`(+`skill_files`) (← committed bundle `backend/app/db/seeds/global_skills.json`, regenerate via `scripts/build_global_skills_seed.py`), `global_mcps` (← `config/global.mcp.json`), `global_models`/`global_providers` (← `config/models.json` + `PROVIDER_TYPES`), `skins`. There is no loose `skills/` tree — global skills live entirely in the DB.
+- **Global** = shipped, read-only catalogs, ALL seeded from one committed file `backend/app/db/seeds/global_seed.sql` (skins, `global_providers`, `global_models`, `global_mcps`, `global_skills`+`skill_files`) — loaded into an empty DB on first boot by `seed.seed_all` (idempotent; no-op once populated). No `config/` dir, no skills tree, no seed constants. Model `api_key`s are `${AZURE_OPENAI_API_KEY}` env-refs in the SQL (real key in `.env`, expanded at runtime — no secret committed). Regenerate the SQL from a populated DB with `scripts/dump_global_seed_sql.py`.
 - **Per-user** = writable rows keyed by `User.id`: `user_models`, `user_mcps`, `user_skills`(+`skill_files`), and `user_configs` (UI prefs + memory: `notes`/`about_you`/`persona`). Global skills' helper files still live on disk (shipped assets).
 - Backend CRUD lives in `agent.py` (`save_/delete_/toggle_user_*`, `describe_*` — async DB); endpoints in `main.py` (`/v1/skills/*`, `/v1/mcp/servers/*`, `/v1/models/config*`, `/v1/memory*`, `/v1/settings/ui`, `/v1/skins`). Writes to a **global** id are rejected as read-only. The effective set a user sees = global merged with their own (`merged_model_specs`, `_merged_mcp_servers`, `list_skills`).
 
@@ -74,7 +74,6 @@ Vite + React 19 + TS, served by the backend. Per-user prefs (skin/theme/locale/a
 
 ## Conventions & gotchas
 
-- **Do NOT rename internal `hermes` identifiers** in the webui: `X-Hermes-CSRF-Token`, `X-Hermes-Session-*` headers, the `hermes_session` cookie, `hermes-*` localStorage/cache keys, and `HERMES_WEBUI_*` env vars are load-bearing. (User-facing strings were rebranded to "joyjoy"; these internal ids were deliberately kept.)
-- **Secrets** live only in gitignored files: `.env`, `config/models.json` (now holds literal keys), `data/users/*/*.json`. `~/joyjoy` is not currently a git repo, but `.gitignore` is configured for when it becomes one.
-- The shared/base model catalog is fully self-contained in **`config/models.json`** (literal keys, no `.env` reference) — edit that JSON directly to change global models; the backend re-reads the file each request (no restart needed). `AZURE_OPENAI_*` env vars were intentionally removed.
+- **Secrets** live in `.env` (gitignored) — `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY` (generate-once), `AZURE_OPENAI_API_KEY`, etc. At rest in the DB, model/provider secrets are **Fernet-encrypted**; the global seed SQL carries only `${VAR}` env-refs, never plaintext.
+- The base/global model catalog is seeded from `global_seed.sql` into `global_models`; edit it in the DB (or the SQL) and regenerate with `scripts/dump_global_seed_sql.py`. Keys are `${AZURE_OPENAI_API_KEY}` env-refs expanded at runtime.
 - Credentials originate from `deepagent/env.txt` (Windows side) → copied into `~/joyjoy/.env`.

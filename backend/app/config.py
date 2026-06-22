@@ -96,8 +96,8 @@ class Settings(BaseSettings):
     workspace_root: str = ""
 
     # ---- Skills / MCP ----
-    global_skills_dir: str = "./skills/global"
-    mcp_global_config: str = "./config/global.mcp.json"
+    # Global skills + MCP are now seeded into the DB (skills from a committed bundle
+    # app/db/seeds/global_skills.json; MCP from seed._GLOBAL_MCPS). No loose config.
 
     # ---- Azure OpenAI ----
     azure_openai_endpoint: str = ""

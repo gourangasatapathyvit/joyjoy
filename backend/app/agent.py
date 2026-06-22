@@ -3,12 +3,12 @@
 One compiled agent per ``(kind, user, model)``. Per-user isolation is via the
 store namespace ``(user_id, "fs")`` + the LangGraph ``thread_id``.
 
-Capabilities loaded on demand by the agent:
-  * **Skills** — ``/skills/global/`` (read-only, shared, from disk) + ``/skills/user/``
-    (per-user store). Runtime-loaded; no recompile when a user adds a skill.
-  * **MCP plugins** — global (``config/global.mcp.json``) + per-user
-    (``data/users/<uid>/mcp.json``) loaded as tools. In run mode, every MCP/plugin
-    tool is gated for human approval (plus any ``JOYJOY_INTERRUPT_TOOLS`` built-ins).
+Capabilities loaded on demand by the agent — all DB-backed (served via ``dbfs``):
+  * **Skills** — ``/skills/global/`` (shipped, read-only) + ``/skills/user/`` (per-user,
+    authored in the Skills tab), both from the DB. Runtime-loaded; no recompile.
+  * **MCP plugins** — global (``global_mcps``) + per-user (``user_mcps``) loaded as
+    tools. In run mode, every MCP/plugin tool is gated for human approval (plus any
+    ``JOYJOY_INTERRUPT_TOOLS`` built-ins).
 """
 
 from __future__ import annotations

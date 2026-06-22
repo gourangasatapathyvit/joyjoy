@@ -54,7 +54,9 @@ def sql_val(v) -> str:
 def _blank_model_secrets(rec: dict) -> None:
     st = dict(rec.get("settings") or {})
     for k in SECRET_KEYS:
-        if st.get(k):
+        v = st.get(k)
+        # Keep ${VAR} env-refs (not secrets); blank real values / Fernet ciphertext.
+        if v and not str(v).startswith("${"):
             st[k] = ""
     rec["settings"] = st
 

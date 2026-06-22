@@ -72,8 +72,7 @@ joyjoy/
     alembic/                relational migrations (baseline = all 13 tables)
     pyproject.toml
   frontend/                 React SPA (Vite + TS); built to frontend/dist, served by the backend
-  backend/app/db/seeds/global_skills.json   committed global-skills bundle (SKILL.md + helper files; base64 for binaries) — the seed source; global skills then live entirely in the DB (no skills/ dir)
-  config/global.mcp.json    global MCP servers — seeded into the DB
+  backend/app/db/seeds/global_seed.sql      THE seed: all shipped/global data (skins, providers, models, MCP, skills + files) as INSERTs; loaded into an empty DB on first boot. Model keys are ${AZURE_OPENAI_API_KEY} env-refs (real key in .env). No config/ dir, no skills tree.
   data/                     dev SQLite DBs + per-user workspace files (gitignored)
   docs/  PLAN.md  README.md  CLAUDE.md  .env
 ```

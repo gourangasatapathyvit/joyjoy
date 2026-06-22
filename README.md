@@ -20,7 +20,7 @@ architecture, **[PLAN.md](./PLAN.md)** for the architecture & checklist, and
 ## Layout
 - `backend/` — FastAPI + deepagents engine; `app/db/` (13 SQLAlchemy models, async engine, Fernet, seeds), `app/dbfs.py` (DB→agent backend bridge), `alembic/` (migrations)
 - `frontend/` — the React SPA (built to `frontend/dist`, served by the backend) — see [frontend/README.md](./frontend/README.md)
-- `config/global.mcp.json`, `config/models.json` — global MCP/model seed sources (seeded into the DB on first boot). Global skills ship as a committed DB seed bundle (`backend/app/db/seeds/global_skills.json`) — there is no loose skills/ tree; global skills live entirely in the DB.
+- `backend/app/db/seeds/global_seed.sql` — the **single** seed for all shipped/global data (skins, providers, base models, MCP, skills + files); loaded into an empty DB on first boot. No `config/`, no skills tree — global data lives entirely in the DB. Model keys are `${AZURE_OPENAI_API_KEY}` env-refs in the SQL (real key in `.env`).
 - `data/` — dev SQLite DBs + per-user workspace files (gitignored)
 - `docs/branding/` — brand kit: logos, favicons, brand guide
 
