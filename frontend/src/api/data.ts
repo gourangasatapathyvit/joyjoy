@@ -36,8 +36,11 @@ export const dataApi = {
 		}),
 
 	skills: () => http<{ skills: Skill[] }>("/v1/skills"),
-	skillContent: (name: string) =>
-		http<SkillContent>(`/v1/skills/content?name=${encodeURIComponent(name)}`),
+	skillContent: (name: string, file?: string) =>
+		http<SkillContent>(
+			`/v1/skills/content?name=${encodeURIComponent(name)}` +
+				(file ? `&file=${encodeURIComponent(file)}` : ""),
+		),
 	saveSkill: (name: string, content: string) =>
 		http<Ok & { name?: string }>("/v1/skills/save", {
 			method: "POST",
@@ -52,6 +55,22 @@ export const dataApi = {
 		http<Ok>("/v1/skills/delete", {
 			method: "POST",
 			body: JSON.stringify({ name }),
+		}),
+	// Multi-file user skills: per-file save/delete + whole-skill zip import.
+	saveSkillFile: (skill: string, path: string, content: string, encoding = "utf-8") =>
+		http<Ok & { path?: string }>("/v1/skills/files/save", {
+			method: "POST",
+			body: JSON.stringify({ skill, path, content, encoding }),
+		}),
+	deleteSkillFile: (skill: string, path: string) =>
+		http<Ok>("/v1/skills/files/delete", {
+			method: "POST",
+			body: JSON.stringify({ skill, path }),
+		}),
+	importSkill: (name: string, zip_b64: string) =>
+		http<Ok & { files?: number }>("/v1/skills/import", {
+			method: "POST",
+			body: JSON.stringify({ name, zip_b64 }),
 		}),
 
 	modelsConfig: () => http<ModelsConfigResponse>("/v1/models/config"),

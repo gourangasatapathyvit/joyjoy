@@ -38,10 +38,12 @@ from .agent import (
     delete_user_mcp,
     delete_user_model,
     delete_user_skill,
+    delete_user_skill_file,
     describe_mcp,
     describe_models,
     get_agent,
     get_run_agent,
+    import_user_skill,
     invoke_once,
     list_skills,
     merged_model_specs,
@@ -52,6 +54,7 @@ from .agent import (
     save_user_mcp,
     save_user_model,
     save_user_skill,
+    save_user_skill_file,
     stream_messages,
     test_model,
     toggle_user_mcp,
@@ -371,6 +374,36 @@ async def skills_toggle(request: Request):
     uid = resolve_user_id(request, settings)
     body = await _json(request)
     return JSONResponse(await toggle_user_skill(uid, body.get("name"), bool(body.get("enabled"))))
+
+
+# ── Multi-file user skills: per-file CRUD + zip import (global stays read-only) ──
+@app.post("/v1/skills/files/save")
+async def skills_file_save(request: Request):
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    body = await _json(request)
+    return JSONResponse(
+        await save_user_skill_file(
+            uid, body.get("skill"), body.get("path"), body.get("content") or "", body.get("encoding") or "utf-8"
+        )
+    )
+
+
+@app.post("/v1/skills/files/delete")
+async def skills_file_delete(request: Request):
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    body = await _json(request)
+    return JSONResponse(await delete_user_skill_file(uid, body.get("skill"), body.get("path")))
+
+
+@app.post("/v1/skills/import")
+async def skills_import(request: Request):
+    """Create/replace a user skill from a base64-encoded zip ({name, zip_b64})."""
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    body = await _json(request)
+    return JSONResponse(await import_user_skill(uid, body.get("name"), body.get("zip_b64")))
 
 
 # ── MCP CRUD (user servers writable; global servers read-only) ──

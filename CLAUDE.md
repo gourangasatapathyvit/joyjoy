@@ -69,6 +69,8 @@ Five provider types: `azure_openai`, `anthropic` (also serves Azure AI Foundry's
 
 Vite + React 19 + TS, served by the backend. Per-user prefs (skin/theme/locale/activity/auto-follow/default model+reasoning) persist to `UserConfig` via `/v1/settings/ui`: `src/api/prefs.ts` `persistPref()` writes + keeps the query cache in sync; `src/components/PrefsSync.tsx` hydrates them once after login. Skins load from `/v1/skins`. i18n default = English (`src/i18n/`). See `frontend/README.md`. Rebuild what the backend serves with `cd frontend && npm run build`.
 
+**Multi-file user skills**: user skills are full trees (SKILL.md + helper files), not just an MD. `SkillsPanel.tsx` is a per-skill file-tree workspace (edit files, Add file, delete, Re-import .zip; global = read-only). Endpoints: `POST /v1/skills/files/save` `{skill,path,content,encoding}`, `/v1/skills/files/delete`, `/v1/skills/import` `{name,zip_b64}` (zip is base64 in JSON — no python-multipart). Backend fns in `agent.py`: `save_user_skill_file`/`delete_user_skill_file`/`import_user_skill` (`_safe_rel` blocks path traversal; size/count caps; SKILL.md → `user_skills.content`, others → `skill_files`). The agent serves the whole tree via the same `DbSkillsBackend`.
+
 ## Conventions & gotchas
 
 - **Do NOT rename internal `hermes` identifiers** in the webui: `X-Hermes-CSRF-Token`, `X-Hermes-Session-*` headers, the `hermes_session` cookie, `hermes-*` localStorage/cache keys, and `HERMES_WEBUI_*` env vars are load-bearing. (User-facing strings were rebranded to "joyjoy"; these internal ids were deliberately kept.)

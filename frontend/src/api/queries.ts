@@ -24,10 +24,10 @@ export function useMcpTools() {
 export function useSkills() {
 	return useQuery({ queryKey: ["skills"], queryFn: dataApi.skills });
 }
-export function useSkillContent(name: string | null) {
+export function useSkillContent(name: string | null, file?: string | null) {
 	return useQuery({
-		queryKey: ["skill-content", name],
-		queryFn: () => dataApi.skillContent(name as string),
+		queryKey: ["skill-content", name, file ?? null],
+		queryFn: () => dataApi.skillContent(name as string, file ?? undefined),
 		enabled: !!name,
 	});
 }
@@ -63,7 +63,10 @@ export function useMcpMutations() {
 }
 export function useSkillMutations() {
 	const qc = useQueryClient();
-	const onSuccess = () => qc.invalidateQueries({ queryKey: ["skills"] });
+	const onSuccess = () => {
+		qc.invalidateQueries({ queryKey: ["skills"] });
+		qc.invalidateQueries({ queryKey: ["skill-content"] });
+	};
 	return {
 		save: useMutation({
 			mutationFn: ({ name, content }: { name: string; content: string }) =>
@@ -77,6 +80,30 @@ export function useSkillMutations() {
 		}),
 		remove: useMutation({
 			mutationFn: (name: string) => dataApi.deleteSkill(name),
+			onSuccess,
+		}),
+		saveFile: useMutation({
+			mutationFn: ({
+				skill,
+				path,
+				content,
+				encoding,
+			}: {
+				skill: string;
+				path: string;
+				content: string;
+				encoding?: string;
+			}) => dataApi.saveSkillFile(skill, path, content, encoding),
+			onSuccess,
+		}),
+		deleteFile: useMutation({
+			mutationFn: ({ skill, path }: { skill: string; path: string }) =>
+				dataApi.deleteSkillFile(skill, path),
+			onSuccess,
+		}),
+		importZip: useMutation({
+			mutationFn: ({ name, zip_b64 }: { name: string; zip_b64: string }) =>
+				dataApi.importSkill(name, zip_b64),
 			onSuccess,
 		}),
 	};

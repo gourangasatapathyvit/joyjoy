@@ -153,6 +153,8 @@ export interface SkillContent {
 	editable: boolean;
 	enabled?: boolean;
 	content: string;
+	linked_files?: Record<string, boolean>;
+	path?: string;
 	error?: string;
 }
 

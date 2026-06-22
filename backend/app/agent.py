@@ -14,10 +14,13 @@ Capabilities loaded on demand by the agent:
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import json
 import logging
 import os
 import re
+import zipfile
 from pathlib import Path
 
 from deepagents import create_deep_agent
@@ -639,6 +642,142 @@ async def toggle_user_skill(user_id, name, enabled) -> dict:
         sk.is_active = bool(enabled)
     _invalidate_user_cache(user_id)
     return {"ok": True, "name": name, "enabled": bool(enabled)}
+
+
+# ---- per-user skill FILES (multi-file skills: SKILL.md + helper tree) ----
+_MAX_SKILL_FILES = 300
+_MAX_FILE_BYTES = 5 * 1024 * 1024
+_MAX_SKILL_BYTES = 30 * 1024 * 1024
+
+
+def _safe_rel(path: str) -> str | None:
+    """Normalize a skill-relative file path; reject traversal/absolute paths."""
+    p = (path or "").replace("\\", "/").strip().lstrip("/")
+    parts = [seg for seg in p.split("/") if seg]
+    if not parts or any(seg in (".", "..") for seg in parts):
+        return None
+    return "/".join(parts)
+
+
+async def _get_or_create_user_skill(s, user_id, name):
+    sk = await s.scalar(select(UserSkill).where(UserSkill.user_id == str(user_id), UserSkill.name == name))
+    if sk is None:
+        sk = UserSkill(user_id=str(user_id), name=name, content="", description="")
+        s.add(sk)
+        await s.flush()
+    return sk
+
+
+async def save_user_skill_file(user_id, name, path, content, encoding="utf-8") -> dict:
+    """Create/overwrite one file in a user skill. ``path='SKILL.md'`` updates the
+    skill body; any other path is a helper file (``skill_files``). ``encoding`` is
+    'utf-8' (text) or 'base64' (binary). Creates the skill if it doesn't exist."""
+    name = (name or "").strip()
+    if not _valid_name(name):
+        return {"ok": False, "error": "invalid skill name"}
+    rel = _safe_rel(path)
+    if not rel:
+        return {"ok": False, "error": "invalid file path"}
+    raw_len = len(content or "")
+    if encoding == "base64":
+        try:
+            raw_len = len(base64.b64decode(content or ""))
+        except Exception:
+            return {"ok": False, "error": "invalid base64 content"}
+    if raw_len > _MAX_FILE_BYTES:
+        return {"ok": False, "error": "file too large"}
+    async with db_session() as s:
+        sk = await _get_or_create_user_skill(s, user_id, name)
+        if rel == "SKILL.md":
+            sk.content = content or ""
+            sk.description = _parse_skill_frontmatter(content or "", name).get("description", "")
+            sk.is_active = True
+        else:
+            f = await s.scalar(
+                select(SkillFile).where(SkillFile.user_skill_id == sk.id, SkillFile.filename == rel)
+            )
+            if f is None:
+                f = SkillFile(user_skill_id=sk.id, filename=rel)
+                s.add(f)
+            f.content = content or ""
+            f.encoding = "base64" if encoding == "base64" else "utf-8"
+    _invalidate_user_cache(user_id)
+    return {"ok": True, "name": name, "path": rel}
+
+
+async def delete_user_skill_file(user_id, name, path) -> dict:
+    name = (name or "").strip()
+    rel = _safe_rel(path)
+    if not _valid_name(name) or not rel:
+        return {"ok": False, "error": "invalid skill/path"}
+    if rel == "SKILL.md":
+        return {"ok": False, "error": "cannot delete SKILL.md — delete the whole skill instead"}
+    async with db_session() as s:
+        sk = await s.scalar(select(UserSkill).where(UserSkill.user_id == str(user_id), UserSkill.name == name))
+        if not sk:
+            return {"ok": False, "error": "skill not found"}
+        res = await s.execute(
+            sa_delete(SkillFile).where(SkillFile.user_skill_id == sk.id, SkillFile.filename == rel)
+        )
+        existed = (res.rowcount or 0) > 0
+    if existed:
+        _invalidate_user_cache(user_id)
+    return {"ok": existed, "name": name, "path": rel}
+
+
+async def import_user_skill(user_id, name, zip_b64) -> dict:
+    """Create/replace a user skill from a base64-encoded zip of a skill folder
+    (SKILL.md + helper tree). Binary files are stored base64. Replaces the skill's
+    existing files. Caps file count / per-file / total size."""
+    name = (name or "").strip()
+    if not _valid_name(name):
+        return {"ok": False, "error": "invalid skill name"}
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(base64.b64decode(zip_b64 or "")))
+    except Exception:
+        return {"ok": False, "error": "invalid zip"}
+    infos = [zi for zi in zf.infolist() if not zi.is_dir()]
+    md = [zi for zi in infos if zi.filename.replace("\\", "/").rsplit("/", 1)[-1] == "SKILL.md"]
+    if not md:
+        return {"ok": False, "error": "zip must contain a SKILL.md"}
+    md_path = min((zi.filename.replace("\\", "/") for zi in md), key=lambda n: n.count("/"))
+    root = md_path[: md_path.rfind("SKILL.md")]  # prefix incl. trailing slash (or "")
+    collected: list[tuple[str, bytes]] = []
+    total = 0
+    for zi in infos:
+        nn = zi.filename.replace("\\", "/")
+        if root and not nn.startswith(root):
+            continue
+        rel = _safe_rel(nn[len(root):])
+        if not rel:
+            continue
+        if zi.file_size > _MAX_FILE_BYTES:
+            return {"ok": False, "error": f"{rel} too large"}
+        total += zi.file_size
+        if total > _MAX_SKILL_BYTES:
+            return {"ok": False, "error": "skill too large"}
+        if len(collected) >= _MAX_SKILL_FILES:
+            return {"ok": False, "error": "too many files"}
+        collected.append((rel, zf.read(zi)))
+    async with db_session() as s:
+        sk = await _get_or_create_user_skill(s, user_id, name)
+        await s.execute(sa_delete(SkillFile).where(SkillFile.user_skill_id == sk.id))
+        nfiles = 0
+        for rel, data in collected:
+            if rel == "SKILL.md":
+                text = data.decode("utf-8", "replace")
+                sk.content = text
+                sk.description = _parse_skill_frontmatter(text, name).get("description", "")
+                sk.is_active = True
+                continue
+            try:
+                content, enc = data.decode("utf-8"), "utf-8"
+            except UnicodeDecodeError:
+                content, enc = base64.b64encode(data).decode("ascii"), "base64"
+            s.add(SkillFile(user_skill_id=sk.id, filename=rel, content=content, encoding=enc))
+            nfiles += 1
+    _invalidate_user_cache(user_id)
+    return {"ok": True, "name": name, "files": nfiles}
 
 
 # ---- per-user MCP CRUD (data/users/<uid>/mcp.json; global is read-only) ----
