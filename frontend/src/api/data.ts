@@ -4,7 +4,6 @@ import type {
 	McpServer,
 	McpTool,
 	Memory,
-	MemorySection,
 	ModelsConfigResponse,
 	ModelTestResult,
 	Skill,
@@ -95,11 +94,10 @@ export const dataApi = {
 			body: JSON.stringify({ id }),
 		}),
 
-	memory: () =>
-		http<Memory & { external_notes_enabled?: boolean }>("/v1/memory"),
-	writeMemory: (section: MemorySection, content: string) =>
+	memory: () => http<Memory>("/v1/memory"),
+	writeMemory: (content: string) =>
 		http<Ok>("/v1/memory/write", {
 			method: "POST",
-			body: JSON.stringify({ section, content }),
+			body: JSON.stringify({ content }),
 		}),
 };

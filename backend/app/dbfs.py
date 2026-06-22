@@ -1,6 +1,6 @@
 """DB-backed deepagents backends — the bridge that lets the agent read/write its
-``/memory/`` and ``/skills/user/`` mounts straight against the relational DB
-(``user_configs`` / ``user_skills`` / ``skill_files``) instead of the KV store.
+``/memory/AGENTS.md`` and ``/skills/user/`` mounts straight against the relational
+DB (``user_configs`` / ``user_skills`` / ``skill_files``) instead of the KV store.
 
 These mount under ``CompositeBackend`` (see ``agent.build_backend``), which strips
 the route prefix and calls the **async** methods (``als``/``aread``/``awrite``/
@@ -39,8 +39,9 @@ from .db.models import GlobalSkill, SkillFile, UserConfig, UserSkill
 
 logger = logging.getLogger("joyjoy.dbfs")
 
-# /memory/<file> -> UserConfig column (the frontend memory sections live here too).
-_MEM_FILES = {"MEMORY.md": "notes", "USER.md": "about_you", "SOUL.md": "persona"}
+# /memory/<file> -> UserConfig column. A single AGENTS.md per user (deepagents'
+# MemoryMiddleware convention); the UI Memory panel edits the same row.
+_MEM_FILES = {"AGENTS.md": "agents_md"}
 
 
 def _read_result(content: str, offset: int, limit: int) -> ReadResult:
@@ -52,8 +53,8 @@ def _read_result(content: str, offset: int, limit: int) -> ReadResult:
 
 
 class MemoryBackend(BackendProtocol):
-    """``/memory/`` ↔ ``user_configs`` (notes / about_you / persona). Read+write so
-    the agent's memory tools and the UI Memory panel share one source of truth."""
+    """``/memory/AGENTS.md`` ↔ ``user_configs.agents_md``. Read+write so the agent's
+    MemoryMiddleware + edit_file and the UI Memory panel share one source of truth."""
 
     def __init__(self, user_id: str) -> None:
         self.user_id = str(user_id or "default")
@@ -100,7 +101,7 @@ class MemoryBackend(BackendProtocol):
     async def awrite(self, file_path: str, content: str) -> WriteResult:
         col = self._col(file_path)
         if not col:
-            return WriteResult(error=f"Cannot write {file_path}: only MEMORY.md / USER.md / SOUL.md exist")
+            return WriteResult(error=f"Cannot write {file_path}: only AGENTS.md exists in /memory/")
         await self._set(col, content)  # memory slots overwrite (no create-only error)
         return WriteResult(path=file_path)
 

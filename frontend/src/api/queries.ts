@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { dataApi } from "@/api/data";
-import type { MemorySection } from "@/api/types";
 
 // ── Reads ──────────────────────────────────────────────────────────────────
 export function useModels() {
@@ -126,13 +125,7 @@ export function useModelMutations() {
 export function useWriteMemory() {
 	const qc = useQueryClient();
 	return useMutation({
-		mutationFn: ({
-			section,
-			content,
-		}: {
-			section: MemorySection;
-			content: string;
-		}) => dataApi.writeMemory(section, content),
+		mutationFn: (content: string) => dataApi.writeMemory(content),
 		onSuccess: () => qc.invalidateQueries({ queryKey: ["memory"] }),
 	});
 }

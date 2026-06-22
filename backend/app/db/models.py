@@ -127,9 +127,9 @@ class UserConfig(Base):
     default_model: Mapped[str] = mapped_column(String(128), default="")
     default_reasoning: Mapped[str] = mapped_column(String(16), default="off")
     locale: Mapped[str] = mapped_column(String(16), default="en")
-    notes: Mapped[str] = mapped_column(Text, default="")  # memory: long-term notes
-    about_you: Mapped[str] = mapped_column(Text, default="")  # memory: about the user
-    persona: Mapped[str] = mapped_column(Text, default="")  # memory: agent soul
+    # Single per-user long-term memory doc (deepagents AGENTS.md convention),
+    # loaded by MemoryMiddleware and editable by the agent (edit_file) + the UI.
+    agents_md: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 

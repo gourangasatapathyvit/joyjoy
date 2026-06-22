@@ -468,13 +468,12 @@ async def models_config_test(request: Request):
     return JSONResponse(await test_model(settings, uid, model_id))
 
 
-# ── Memory (per-user notes / profile / soul) ──
+# ── Memory (per-user AGENTS.md — deepagents MemoryMiddleware) ──
 @app.get("/v1/memory")
 async def memory_get(request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
-    mem = await read_memory(uid)
-    return {**mem, "external_notes_enabled": False}
+    return await read_memory(uid)
 
 
 @app.post("/v1/memory/write")
@@ -482,7 +481,7 @@ async def memory_write(request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
     body = await _json(request)
-    return JSONResponse(await write_memory(uid, body.get("section"), body.get("content")))
+    return JSONResponse(await write_memory(uid, body.get("content")))
 
 
 # ── Workspace (PER-SESSION file browser + CRUD over the agent's working dir) ──

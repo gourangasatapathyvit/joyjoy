@@ -24,7 +24,7 @@ import zipfile
 from pathlib import Path
 
 from deepagents import create_deep_agent
-from deepagents.backends import CompositeBackend, FilesystemBackend
+from deepagents.backends import CompositeBackend, FilesystemBackend, StoreBackend
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_openai import AzureChatOpenAI
@@ -55,7 +55,16 @@ DEFAULT_SYSTEM_PROMPT = (
     "You are joyjoy, a helpful AI assistant running as a multi-tenant deep agent. "
     "Each user has a private, isolated workspace, long-term memory, and skills. "
     "Use your filesystem and memory tools to keep durable, per-user context, and use "
-    "your skills and plugin tools when they help."
+    "your skills and plugin tools when they help.\n\n"
+    "Memory layout:\n"
+    "- `/memory/AGENTS.md` — your core long-term memory; it is ALWAYS loaded into "
+    "your context. Keep it concise; update it with `edit_file` for durable, "
+    "frequently-needed facts (the user's identity, standing preferences, how to behave).\n"
+    "- `/memories/` — a persistent, cross-session folder for everything else. Create "
+    "and organize arbitrary files here on demand (e.g. `/memories/<topic>.md`) for "
+    "scenario- or project-specific notes that don't need to be in context every turn. "
+    "Use `ls`/`glob`/`read_file` to find and load them when relevant, and "
+    "`write_file`/`edit_file` to record new ones."
 )
 
 # Skill sources the agent reads on demand: read-only global (shared) + per-user.
@@ -275,10 +284,17 @@ def build_backend(settings: Settings, user_id: str = "default"):
       ``virtual_mode=True`` so every op is confined there (``..``/``~``/absolute
       escapes are blocked). This is the SAME dir the webui workspace panel browses,
       so whatever the agent reads/writes shows up there — and nowhere else.
-    - ``/memory/`` → ``MemoryBackend`` (DB ``user_configs``); ``/skills/user/`` and
-      ``/skills/global/`` → ``DbSkillsBackend`` (DB ``user_skills``/``global_skills`` +
-      ``skill_files``). Everything but the working files is served from the DB — no
-      disk dependency for memory or skills.
+    - ``/memory/`` → ``MemoryBackend`` (DB ``user_configs.agents_md``, the single
+      always-loaded AGENTS.md); ``/skills/user/`` + ``/skills/global/`` →
+      ``DbSkillsBackend``. Everything but the working files is DB-served.
+    - ``/memories/`` → deepagents' ``StoreBackend``: a dynamic, per-user,
+      cross-thread memory folder backed by the LangGraph store. The agent uses its
+      normal file tools (write_file/read_file/ls/glob/edit_file) to create and
+      organize ARBITRARY scenario-specific memory files here on demand — unlike
+      ``/memory/AGENTS.md`` (always injected into the prompt), these are read on
+      demand. Namespaced ``(uid, "memories")`` so they're private + persist across
+      sessions. Store resolved at runtime via ``get_store()`` (the store passed to
+      ``create_deep_agent``).
     """
     uid = str(user_id or "default")
     host_root = os.path.join(settings.workspace_root_dir, uid, "workspace")
@@ -286,6 +302,7 @@ def build_backend(settings: Settings, user_id: str = "default"):
     working_fs = SessionFilesystemBackend(root_dir=host_root, virtual_mode=True)
     routes: dict[str, object] = {
         "/memory/": MemoryBackend(uid),
+        "/memories/": StoreBackend(namespace=lambda _rt, _ns=(uid, "memories"): _ns),
         "/skills/user/": DbSkillsBackend(user_id=uid),
         "/skills/global/": DbSkillsBackend(),  # shipped, read-only — from the DB
     }
@@ -1094,57 +1111,43 @@ async def delete_user_model(settings, user_id, mid) -> dict:
     return {"ok": existed, "id": mid}
 
 
-# ---- per-user memory docs (notes / profile / soul) — UserConfig columns ----
-# API section -> UserConfig column. Section keys are the frontend's contract.
-MEMORY_FIELDS = {"memory": "notes", "user": "about_you", "soul": "persona"}
+# ---- per-user long-term memory — a single AGENTS.md (user_configs.agents_md) ----
+# deepagents' MemoryMiddleware loads this into the prompt; the agent edits it with
+# edit_file; the UI Memory panel edits the same column.
 
 
 async def read_memory(user_id) -> dict:
-    """Return {memory, user, soul} text for a user (empty strings if unset)."""
-    out = {k: "" for k in MEMORY_FIELDS}
+    """Return {agents_md} text for a user (empty string if unset)."""
+    out = {"agents_md": ""}
     try:
         async with db_session() as s:
             cfg = await s.get(UserConfig, str(user_id or ""))
             if cfg:
-                for sec, col in MEMORY_FIELDS.items():
-                    out[sec] = getattr(cfg, col, "") or ""
+                out["agents_md"] = getattr(cfg, "agents_md", "") or ""
     except Exception:  # noqa: BLE001
         logger.debug("read_memory failed", exc_info=True)
     return out
 
 
-async def write_memory(user_id, section, content) -> dict:
-    if section not in MEMORY_FIELDS:
-        return {"ok": False, "error": "section must be memory|user|soul"}
+async def write_memory(user_id, content) -> dict:
     try:
         async with db_session() as s:
             cfg = await s.get(UserConfig, str(user_id or ""))
             if cfg is None:
                 cfg = UserConfig(user_id=str(user_id))
                 s.add(cfg)
-            setattr(cfg, MEMORY_FIELDS[section], content or "")
+            cfg.agents_md = content or ""
     except Exception as e:  # noqa: BLE001
         logger.warning("write_memory failed", exc_info=True)
         return {"ok": False, "error": str(e)}
-    _invalidate_user_cache(user_id)  # soul/profile/notes feed the system prompt
-    return {"ok": True, "section": section}
+    _invalidate_user_cache(user_id)  # memory feeds the prompt via MemoryMiddleware
+    return {"ok": True}
 
 
 async def _system_prompt_for(user_id) -> str:
-    """Base prompt + the user's soul/profile/notes so memory actually shapes the agent."""
-    base = DEFAULT_SYSTEM_PROMPT
-    try:
-        mem = await read_memory(user_id)
-    except Exception:  # noqa: BLE001
-        return base
-    parts = []
-    if (mem.get("soul") or "").strip():
-        parts.append("## Your persona (agent soul)\n" + mem["soul"].strip())
-    if (mem.get("user") or "").strip():
-        parts.append("## About the user\n" + mem["user"].strip())
-    if (mem.get("memory") or "").strip():
-        parts.append("## Long-term notes to remember\n" + mem["memory"].strip())
-    return base + "\n\n" + "\n\n".join(parts) if parts else base
+    """Just the base prompt — the user's long-term memory (AGENTS.md) is injected
+    separately by deepagents' MemoryMiddleware (see ``memory=`` in create_deep_agent)."""
+    return DEFAULT_SYSTEM_PROMPT
 
 
 async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run_mode, reasoning=None):
@@ -1176,6 +1179,10 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
         context_schema=AgentContext,
         interrupt_on=interrupt_on,
         skills=SKILL_SOURCES,
+        # deepagents MemoryMiddleware: loads the user's AGENTS.md (served from the
+        # DB via the /memory/ mount) into the prompt and lets the agent update it
+        # with edit_file. Replaces the old hand-rolled soul/profile/notes injection.
+        memory=["/memory/AGENTS.md"],
     )
     _AGENT_CACHE[key] = agent
     logger.info(

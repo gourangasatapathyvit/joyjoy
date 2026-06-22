@@ -159,11 +159,9 @@ export interface SkillContent {
 }
 
 export interface Memory {
-	memory: string;
-	user: string;
-	soul: string;
+	// The user's single long-term memory doc (deepagents AGENTS.md convention).
+	agents_md: string;
 }
-export type MemorySection = "memory" | "user" | "soul";
 
 // ── Sessions (conversation threads) ────────────────────────────────────────
 export interface Session {
