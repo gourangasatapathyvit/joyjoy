@@ -57,7 +57,12 @@ export const dataApi = {
 			body: JSON.stringify({ name }),
 		}),
 	// Multi-file user skills: per-file save/delete + whole-skill zip import.
-	saveSkillFile: (skill: string, path: string, content: string, encoding = "utf-8") =>
+	saveSkillFile: (
+		skill: string,
+		path: string,
+		content: string,
+		encoding = "utf-8",
+	) =>
 		http<Ok & { path?: string }>("/v1/skills/files/save", {
 			method: "POST",
 			body: JSON.stringify({ skill, path, content, encoding }),

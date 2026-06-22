@@ -8,7 +8,11 @@ import { useNavigate } from "react-router-dom";
 import { authApi, useMe } from "@/api/auth";
 import { persistPref } from "@/api/prefs";
 import { sessionApi, useSessionMutations } from "@/api/sessions";
-import { useSkins, useUiSettings, useUpdateUiSettings } from "@/api/usersettings";
+import {
+	useSkins,
+	useUiSettings,
+	useUpdateUiSettings,
+} from "@/api/usersettings";
 import { ModelPicker } from "@/components/chat/ModelPicker";
 import { LanguageSwitcher } from "@/components/settings/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
@@ -20,8 +24,8 @@ import { ProvidersPanel } from "@/routes/ProvidersPanel";
 import { useChatStore } from "@/store/chat";
 import {
 	type ActivityDisplay,
-	type Skin,
 	SKINS,
+	type Skin,
 	useSettingsStore,
 } from "@/store/settings";
 

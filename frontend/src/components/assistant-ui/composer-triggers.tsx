@@ -1,5 +1,4 @@
 import {
-	ComposerPrimitive,
 	type Unstable_DirectiveFormatter,
 	type Unstable_DirectiveSegment,
 	unstable_useMentionAdapter,
@@ -8,14 +7,15 @@ import {
 } from "@assistant-ui/react";
 import type { FC } from "react";
 import { useMcpTools, useSkills } from "@/api/queries";
+import { ComposerTriggerPopover } from "@/components/assistant-ui/composer-trigger-popover";
 
-// ChatGPT/Claude-style composer triggers, built on assistant-ui's (unstable)
-// TriggerPopover primitives:
+// ChatGPT/Claude-style composer triggers. The popover UI is assistant-ui's
+// official registry component (`composer-trigger-popover`); we only supply the
+// adapters + behavior:
 //   "/"  → slash commands = enabled skills; selecting one nudges the agent to
 //          use that skill (skills auto-load, so this is a discoverability hint).
 //   "@"  → mentions = available MCP tools; selecting one inserts a plain
 //          "@toolname" reference that travels with the message text.
-//
 // Both adapters are search-only (empty categories) so the popover shows the
 // full list under the bare trigger char and filters as the user types.
 
@@ -31,6 +31,24 @@ const appendAfterTrigger = (
 		const cur = runtime.getState().text;
 		const prefix = cur ? `${cur.replace(/\s+$/, "")} ` : "";
 		runtime.setText(`${prefix}${insert}`);
+	}, 0);
+};
+
+// After a mention is inserted, the trigger resource leaves the tracked cursor
+// at the trigger offset (it only advances it on close()), so detection keeps
+// matching the just-inserted "@token" and the popover stays open on a plain
+// <textarea>. Move the caret to the end and fire `select` so ComposerInput
+// reports the new position → detection deactivates → popover closes.
+const closeTriggerAfterInsert = () => {
+	setTimeout(() => {
+		const ta = document.querySelector<HTMLTextAreaElement>(
+			"textarea.aui-composer-input",
+		);
+		if (!ta) return;
+		ta.focus();
+		const end = ta.value.length;
+		ta.setSelectionRange(end, end);
+		ta.dispatchEvent(new Event("select", { bubbles: true }));
 	}, 0);
 };
 
@@ -56,39 +74,6 @@ const mentionFormatter: Unstable_DirectiveFormatter = {
 	},
 };
 
-const POPOVER_CLS =
-	"aui-trigger-popover bg-popover text-popover-foreground border-border absolute bottom-full left-0 z-50 mb-2 flex max-h-72 w-[min(24rem,90vw)] flex-col gap-0.5 overflow-y-auto rounded-xl border p-1.5 shadow-lg";
-const ITEM_CLS =
-	"aui-trigger-item flex w-full cursor-pointer flex-col items-start gap-0.5 rounded-lg px-2.5 py-1.5 text-left text-sm outline-none data-[highlighted=true]:bg-accent data-[highlighted=true]:text-accent-foreground";
-
-const TriggerItems: FC<{ empty: string }> = ({ empty }) => (
-	<ComposerPrimitive.Unstable_TriggerPopoverItems>
-		{(items) =>
-			items.length === 0 ? (
-				<div className="text-muted-foreground px-2.5 py-1.5 text-sm">
-					{empty}
-				</div>
-			) : (
-				items.map((item, i) => (
-					<ComposerPrimitive.Unstable_TriggerPopoverItem
-						key={item.id}
-						item={item}
-						index={i}
-						className={ITEM_CLS}
-					>
-						<span className="font-medium">{item.label}</span>
-						{item.description ? (
-							<span className="text-muted-foreground line-clamp-1 text-xs">
-								{item.description}
-							</span>
-						) : null}
-					</ComposerPrimitive.Unstable_TriggerPopoverItem>
-				))
-			)
-		}
-	</ComposerPrimitive.Unstable_TriggerPopoverItems>
-);
-
 export const ComposerTriggers: FC = () => {
 	const composerRuntime = useComposerRuntime();
 	const skills = useSkills();
@@ -110,6 +95,7 @@ export const ComposerTriggers: FC = () => {
 	const mention = unstable_useMentionAdapter({
 		includeModelContextTools: false,
 		formatter: mentionFormatter,
+		onInserted: closeTriggerAfterInsert,
 		items: (tools.data?.tools ?? []).map((tool) => ({
 			id: `${tool.server}:${tool.name}`,
 			type: "tool",
@@ -120,25 +106,18 @@ export const ComposerTriggers: FC = () => {
 
 	return (
 		<>
-			<ComposerPrimitive.Unstable_TriggerPopover
+			<ComposerTriggerPopover
 				char="/"
 				adapter={slash.adapter}
-				className={POPOVER_CLS}
-			>
-				<ComposerPrimitive.Unstable_TriggerPopover.Action {...slash.action} />
-				<TriggerItems empty="No skills available" />
-			</ComposerPrimitive.Unstable_TriggerPopover>
-
-			<ComposerPrimitive.Unstable_TriggerPopover
+				action={slash.action}
+				emptyItemsLabel="No skills available"
+			/>
+			<ComposerTriggerPopover
 				char="@"
 				adapter={mention.adapter}
-				className={POPOVER_CLS}
-			>
-				<ComposerPrimitive.Unstable_TriggerPopover.Directive
-					{...mention.directive}
-				/>
-				<TriggerItems empty="No tools available" />
-			</ComposerPrimitive.Unstable_TriggerPopover>
+				directive={mention.directive}
+				emptyItemsLabel="No tools available"
+			/>
 		</>
 	);
 };

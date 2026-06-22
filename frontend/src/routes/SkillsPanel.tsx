@@ -55,7 +55,10 @@ function ImportZipButton({
 		const base = file.name.replace(/\.zip$/i, "");
 		const name = (
 			defaultName ??
-			window.prompt(t("skills.importNamePrompt", "Name for the imported skill:"), base) ??
+			window.prompt(
+				t("skills.importNamePrompt", "Name for the imported skill:"),
+				base,
+			) ??
 			""
 		).trim();
 		if (!name) return;
@@ -138,7 +141,11 @@ function CreateSkillForm({
 					<Button size="sm" variant="ghost" onClick={onCancel}>
 						{t("common.cancel")}
 					</Button>
-					<Button size="sm" onClick={onSave} disabled={!name.trim() || save.isPending}>
+					<Button
+						size="sm"
+						onClick={onSave}
+						disabled={!name.trim() || save.isPending}
+					>
 						{save.isPending ? t("common.saving") : t("common.save")}
 					</Button>
 				</div>
@@ -161,11 +168,16 @@ function CreateSkillForm({
 							value={content}
 							onChange={(e) => setContent(e.target.value)}
 							className="min-h-0 flex-1 resize-none font-mono text-xs"
-							placeholder={"---\nname: my-skill\ndescription: what it does\n---\n\nInstructions…"}
+							placeholder={
+								"---\nname: my-skill\ndescription: what it does\n---\n\nInstructions…"
+							}
 						/>
 					</div>
 					<p className="text-xs text-muted-foreground">
-						{t("skills.createHint", "Add helper files (scripts/, references/, …) after saving — or import a .zip.")}
+						{t(
+							"skills.createHint",
+							"Add helper files (scripts/, references/, …) after saving — or import a .zip.",
+						)}
 					</p>
 					{err && <p className="text-xs text-destructive">{err}</p>}
 				</div>
@@ -175,7 +187,12 @@ function CreateSkillForm({
 }
 
 // Build a nested folder tree from flat relative paths (e.g. "scripts/run.py").
-type TreeNode = { name: string; path: string; dir: boolean; children: TreeNode[] };
+type TreeNode = {
+	name: string;
+	path: string;
+	dir: boolean;
+	children: TreeNode[];
+};
 
 function buildTree(paths: string[]): TreeNode[] {
 	const roots: TreeNode[] = [];
@@ -188,18 +205,27 @@ function buildTree(paths: string[]): TreeNode[] {
 			const isFile = i === segs.length - 1;
 			let node = level.find((n) => n.name === seg && n.dir === !isFile);
 			if (!node) {
-				node = { name: seg, path: isFile ? p : acc, dir: !isFile, children: [] };
+				node = {
+					name: seg,
+					path: isFile ? p : acc,
+					dir: !isFile,
+					children: [],
+				};
 				level.push(node);
 			}
 			level = node.children;
 		});
 	}
 	const sort = (ns: TreeNode[]) => {
-		ns.sort((a, b) => (a.dir !== b.dir ? (a.dir ? -1 : 1) : a.name.localeCompare(b.name)));
+		ns.sort((a, b) =>
+			a.dir !== b.dir ? (a.dir ? -1 : 1) : a.name.localeCompare(b.name),
+		);
 		for (const n of ns) sort(n.children);
 	};
 	sort(roots);
-	roots.sort((a, b) => (a.name === "SKILL.md" ? -1 : b.name === "SKILL.md" ? 1 : 0)); // SKILL.md first
+	roots.sort((a, b) =>
+		a.name === "SKILL.md" ? -1 : b.name === "SKILL.md" ? 1 : 0,
+	); // SKILL.md first
 	return roots;
 }
 
@@ -243,7 +269,9 @@ function FileTreeNodes({
 									<ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
 								)}
 								<Folder className="size-3.5 shrink-0 text-muted-foreground" />
-								<span className="truncate font-mono text-[12px] text-foreground">{n.name}</span>
+								<span className="truncate font-mono text-[12px] text-foreground">
+									{n.name}
+								</span>
 							</button>
 							{open && (
 								<FileTreeNodes
@@ -319,7 +347,10 @@ function SkillWorkspace({
 	const { data: meta } = useSkillContent(skill.name); // SKILL.md + linked_files
 	const [sel, setSel] = useState("SKILL.md");
 	const isMd = sel === "SKILL.md";
-	const { data: fileData, isLoading } = useSkillContent(skill.name, isMd ? null : sel);
+	const { data: fileData, isLoading } = useSkillContent(
+		skill.name,
+		isMd ? null : sel,
+	);
 	const current = isMd ? meta : fileData;
 
 	const [draft, setDraft] = useState("");
@@ -348,7 +379,9 @@ function SkillWorkspace({
 			{ skill: skill.name, path: sel, content: draft },
 			{
 				onSuccess: (r) =>
-					r?.ok === false ? setErr(r.error ?? t("skills.saveFailed")) : setDirty(false),
+					r?.ok === false
+						? setErr(r.error ?? t("skills.saveFailed"))
+						: setDirty(false),
 				onError: () => setErr(t("skills.saveFailed")),
 			},
 		);
@@ -361,13 +394,23 @@ function SkillWorkspace({
 		if (!p) return;
 		saveFile.mutate(
 			{ skill: skill.name, path: p, content: "" },
-			{ onSuccess: (r) => (r?.ok === false ? window.alert(r.error) : setSel(p.replace(/^\/+/, ""))) },
+			{
+				onSuccess: (r) =>
+					r?.ok === false
+						? window.alert(r.error)
+						: setSel(p.replace(/^\/+/, "")),
+			},
 		);
 	};
 
 	const onDeleteFile = (p: string) => {
 		if (p === "SKILL.md") return;
-		if (!window.confirm(t("skills.deleteFileConfirm", { defaultValue: "Delete this file?" }))) return;
+		if (
+			!window.confirm(
+				t("skills.deleteFileConfirm", { defaultValue: "Delete this file?" }),
+			)
+		)
+			return;
 		deleteFile.mutate(
 			{ skill: skill.name, path: p },
 			{ onSuccess: () => sel === p && setSel("SKILL.md") },
@@ -399,8 +442,15 @@ function SkillWorkspace({
 							label={t("skills.reimport", "Re-import .zip")}
 							onImported={() => setSel("SKILL.md")}
 						/>
-						<Button size="sm" variant="ghost" onClick={() => remove.mutate(skill.name, { onSuccess: onDeleted })}>
-							<Trash2 className="size-3.5" /> {t("skills.deleteSkill", "Delete skill")}
+						<Button
+							size="sm"
+							variant="ghost"
+							onClick={() =>
+								remove.mutate(skill.name, { onSuccess: onDeleted })
+							}
+						>
+							<Trash2 className="size-3.5" />{" "}
+							{t("skills.deleteSkill", "Delete skill")}
 						</Button>
 					</div>
 				)}
@@ -441,11 +491,15 @@ function SkillWorkspace({
 				{/* file content: edit (user) or view (global) */}
 				<div className="flex min-h-0 flex-1 flex-col px-6 py-4">
 					{isLoading ? (
-						<p className="text-sm text-muted-foreground">{t("common.loading")}</p>
+						<p className="text-sm text-muted-foreground">
+							{t("common.loading")}
+						</p>
 					) : editable ? (
 						<div className="flex min-h-0 flex-1 flex-col gap-2">
 							<div className="flex items-center justify-between">
-								<span className="font-mono text-xs text-muted-foreground">{sel}</span>
+								<span className="font-mono text-xs text-muted-foreground">
+									{sel}
+								</span>
 								<Button
 									size="sm"
 									onClick={onSaveFile}
@@ -499,7 +553,9 @@ export function SkillsPanel() {
 
 	const q = query.trim().toLowerCase();
 	const filtered = q
-		? skills.filter((s) => `${s.name} ${s.description ?? ""}`.toLowerCase().includes(q))
+		? skills.filter((s) =>
+				`${s.name} ${s.description ?? ""}`.toLowerCase().includes(q),
+			)
 		: skills;
 	const selectedSkill = skills.find((s) => s.name === selected) ?? null;
 
@@ -555,7 +611,9 @@ export function SkillsPanel() {
 
 				<div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
 					{isLoading ? (
-						<p className="px-2 py-4 text-xs text-muted-foreground">{t("common.loading")}</p>
+						<p className="px-2 py-4 text-xs text-muted-foreground">
+							{t("common.loading")}
+						</p>
 					) : filtered.length === 0 ? (
 						<p className="px-2 py-4 text-xs text-muted-foreground">
 							{q ? t("common.noMatches") : t("skills.none")}
@@ -597,8 +655,12 @@ export function SkillsPanel() {
 											{s.editable ? (
 												<Switch
 													checked={s.enabled}
-													onCheckedChange={(v) => toggle.mutate({ name: s.name, enabled: v })}
-													aria-label={s.enabled ? t("skills.disable") : t("skills.enable")}
+													onCheckedChange={(v) =>
+														toggle.mutate({ name: s.name, enabled: v })
+													}
+													aria-label={
+														s.enabled ? t("skills.disable") : t("skills.enable")
+													}
 													className="shrink-0"
 												/>
 											) : (
@@ -626,12 +688,18 @@ export function SkillsPanel() {
 					<div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
 						<Sparkles className="size-8 text-muted-foreground opacity-40" />
 						<div className="space-y-1">
-							<p className="text-sm font-medium text-foreground">{t("skills.selectTitle")}</p>
+							<p className="text-sm font-medium text-foreground">
+								{t("skills.selectTitle")}
+							</p>
 							<p className="mx-auto max-w-xs text-xs text-muted-foreground">
 								{t("skills.selectHint")}
 							</p>
 						</div>
-						<Button size="sm" variant="outline" onClick={() => setCreating(true)}>
+						<Button
+							size="sm"
+							variant="outline"
+							onClick={() => setCreating(true)}
+						>
 							<Plus className="size-3.5" /> {t("skills.newSkill")}
 						</Button>
 					</div>

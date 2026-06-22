@@ -1,11 +1,15 @@
 import { useTheme } from "next-themes";
 import { useEffect, useRef } from "react";
 import { suspendPrefSave } from "@/api/prefs";
-import { useUiSettings } from "@/api/usersettings";
 import type { ReasoningEffort } from "@/api/types";
+import { useUiSettings } from "@/api/usersettings";
 import { setLanguage } from "@/i18n/config";
 import { useChatStore } from "@/store/chat";
-import { type ActivityDisplay, type Skin, useSettingsStore } from "@/store/settings";
+import {
+	type ActivityDisplay,
+	type Skin,
+	useSettingsStore,
+} from "@/store/settings";
 
 // Applies the user's server-stored prefs (UserConfig) once after login: skin,
 // theme, locale, activity display, auto-follow, and the default model/reasoning.
