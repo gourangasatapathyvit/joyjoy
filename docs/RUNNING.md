@@ -79,3 +79,25 @@ cd backend
 .venv/bin/alembic revision --autogenerate -m "describe change"
 .venv/bin/alembic upgrade head
 ```
+
+## Seed data (global / non-user)
+
+The shipped catalogs (skins, providers, base models, MCP servers, and the global
+skills + their files) are seeded into the DB on startup from committed sources:
+`app/db/seeds/global_skills.json` (skills bundle), `config/global.mcp.json`,
+`config/models.json`. Global skills live entirely in the DB (no `skills/` dir);
+regenerate the bundle with `scripts/build_global_skills_seed.py`.
+
+A portable **SQL** export of all non-user data is also committed at
+`app/db/seeds/global_seed.sql` (skins, global_providers, global_models,
+global_mcps, global_skills, global skill_files — no user data). Load it into a
+fresh DB instead of running the Python seed:
+
+```bash
+psql "$DATABASE_URL" -f app/db/seeds/global_seed.sql        # prod (Postgres)
+sqlite3 data/joyjoy.db < app/db/seeds/global_seed.sql       # dev (SQLite)
+```
+Run it after the schema exists (`create_all` / `alembic upgrade head`). Global-model
+API keys are **blank** in the SQL (env secrets — set them via Settings → Providers);
+regenerate with `scripts/dump_global_seed_sql.py` (add `--with-secrets` to include
+the Fernet-encrypted blobs, which only work with the matching `CREDENTIAL_ENCRYPTION_KEY`).
