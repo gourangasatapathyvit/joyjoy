@@ -17,6 +17,7 @@ import {
 	XCircleIcon,
 } from "lucide-react";
 import { memo, useCallback, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
 	Collapsible,
@@ -132,13 +133,14 @@ function ToolFallbackTrigger({
 	toolName: string;
 	status?: ToolCallMessagePartStatus;
 }) {
+	const { t } = useTranslation();
 	const statusType = status?.type ?? "complete";
 	const isRunning = statusType === "running";
 	const isCancelled =
 		status?.type === "incomplete" && status.reason === "cancelled";
 
 	const Icon = statusIconMap[statusType];
-	const label = isCancelled ? "Cancelled tool" : "Used tool";
+	const label = isCancelled ? t("tools.cancelled") : t("tools.used");
 
 	return (
 		<CollapsibleTrigger
@@ -271,6 +273,7 @@ function ToolFallbackError({
 }: React.ComponentProps<"div"> & {
 	status?: ToolCallMessagePartStatus;
 }) {
+	const { t } = useTranslation();
 	if (status?.type !== "incomplete") return null;
 
 	const error = status.error;
@@ -283,7 +286,9 @@ function ToolFallbackError({
 	if (!errorText) return null;
 
 	const isCancelled = status.reason === "cancelled";
-	const headerText = isCancelled ? "Cancelled reason:" : "Error:";
+	const headerText = isCancelled
+		? t("tools.cancelledReason")
+		: t("tools.errorLabel");
 
 	return (
 		<div
@@ -301,23 +306,29 @@ function ToolFallbackError({
 	);
 }
 
+// Tool-RESULT payloads that flow back to the model — kept English (consistent
+// model-facing content), NOT translated like UI chrome.
 const APPROVED_RESULT = "Approved by user";
 const DENIED_RESULT = "User denied tool execution";
 
-const APPROVAL_OPTION_DEFAULT_LABELS: Record<string, string> = {
-	"allow-once": "Allow",
-	"allow-always": "Always allow",
-	"reject-once": "Deny",
-	"reject-always": "Always deny",
+// Maps an approval kind to its i18n key for the button label.
+const APPROVAL_OPTION_KEYS: Record<string, string> = {
+	"allow-once": "tools.allow",
+	"allow-always": "tools.allowAlways",
+	"reject-once": "tools.deny",
+	"reject-always": "tools.denyAlways",
 };
 
 const isAllowKind = (kind: string) =>
 	kind === "allow-once" || kind === "allow-always";
 
-const approvalOptionLabel = (option: ToolApprovalOption) =>
+const approvalOptionLabel = (
+	option: ToolApprovalOption,
+	t: (key: string) => string,
+) =>
 	option.label ??
-	(Object.hasOwn(APPROVAL_OPTION_DEFAULT_LABELS, option.kind)
-		? APPROVAL_OPTION_DEFAULT_LABELS[option.kind]
+	(Object.hasOwn(APPROVAL_OPTION_KEYS, option.kind)
+		? t(APPROVAL_OPTION_KEYS[option.kind] as string)
 		: undefined) ??
 	option.id;
 
@@ -338,6 +349,7 @@ function ToolFallbackApproval({
 	}) {
 	const [submitted, setSubmitted] = useState(false);
 	const [confirmingId, setConfirmingId] = useState<string | null>(null);
+	const { t } = useTranslation();
 
 	if (
 		approval != null &&
@@ -351,7 +363,7 @@ function ToolFallbackApproval({
 	// always preserves a refusal path.
 	const declaredOptions = respondToApproval ? approval?.options : undefined;
 	const options = declaredOptions?.filter((o) =>
-		Object.hasOwn(APPROVAL_OPTION_DEFAULT_LABELS, o.kind),
+		Object.hasOwn(APPROVAL_OPTION_KEYS, o.kind),
 	);
 
 	const respond = (approved: boolean) => {
@@ -405,7 +417,7 @@ function ToolFallbackApproval({
 				{...props}
 			>
 				<p className="aui-tool-fallback-approval-confirm-title font-semibold">
-					{confirmMeta?.title ?? `${approvalOptionLabel(confirming)}?`}
+					{confirmMeta?.title ?? `${approvalOptionLabel(confirming, t)}?`}
 				</p>
 				{confirmDescription && (
 					<p className="aui-tool-fallback-approval-confirm-description text-muted-foreground">
@@ -464,7 +476,7 @@ function ToolFallbackApproval({
 						onClick={() => handleOption(option)}
 						disabled={submitted}
 					>
-						{approvalOptionLabel(option)}
+						{approvalOptionLabel(option, t)}
 					</Button>
 				))}
 				{rejectOptions.length === 0 && (
@@ -517,6 +529,7 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 	approval,
 	respondToApproval,
 }) => {
+	const { t } = useTranslation();
 	// joyjoy HITL: the backend gates MCP/plugin tools; the pending approval is
 	// surfaced via context (keyed by toolCallId) and rendered inline below.
 	const { pending, respond } = useApprovals();
@@ -555,14 +568,14 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 				{joyApproval && toolCallId && (
 					<div className="aui-tool-fallback-approval flex items-center gap-2 pt-1">
 						<Button size="sm" onClick={() => respond(toolCallId, "approve")}>
-							Allow once
+							{t("tools.allowOnce")}
 						</Button>
 						<Button
 							size="sm"
 							variant="outline"
 							onClick={() => respond(toolCallId, "reject")}
 						>
-							Deny
+							{t("tools.deny")}
 						</Button>
 					</div>
 				)}

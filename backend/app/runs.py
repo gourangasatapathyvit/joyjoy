@@ -95,6 +95,10 @@ async def _stream_segment(run: _Run, agent_input):
                 continue
             for _node, upd in chunk.items():
                 msgs = upd.get("messages") if isinstance(upd, dict) else None
+                # A node may bypass the reducer with langgraph's Overwrite wrapper
+                # ({"messages": Overwrite(value=[...])}) — unwrap to the real list.
+                if msgs is not None and not isinstance(msgs, list) and hasattr(msgs, "value"):
+                    msgs = msgs.value
                 for m in (msgs or []):
                     if isinstance(m, AIMessage) and getattr(m, "tool_calls", None):
                         for tc in m.tool_calls:

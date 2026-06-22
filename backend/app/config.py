@@ -15,6 +15,8 @@ from urllib.parse import quote
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .enums import Provider
+
 
 def _read_models_file(path: str) -> list | None:
     """Read the global model catalog file -> list of raw model entries.
@@ -96,8 +98,8 @@ class Settings(BaseSettings):
     workspace_root: str = ""
 
     # ---- Skills / MCP ----
-    # Global skills + MCP are now seeded into the DB (skills from a committed bundle
-    # app/db/seeds/global_skills.json; MCP from seed._GLOBAL_MCPS). No loose config.
+    # Global skills + MCP live in the DB, bootstrapped on first boot from the
+    # committed SQL seed (app/db/seeds/global_seed.sql). No loose config files.
 
     # ---- Azure OpenAI ----
     azure_openai_endpoint: str = ""
@@ -167,8 +169,8 @@ class Settings(BaseSettings):
         mid = str(m.get("id") or "").strip()
         if not mid:
             return None
-        provider = str(m.get("provider") or "azure_openai").strip().lower()
-        is_azure = provider == "azure_openai"
+        provider = Provider.coerce(m.get("provider"))
+        is_azure = provider == Provider.AZURE_OPENAI
         spec = dict(m)  # preserve extra provider-specific keys (aws creds, etc.)
         spec.update(
             {

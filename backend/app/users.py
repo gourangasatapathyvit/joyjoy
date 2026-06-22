@@ -22,6 +22,7 @@ from typing import Any
 import bcrypt
 from sqlalchemy import delete, select
 
+from .constants import OTP_MAX_ATTEMPTS
 from .db import db_session
 from .db.models import PasswordReset, User, UserConfig
 
@@ -33,7 +34,6 @@ DEV_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, "joyjoy:dev-user").hex
 
 _USERNAME_RE = re.compile(r"^[a-zA-Z0-9._-]{3,32}$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-_OTP_MAX_ATTEMPTS = 5
 
 
 def _nu(u: str | None) -> str:
@@ -192,10 +192,10 @@ async def verify_and_consume_otp(email: str, otp: str) -> dict:
         )
         if not pr:
             return {"ok": False, "error": "No reset code requested — request a new one."}
-        if datetime.utcnow() > _as_naive_utc(pr.expires_at):
+        if datetime.now(timezone.utc).replace(tzinfo=None) > _as_naive_utc(pr.expires_at):
             await s.execute(delete(PasswordReset).where(PasswordReset.user_id == u.id))
             return {"ok": False, "error": "Reset code expired — request a new one."}
-        if pr.attempts >= _OTP_MAX_ATTEMPTS:
+        if pr.attempts >= OTP_MAX_ATTEMPTS:
             await s.execute(delete(PasswordReset).where(PasswordReset.user_id == u.id))
             return {"ok": False, "error": "Too many attempts — request a new code."}
         if not verify_pw(str(otp or ""), pr.otp_hash):

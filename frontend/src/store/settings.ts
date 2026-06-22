@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persistPref } from "@/api/prefs";
+import { STORAGE_KEYS } from "@/lib/constants";
 
 // Appearance/UX preferences (theme itself is handled by next-themes). Mirrored to
 // BOTH localStorage (instant first paint) and the server (UserConfig, via
@@ -18,9 +19,9 @@ export const SKINS: { id: Skin; label: string; color: string }[] = [
 ];
 
 const K = {
-	skin: "joyjoy-skin",
-	act: "joyjoy-activity",
-	follow: "joyjoy-autofollow",
+	skin: STORAGE_KEYS.skin,
+	act: STORAGE_KEYS.activity,
+	follow: STORAGE_KEYS.autoFollow,
 };
 
 function ls(key: string): string | null {

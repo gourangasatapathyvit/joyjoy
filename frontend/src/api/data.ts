@@ -4,6 +4,7 @@ import type {
 	McpServer,
 	McpTool,
 	Memory,
+	MemoryFile,
 	ModelsConfigResponse,
 	ModelTestResult,
 	Skill,
@@ -99,5 +100,27 @@ export const dataApi = {
 		http<Ok>("/v1/memory/write", {
 			method: "POST",
 			body: JSON.stringify({ content }),
+		}),
+
+	// Dynamic /memories/ files (agent's on-demand, cross-session memory folder).
+	memoryFiles: () => http<{ files: MemoryFile[] }>("/v1/memories"),
+	readMemoryFile: (path: string) =>
+		http<{ path: string; content: string; enabled: boolean; error?: string }>(
+			`/v1/memories/file?path=${encodeURIComponent(path)}`,
+		),
+	writeMemoryFile: (path: string, content: string) =>
+		http<Ok>("/v1/memories/file", {
+			method: "POST",
+			body: JSON.stringify({ path, content }),
+		}),
+	deleteMemoryFile: (path: string) =>
+		http<Ok>("/v1/memories/delete", {
+			method: "POST",
+			body: JSON.stringify({ path }),
+		}),
+	toggleMemoryFile: (path: string, enabled: boolean) =>
+		http<Ok>("/v1/memories/toggle", {
+			method: "POST",
+			body: JSON.stringify({ path, enabled }),
 		}),
 };

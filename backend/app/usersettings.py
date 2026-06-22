@@ -12,7 +12,7 @@ import logging
 
 from sqlalchemy import select
 
-from .db import db_session
+from .db import db_session, get_or_create_user_config
 from .db.models import Skin, User, UserConfig
 
 logger = logging.getLogger("joyjoy.usersettings")
@@ -48,14 +48,6 @@ async def list_skins() -> list[dict]:
         return []
 
 
-async def _get_or_create_config(s, user_id: str) -> UserConfig:
-    cfg = await s.get(UserConfig, str(user_id or ""))
-    if cfg is None:
-        cfg = UserConfig(user_id=str(user_id))
-        s.add(cfg)
-    return cfg
-
-
 async def read_ui(user_id: str) -> dict:
     try:
         async with db_session() as s:
@@ -89,7 +81,7 @@ async def write_ui(user_id: str, data: dict) -> dict:
     data = data if isinstance(data, dict) else {}
     try:
         async with db_session() as s:
-            cfg = await _get_or_create_config(s, user_id)
+            cfg = await get_or_create_user_config(s, user_id)
             for key, typ in _WRITABLE.items():
                 if key not in data:
                     continue

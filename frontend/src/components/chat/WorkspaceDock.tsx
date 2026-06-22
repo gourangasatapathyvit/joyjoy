@@ -22,30 +22,15 @@ import {
 	useWorkspaceTree,
 	workspaceApi,
 } from "@/api/workspace";
+import {
+	formatSize,
+	isImageFile,
+	isMarkdownFile,
+	isPdfFile,
+} from "@/lib/media";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/store/chat";
 
-const IMAGE_EXT = [
-	"png",
-	"jpg",
-	"jpeg",
-	"gif",
-	"svg",
-	"webp",
-	"bmp",
-	"ico",
-	"avif",
-];
-
-function extOf(name: string): string {
-	return name.includes(".") ? (name.split(".").pop()?.toLowerCase() ?? "") : "";
-}
-function formatSize(bytes?: number): string {
-	if (bytes == null) return "";
-	if (bytes < 1024) return `${bytes} B`;
-	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 function parentOf(path: string): string {
 	return path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : "";
 }
@@ -174,10 +159,9 @@ function FileView({
 }) {
 	const { t } = useTranslation();
 	const name = path.split("/").pop() ?? path;
-	const ext = extOf(name);
-	const isImage = IMAGE_EXT.includes(ext);
-	const isPdf = ext === "pdf";
-	const isMd = ext === "md" || ext === "markdown";
+	const isImage = isImageFile(name);
+	const isPdf = isPdfFile(name);
+	const isMd = isMarkdownFile(name);
 	const isMedia = isImage || isPdf;
 	const raw = workspaceApi.rawUrl(threadId, path);
 

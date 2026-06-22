@@ -16,9 +16,9 @@ import os
 import re
 import shutil
 
-logger = logging.getLogger("joyjoy.workspace")
+from .constants import MAX_WORKSPACE_PREVIEW_BYTES
 
-_MAX_BYTES = 1_000_000  # 1 MB text-preview cap
+logger = logging.getLogger("joyjoy.workspace")
 
 
 def _seg(value: str) -> str:
@@ -87,12 +87,12 @@ def read_file(settings, user_id: str, workspace_id: str, rel: str) -> dict | Non
     try:
         size = os.path.getsize(full)
         with open(full, "rb") as f:
-            raw = f.read(_MAX_BYTES + 1)
+            raw = f.read(MAX_WORKSPACE_PREVIEW_BYTES + 1)
     except OSError:
         logger.warning("workspace read failed: %s", rel, exc_info=True)
         return None
-    truncated = len(raw) > _MAX_BYTES
-    raw = raw[:_MAX_BYTES]
+    truncated = len(raw) > MAX_WORKSPACE_PREVIEW_BYTES
+    raw = raw[:MAX_WORKSPACE_PREVIEW_BYTES]
     try:
         return {
             "path": rel,

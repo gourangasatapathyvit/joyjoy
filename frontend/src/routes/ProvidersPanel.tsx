@@ -26,6 +26,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { NEW_ITEM } from "@/lib/constants";
 
 // Add/edit a per-user model. Fields are driven by the provider's field-schema
 // (PROVIDER_TYPES from the backend). Secrets left blank keep the stored value.
@@ -276,7 +277,7 @@ export function ProvidersPanel() {
 			})}
 			{dialogOpen && providers.length > 0 && (
 				<ProviderModelDialog
-					key={editTarget?.id ?? "__new__"}
+					key={editTarget?.id ?? NEW_ITEM}
 					providers={providers}
 					initial={editTarget}
 					onClose={() => setDialogOpen(false)}

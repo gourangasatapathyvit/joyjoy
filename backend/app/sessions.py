@@ -150,6 +150,12 @@ async def list_sessions(user_id: str, limit: int = 200) -> list[dict]:
                     .limit(limit)
                 )
             ).all()
+            if len(rows) >= limit:
+                logger.warning(
+                    "session list truncated at %d for user=%s — older conversations not shown",
+                    limit,
+                    user_id,
+                )
             return [_to_wire(r) for r in rows]
     except Exception:
         logger.warning("list_sessions failed", exc_info=True)

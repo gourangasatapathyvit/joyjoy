@@ -15,6 +15,7 @@ const IMAGE_EXTS = new Set([
 	".svg",
 	".heic",
 	".heif",
+	".avif",
 ]);
 const PDF_EXTS = new Set([".pdf"]);
 const OFFICE_EXTS = new Set([
@@ -118,6 +119,13 @@ const MIME: Record<string, string> = {
 export const extOf = (name: string): string => {
 	const i = name.lastIndexOf(".");
 	return i >= 0 ? name.slice(i).toLowerCase() : "";
+};
+// Human-readable byte size (B / KB / MB). Empty string for null/undefined.
+export const formatSize = (bytes?: number): string => {
+	if (bytes == null) return "";
+	if (bytes < 1024) return `${bytes} B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 export const baseName = (p: string): string =>
 	p

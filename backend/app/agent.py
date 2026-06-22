@@ -14,17 +14,14 @@ Capabilities loaded on demand by the agent — all DB-backed (served via ``dbfs`
 from __future__ import annotations
 
 import asyncio
-import base64
-import io
 import json
 import logging
 import os
 import re
-import zipfile
 from pathlib import Path
 
 from deepagents import create_deep_agent
-from deepagents.backends import CompositeBackend, FilesystemBackend, StoreBackend
+from deepagents.backends import CompositeBackend, FilesystemBackend
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_openai import AzureChatOpenAI
@@ -33,21 +30,55 @@ from langgraph.runtime import get_runtime
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 
+from .agent_common import (
+    _AGENT_CACHE,
+    cache_put,
+    invalidate_user_cache as _invalidate_user_cache,
+    valid_name as _valid_name,
+)
 from .config import Settings
 from .context import AgentContext
 from .db import db_session, decrypt_secrets, encrypt
+from .enums import Provider
 from .db.models import (
-    GlobalMcp,
     GlobalModel,
     GlobalProvider,
-    GlobalSkill,
-    SkillFile,
-    UserConfig,
-    UserMcp,
     UserModel,
-    UserSkill,
 )
-from .dbfs import DbSkillsBackend, MemoryBackend, _file_text
+from .dbfs import (
+    DbSkillsBackend,
+    MemoriesBackend,
+    MemoryBackend,
+)
+# Extracted concern modules — re-exported here so `from .agent import X` (used by
+# main.py / runs.py / sessions.py) keeps working while the code lives in focused
+# modules. load_mcp_tools is also consumed by the agent factory below.
+from .mcp_runtime import (  # noqa: F401 (re-exported for callers)
+    delete_user_mcp,
+    describe_mcp,
+    load_mcp_tools,
+    save_user_mcp,
+    toggle_user_mcp,
+)
+from .memory_store import (  # noqa: F401 (re-exported for callers)
+    delete_memory_file,
+    list_memory_files,
+    read_memory,
+    read_memory_file,
+    toggle_memory_file,
+    write_memory,
+    write_memory_file,
+)
+from .skills_store import (  # noqa: F401 (re-exported for callers)
+    delete_user_skill,
+    delete_user_skill_file,
+    import_user_skill,
+    list_skills,
+    read_skill_content,
+    save_user_skill,
+    save_user_skill_file,
+    toggle_user_skill,
+)
 
 logger = logging.getLogger("joyjoy.agent")
 
@@ -56,22 +87,27 @@ DEFAULT_SYSTEM_PROMPT = (
     "Each user has a private, isolated workspace, long-term memory, and skills. "
     "Use your filesystem and memory tools to keep durable, per-user context, and use "
     "your skills and plugin tools when they help.\n\n"
-    "Memory layout:\n"
+    "Filesystem layout:\n"
+    "- Your **working directory** is the user's per-session WORKSPACE — it is the "
+    "DEFAULT location for `write_file`/`read_file`/`ls`/`edit_file` whenever you use a "
+    "plain or root-relative path (e.g. `notes.txt`, `data/report.csv`, `/lorem.txt`). "
+    "Any file the USER asks you to create or work with goes HERE — this is the folder "
+    "they see and download in the workspace panel. Default to it for all real output "
+    "files unless the user explicitly says otherwise.\n"
     "- `/memory/AGENTS.md` — your core long-term memory; it is ALWAYS loaded into "
     "your context. Keep it concise; update it with `edit_file` for durable, "
     "frequently-needed facts (the user's identity, standing preferences, how to behave).\n"
-    "- `/memories/` — a persistent, cross-session folder for everything else. Create "
-    "and organize arbitrary files here on demand (e.g. `/memories/<topic>.md`) for "
-    "scenario- or project-specific notes that don't need to be in context every turn. "
-    "Use `ls`/`glob`/`read_file` to find and load them when relevant, and "
-    "`write_file`/`edit_file` to record new ones."
+    "- `/memories/` — YOUR OWN private scratch folder for notes you choose to keep "
+    "across sessions (e.g. `/memories/<topic>.md`): scenario-specific context that "
+    "doesn't need to be in-context every turn. Use it ONLY for your own durable memory "
+    "— NEVER for files the user asked you to create (those belong in the workspace). "
+    "Use `ls`/`glob`/`read_file` to recall them and `write_file`/`edit_file` to record new ones."
 )
 
 # Skill sources the agent reads on demand: read-only global (shared) + per-user.
 SKILL_SOURCES = ["/skills/global/", "/skills/user/"]
-
-# (kind, user_id, model_id, reasoning) -> compiled deep agent
-_AGENT_CACHE: dict[tuple, object] = {}
+# The compiled-agent cache + invalidate/valid_name now live in agent_common
+# (imported above) so the extracted CRUD modules can share them without a cycle.
 
 # --- Reasoning / extended-thinking support --------------------------------
 # Effort level -> Anthropic extended-thinking token budget. Higher = more thinking.
@@ -105,18 +141,18 @@ def model_supports_reasoning(spec: dict) -> bool:
     model name, override-able via an explicit ``reasoning`` bool on the spec."""
     if isinstance(spec.get("reasoning"), bool):
         return spec["reasoning"]
-    provider = (spec.get("provider") or "azure_openai").lower()
+    provider = Provider.coerce(spec.get("provider"))
     ids = [str(spec.get("deployment") or "").lower(), str(spec.get("id") or "").lower()]
     blob = " ".join(ids)
-    if provider == "anthropic":
+    if provider == Provider.ANTHROPIC:
         return True  # Claude 3.7 / 4.x support extended thinking
-    if provider == "bedrock":
+    if provider == Provider.BEDROCK:
         return any(k in blob for k in ("claude-3-7", "claude-opus-4", "claude-sonnet-4", "claude-4"))
-    if provider == "azure_openai":
+    if provider == Provider.AZURE_OPENAI:
         return any(re.match(r"o[1345]\b", i) for i in ids) or "gpt-5" in blob
-    if provider in ("openai", "openai_compatible"):
+    if provider == Provider.OPENAI:
         return any(k in blob for k in ("o1", "o3", "o4", "deepseek-r", "gpt-5", "reason"))
-    if provider in ("gemini", "google"):
+    if provider == Provider.GEMINI:
         return "2.5" in blob or "thinking" in blob
     return False
 
@@ -139,10 +175,10 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
     """
     specs = await merged_model_specs(settings, uid)
     spec = specs.get(model_id) or specs.get(settings.default_model) or next(iter(specs.values()))
-    provider = (spec.get("provider") or "azure_openai").lower()
+    provider = Provider.coerce(spec.get("provider"))
     effort = normalize_reasoning_effort(reasoning) if model_supports_reasoning(spec) else None
 
-    if provider == "anthropic":
+    if provider == Provider.ANTHROPIC:
         from langchain_anthropic import ChatAnthropic
 
         anthropic_kwargs = dict(
@@ -169,7 +205,7 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
                 anthropic_kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
         return ChatAnthropic(**anthropic_kwargs)
 
-    if provider == "bedrock":
+    if provider == Provider.BEDROCK:
         from langchain_aws import ChatBedrockConverse
 
         kwargs: dict = {"model": spec["deployment"]}
@@ -189,7 +225,7 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
                 kwargs["aws_session_token"] = st
         return ChatBedrockConverse(**kwargs)
 
-    if provider in ("openai", "openai_compatible"):
+    if provider == Provider.OPENAI:
         # Any OpenAI-compatible endpoint: OpenAI, OpenRouter, DeepSeek, Groq,
         # Together, vLLM/Ollama, etc. Omit endpoint => api.openai.com.
         from langchain_openai import ChatOpenAI
@@ -203,7 +239,7 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
             kwargs["reasoning_effort"] = "high" if effort in ("high", "extra_high") else ("low" if effort in ("minimal", "low") else "medium")
         return ChatOpenAI(**kwargs)
 
-    if provider in ("gemini", "google"):
+    if provider == Provider.GEMINI:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         kwargs = {"model": spec["deployment"], "google_api_key": spec["api_key"]}
@@ -302,7 +338,7 @@ def build_backend(settings: Settings, user_id: str = "default"):
     working_fs = SessionFilesystemBackend(root_dir=host_root, virtual_mode=True)
     routes: dict[str, object] = {
         "/memory/": MemoryBackend(uid),
-        "/memories/": StoreBackend(namespace=lambda _rt, _ns=(uid, "memories"): _ns),
+        "/memories/": MemoriesBackend(uid),  # hides disabled files from the agent
         "/skills/user/": DbSkillsBackend(user_id=uid),
         "/skills/global/": DbSkillsBackend(),  # shipped, read-only — from the DB
     }
@@ -318,563 +354,14 @@ async def resolve_model(settings: Settings, requested: str | None, uid: str | No
     return settings.default_model if settings.default_model in specs else next(iter(specs))
 
 
-# ---------------------------------------------------------------------------
-# MCP plugins (global + per-user) → tools
-# ---------------------------------------------------------------------------
-def _expand_env_vars(value):
-    """Expand ``${VAR}``/``$VAR`` (from os.environ) in strings / lists / dicts."""
-    if isinstance(value, str):
-        return os.path.expandvars(value)
-    if isinstance(value, list):
-        return [_expand_env_vars(v) for v in value]
-    if isinstance(value, dict):
-        return {k: _expand_env_vars(v) for k, v in value.items()}
-    return value
-
-
-def _to_connections(servers: dict) -> dict:
-    """Convert .mcp.json ``mcpServers`` entries to langchain-mcp-adapters connections.
-
-    ``${VAR}`` references in command/args/url/headers/env expand from the process
-    env (the backend loads ``.env`` into os.environ at startup), so API keys stay
-    out of the config file and only the referenced var reaches the server.
-    """
-    conns: dict[str, dict] = {}
-    for name, cfg in (servers or {}).items():
-        if not isinstance(cfg, dict):
-            continue
-        if cfg.get("url"):
-            conns[name] = {"transport": cfg.get("transport") or "streamable_http", "url": _expand_env_vars(cfg["url"])}
-            if cfg.get("headers"):
-                conns[name]["headers"] = _expand_env_vars(cfg["headers"])
-        elif cfg.get("command"):
-            conns[name] = {
-                "transport": "stdio",
-                "command": _expand_env_vars(cfg["command"]),
-                "args": _expand_env_vars(list(cfg.get("args") or [])),
-            }
-            # MCP stdio passes ONLY this env to the child (no inherited PATH), so always
-            # provide the parent's PATH/HOME/cache vars so uvx/python/npx servers can be
-            # found + run; then overlay the config's env (e.g. an API key reference).
-            env = {
-                k: os.environ[k]
-                for k in ("PATH", "HOME", "USER", "LANG", "LC_ALL", "TMPDIR", "NODE_PATH",
-                          "npm_config_cache", "XDG_CACHE_HOME", "XDG_DATA_HOME", "UV_CACHE_DIR")
-                if k in os.environ
-            }
-            env.update(_expand_env_vars(cfg.get("env") or {}))
-            conns[name]["env"] = env
-    return conns
-
-
-def _split_lines(text: str | None) -> list[str]:
-    return [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
-
-
-def _parse_kv(text: str | None) -> dict:
-    """Parse ``KEY=value`` lines (env / headers textareas) into a dict."""
-    out: dict[str, str] = {}
-    for ln in (text or "").splitlines():
-        ln = ln.strip()
-        if not ln or "=" not in ln:
-            continue
-        k, _sep, v = ln.partition("=")
-        if k.strip():
-            out[k.strip()] = v.strip()
-    return out
-
-
-def _mcp_row_to_cfg(row) -> dict:
-    """An MCP table row -> the ``.mcp.json``-shaped cfg dict the connection builder
-    and the UI describe path expect (args as a list; env/headers as dicts)."""
-    cfg: dict = {"enabled": bool(row.is_active)}
-    if row.url:
-        cfg["url"] = row.url
-        cfg["transport"] = row.transport or "streamable_http"
-        if row.headers:
-            cfg["headers"] = _parse_kv(row.headers)
-    elif row.command:
-        cfg["command"] = row.command
-        cfg["args"] = _split_lines(row.args)
-        if row.env:
-            cfg["env"] = _parse_kv(row.env)
-    return cfg
-
-
-async def _merged_mcp_servers(user_id: str) -> dict:
-    """{name: (cfg, scope)} — global servers first, per-user entries override/extend."""
-    merged: dict[str, tuple[dict, str]] = {}
-    async with db_session() as s:
-        for g in (await s.scalars(select(GlobalMcp).order_by(GlobalMcp.name))).all():
-            merged[g.name] = (_mcp_row_to_cfg(g), "global")
-        if user_id:
-            urows = (await s.scalars(select(UserMcp).where(UserMcp.user_id == str(user_id)))).all()
-            for u in urows:
-                merged[u.name] = (_mcp_row_to_cfg(u), "user")
-    return merged
-
-
-async def load_mcp_tools(settings: Settings, user_id: str) -> list:
-    """Load global + per-user MCP tools (user entries override/extend global; disabled
-    skipped). Each server is loaded independently so one unreachable provider (e.g. a
-    copied-but-not-running server) can't blank out everyone's tools."""
-    conns = _to_connections({
-        n: cfg for n, (cfg, _s) in (await _merged_mcp_servers(user_id)).items()
-        if not (isinstance(cfg, dict) and cfg.get("enabled") is False)
-    })
-    if not conns:
-        return []
-    from langchain_mcp_adapters.client import MultiServerMCPClient
-
-    tools: list = []
-    for name, conn in conns.items():
-        try:
-            tools.extend(await asyncio.wait_for(MultiServerMCPClient({name: conn}).get_tools(), timeout=10))
-        except Exception:  # noqa: BLE001 - one bad/slow server shouldn't drop the rest (incl. timeout)
-            logger.warning("MCP server '%s' failed/timed-out for user=%s (skipped)", name, user_id, exc_info=True)
-    logger.info("loaded %d MCP tool(s) for user=%s from servers=%s", len(tools), user_id, list(conns))
-    return tools
-
-
-# ---------------------------------------------------------------------------
-# Introspection for the UI: describe MCP servers/tools + skills (global + user)
-# ---------------------------------------------------------------------------
-def _tool_schema_summary(tool) -> list[dict]:
-    """Compact parameter list for a tool, matching the webui's MCP-tools shape."""
-    out: list[dict] = []
-    try:
-        args = getattr(tool, "args", None) or {}
-        required: list = []
-        sch = getattr(tool, "args_schema", None)
-        if isinstance(sch, dict):
-            required = sch.get("required") or []
-        for pname, pinfo in args.items():
-            pinfo = pinfo if isinstance(pinfo, dict) else {}
-            out.append({
-                "name": pname,
-                "type": pinfo.get("type") or "",
-                "required": pname in required,
-                "description": pinfo.get("description") or "",
-            })
-    except Exception:  # noqa: BLE001 - schema introspection is best-effort
-        logger.debug("schema summary failed for tool", exc_info=True)
-    return out
-
-
-async def describe_mcp(settings: Settings, user_id: str) -> tuple[list[dict], list[dict]]:
-    """Return ``(servers, tools)`` describing global+user MCP for a user.
-
-    Each server is probed individually so tools carry their originating server +
-    scope (``global``/``user``) and each server reports an accurate tool count and
-    live ``status`` (``active`` if it connected, else ``invalid_config``).
-    """
-    servers_out: list[dict] = []
-    tools_out: list[dict] = []
-    for name, (cfg, scope) in (await _merged_mcp_servers(user_id)).items():
-        conn = _to_connections({name: cfg})  # expanded — used only to probe
-        cfg_d = cfg if isinstance(cfg, dict) else {}
-        transport = "http" if cfg_d.get("url") else ("stdio" if cfg_d.get("command") else "unknown")
-        enabled = not (cfg_d.get("enabled") is False)
-        entry = {
-            "name": name,
-            "scope": scope,
-            "transport": transport,
-            "enabled": enabled,
-            "status": "configured",
-            "tool_count": None,
-            # Show only command/args/url for display. env/headers are NEVER returned
-            # (they may hold ${VAR} secret refs / inline values) — the UI doesn't use them.
-            "command": cfg_d.get("command"),
-            "args": cfg_d.get("args") or [],
-            "url": cfg_d.get("url"),
-        }
-        if not conn:
-            entry["status"] = "invalid_config"
-            servers_out.append(entry)
-            continue
-        if not enabled:
-            entry["status"] = "disabled"
-            servers_out.append(entry)
-            continue
-        try:
-            from langchain_mcp_adapters.client import MultiServerMCPClient
-
-            tls = await asyncio.wait_for(MultiServerMCPClient(conn).get_tools(), timeout=10)
-            entry["tool_count"] = len(tls)
-            entry["status"] = "active"
-            for tl in tls:
-                tools_out.append({
-                    "name": getattr(tl, "name", ""),
-                    "server": name,
-                    "scope": scope,
-                    "status": "active",  # webui renders this as the tool's status badge
-                    "description": getattr(tl, "description", "") or "",
-                    "schema_summary": _tool_schema_summary(tl),  # webui reads `schema_summary`
-                })
-        except Exception:  # noqa: BLE001 - one bad server shouldn't blank the list
-            logger.exception("failed to probe MCP server %s for user=%s", name, user_id)
-            entry["status"] = "invalid_config"
-        servers_out.append(entry)
-    return servers_out, tools_out
-
-
-def _parse_skill_frontmatter(text: str, fallback_name: str) -> dict:
-    """Extract name+description from SKILL.md YAML frontmatter text (best-effort)."""
-    name, desc = fallback_name, ""
-    try:
-        if text.lstrip().startswith("---"):
-            block = text.split("---", 2)
-            if len(block) >= 3:
-                for line in block[1].splitlines():
-                    k, sep, v = line.partition(":")
-                    if not sep:
-                        continue
-                    k, v = k.strip().lower(), v.strip().strip("'\"")
-                    if k == "name" and v:
-                        name = v
-                    elif k == "description" and v:
-                        desc = v
-    except Exception:  # noqa: BLE001
-        logger.debug("failed to parse skill frontmatter", exc_info=True)
-    return {"name": name, "description": desc}
-
-
-async def list_skills(settings: Settings, user_id: str) -> list[dict]:
-    """Global skills (read-only, ``global_skills`` table) + per-user skills
-    (``user_skills`` table) for the UI Skills tab."""
-    skills: list[dict] = []
-    async with db_session() as s:
-        grows = (
-            await s.scalars(
-                select(GlobalSkill).where(GlobalSkill.is_active.is_(True)).order_by(GlobalSkill.name)
-            )
-        ).all()
-        for g in grows:
-            skills.append(
-                {"name": g.name, "description": g.description or "", "scope": "global",
-                 "editable": False, "enabled": True, "builtin": True}
-            )
-        urows = (
-            await s.scalars(
-                select(UserSkill).where(UserSkill.user_id == str(user_id)).order_by(UserSkill.name)
-            )
-        ).all()
-        for u in urows:
-            skills.append(
-                {"name": u.name, "description": u.description or "", "scope": "user",
-                 "editable": True, "enabled": bool(u.is_active)}
-            )
-    return skills
-
-
-async def read_skill_content(settings: Settings, user_id: str, name: str, file: str | None = None) -> dict:
-    """Read a global skill (shipped, read-only) or a per-user skill — both entirely
-    from the DB (``global_skills``/``user_skills`` + ``skill_files``) for the UI viewer.
-
-    Returns ``{success, name, content, linked_files}`` on success, or
-    ``{success: False, error}`` when not found.
-    """
-    if not name:
-        return {"success": False, "error": "name required"}
-    async with db_session() as s:
-        gs = await s.scalar(select(GlobalSkill).where(GlobalSkill.name == name, GlobalSkill.is_active.is_(True)))
-        if gs:
-            spec = (gs, SkillFile.global_skill_id, "global", False, True)
-        else:
-            us = await s.scalar(select(UserSkill).where(UserSkill.user_id == str(user_id), UserSkill.name == name))
-            if not us:
-                return {"success": False, "error": f"Skill '{name}' not found.", "available_skills": [], "linked_files": {}}
-            spec = (us, SkillFile.user_skill_id, "user", True, bool(us.is_active))
-        sk, file_col, scope, editable, enabled = spec
-        if file:
-            f = await s.scalar(select(SkillFile).where(file_col == sk.id, SkillFile.filename == file))
-            if not f:
-                return {"success": False, "error": "File not found"}
-            return {"success": True, "name": name, "content": _file_text(f), "path": file}
-        files = (await s.scalars(select(SkillFile).where(file_col == sk.id))).all()
-        return {
-            "success": True, "name": name, "scope": scope, "editable": editable,
-            "enabled": enabled, "content": sk.content or "",
-            "linked_files": {f.filename: True for f in files},
-        }
-
-
-# ---------------------------------------------------------------------------
-# CRUD: per-user skills + MCP + models (all DB). Global is READ-ONLY here —
-# writes only ever touch the user's own rows.
-# ---------------------------------------------------------------------------
-def _valid_name(name: str) -> bool:
-    return bool(name) and not any(c in name for c in ("/", "\\")) and ".." not in name
-
-
-def _invalidate_user_cache(user_id: str) -> None:
-    """Drop cached agents for a user so skill/MCP/memory edits take effect next call."""
-    uid = str(user_id or "default")
-    for k in [k for k in _AGENT_CACHE if isinstance(k, tuple) and len(k) >= 2 and k[1] == uid]:
-        _AGENT_CACHE.pop(k, None)
-
-
-async def save_user_skill(user_id, name, content) -> dict:
-    """Create or overwrite a per-user skill (enables it). The description is parsed
-    from the SKILL.md frontmatter so the Skills list shows it."""
-    name = (name or "").strip()
-    if not _valid_name(name):
-        return {"ok": False, "error": "invalid skill name"}
-    desc = _parse_skill_frontmatter(content or "", name).get("description", "")
-    async with db_session() as s:
-        sk = await s.scalar(select(UserSkill).where(UserSkill.user_id == str(user_id), UserSkill.name == name))
-        if sk is None:
-            sk = UserSkill(user_id=str(user_id), name=name)
-            s.add(sk)
-        sk.content = content or ""
-        sk.description = desc
-        sk.is_active = True
-    _invalidate_user_cache(user_id)
-    return {"ok": True, "name": name, "path": f"/skills/user/{name}/SKILL.md"}
-
-
-async def delete_user_skill(user_id, name) -> dict:
-    name = (name or "").strip()
-    if not _valid_name(name):
-        return {"ok": False, "error": "invalid skill name"}
-    async with db_session() as s:
-        res = await s.execute(
-            sa_delete(UserSkill).where(UserSkill.user_id == str(user_id), UserSkill.name == name)
-        )
-        deleted = res.rowcount or 0  # skill_files cascade via FK ondelete=CASCADE
-    if deleted:
-        _invalidate_user_cache(user_id)
-    return {"ok": deleted > 0, "name": name, "deleted": deleted}
-
-
-async def toggle_user_skill(user_id, name, enabled) -> dict:
-    """Enable/disable a user skill (is_active flag; disabled skills aren't loaded)."""
-    name = (name or "").strip()
-    if not _valid_name(name):
-        return {"ok": False, "error": "invalid skill name"}
-    async with db_session() as s:
-        sk = await s.scalar(select(UserSkill).where(UserSkill.user_id == str(user_id), UserSkill.name == name))
-        if sk is None:
-            return {"ok": False, "error": f"skill '{name}' not found"}
-        sk.is_active = bool(enabled)
-    _invalidate_user_cache(user_id)
-    return {"ok": True, "name": name, "enabled": bool(enabled)}
-
-
-# ---- per-user skill FILES (multi-file skills: SKILL.md + helper tree) ----
-_MAX_SKILL_FILES = 300
-_MAX_FILE_BYTES = 5 * 1024 * 1024
-_MAX_SKILL_BYTES = 30 * 1024 * 1024
-
-
-def _safe_rel(path: str) -> str | None:
-    """Normalize a skill-relative file path; reject traversal/absolute paths."""
-    p = (path or "").replace("\\", "/").strip().lstrip("/")
-    parts = [seg for seg in p.split("/") if seg]
-    if not parts or any(seg in (".", "..") for seg in parts):
-        return None
-    return "/".join(parts)
-
-
-async def _get_or_create_user_skill(s, user_id, name):
-    sk = await s.scalar(select(UserSkill).where(UserSkill.user_id == str(user_id), UserSkill.name == name))
-    if sk is None:
-        sk = UserSkill(user_id=str(user_id), name=name, content="", description="")
-        s.add(sk)
-        await s.flush()
-    return sk
-
-
-async def save_user_skill_file(user_id, name, path, content, encoding="utf-8") -> dict:
-    """Create/overwrite one file in a user skill. ``path='SKILL.md'`` updates the
-    skill body; any other path is a helper file (``skill_files``). ``encoding`` is
-    'utf-8' (text) or 'base64' (binary). Creates the skill if it doesn't exist."""
-    name = (name or "").strip()
-    if not _valid_name(name):
-        return {"ok": False, "error": "invalid skill name"}
-    rel = _safe_rel(path)
-    if not rel:
-        return {"ok": False, "error": "invalid file path"}
-    raw_len = len(content or "")
-    if encoding == "base64":
-        try:
-            raw_len = len(base64.b64decode(content or ""))
-        except Exception:
-            return {"ok": False, "error": "invalid base64 content"}
-    if raw_len > _MAX_FILE_BYTES:
-        return {"ok": False, "error": "file too large"}
-    async with db_session() as s:
-        sk = await _get_or_create_user_skill(s, user_id, name)
-        if rel == "SKILL.md":
-            sk.content = content or ""
-            sk.description = _parse_skill_frontmatter(content or "", name).get("description", "")
-            sk.is_active = True
-        else:
-            f = await s.scalar(
-                select(SkillFile).where(SkillFile.user_skill_id == sk.id, SkillFile.filename == rel)
-            )
-            if f is None:
-                f = SkillFile(user_skill_id=sk.id, filename=rel)
-                s.add(f)
-            f.content = content or ""
-            f.encoding = "base64" if encoding == "base64" else "utf-8"
-    _invalidate_user_cache(user_id)
-    return {"ok": True, "name": name, "path": rel}
-
-
-async def delete_user_skill_file(user_id, name, path) -> dict:
-    name = (name or "").strip()
-    rel = _safe_rel(path)
-    if not _valid_name(name) or not rel:
-        return {"ok": False, "error": "invalid skill/path"}
-    if rel == "SKILL.md":
-        return {"ok": False, "error": "cannot delete SKILL.md — delete the whole skill instead"}
-    async with db_session() as s:
-        sk = await s.scalar(select(UserSkill).where(UserSkill.user_id == str(user_id), UserSkill.name == name))
-        if not sk:
-            return {"ok": False, "error": "skill not found"}
-        res = await s.execute(
-            sa_delete(SkillFile).where(SkillFile.user_skill_id == sk.id, SkillFile.filename == rel)
-        )
-        existed = (res.rowcount or 0) > 0
-    if existed:
-        _invalidate_user_cache(user_id)
-    return {"ok": existed, "name": name, "path": rel}
-
-
-async def import_user_skill(user_id, name, zip_b64) -> dict:
-    """Create/replace a user skill from a base64-encoded zip of a skill folder
-    (SKILL.md + helper tree). Binary files are stored base64. Replaces the skill's
-    existing files. Caps file count / per-file / total size."""
-    name = (name or "").strip()
-    if not _valid_name(name):
-        return {"ok": False, "error": "invalid skill name"}
-    try:
-        zf = zipfile.ZipFile(io.BytesIO(base64.b64decode(zip_b64 or "")))
-    except Exception:
-        return {"ok": False, "error": "invalid zip"}
-    infos = [zi for zi in zf.infolist() if not zi.is_dir()]
-    md = [zi for zi in infos if zi.filename.replace("\\", "/").rsplit("/", 1)[-1] == "SKILL.md"]
-    if not md:
-        return {"ok": False, "error": "zip must contain a SKILL.md"}
-    md_path = min((zi.filename.replace("\\", "/") for zi in md), key=lambda n: n.count("/"))
-    root = md_path[: md_path.rfind("SKILL.md")]  # prefix incl. trailing slash (or "")
-    collected: list[tuple[str, bytes]] = []
-    total = 0
-    for zi in infos:
-        nn = zi.filename.replace("\\", "/")
-        if root and not nn.startswith(root):
-            continue
-        rel = _safe_rel(nn[len(root):])
-        if not rel:
-            continue
-        if zi.file_size > _MAX_FILE_BYTES:
-            return {"ok": False, "error": f"{rel} too large"}
-        total += zi.file_size
-        if total > _MAX_SKILL_BYTES:
-            return {"ok": False, "error": "skill too large"}
-        if len(collected) >= _MAX_SKILL_FILES:
-            return {"ok": False, "error": "too many files"}
-        collected.append((rel, zf.read(zi)))
-    async with db_session() as s:
-        sk = await _get_or_create_user_skill(s, user_id, name)
-        await s.execute(sa_delete(SkillFile).where(SkillFile.user_skill_id == sk.id))
-        nfiles = 0
-        for rel, data in collected:
-            if rel == "SKILL.md":
-                text = data.decode("utf-8", "replace")
-                sk.content = text
-                sk.description = _parse_skill_frontmatter(text, name).get("description", "")
-                sk.is_active = True
-                continue
-            try:
-                content, enc = data.decode("utf-8"), "utf-8"
-            except UnicodeDecodeError:
-                content, enc = base64.b64encode(data).decode("ascii"), "base64"
-            s.add(SkillFile(user_skill_id=sk.id, filename=rel, content=content, encoding=enc))
-            nfiles += 1
-    _invalidate_user_cache(user_id)
-    return {"ok": True, "name": name, "files": nfiles}
-
-
-# ---- per-user MCP CRUD (data/users/<uid>/mcp.json; global is read-only) ----
-async def _is_global_mcp(name) -> bool:
-    async with db_session() as s:
-        return (await s.scalar(select(GlobalMcp.id).where(GlobalMcp.name == name))) is not None
-
-
-def _cfg_to_mcp_columns(cfg: dict) -> dict:
-    """Frontend cfg (args list, env/headers dicts) -> UserMcp column values (text).
-    Secrets in MCP env are kept as ``${VAR}`` references — the real value lives in
-    .env (os.environ) and is expanded only when the connection is built."""
-    url = str(cfg.get("url") or "").strip()
-    command = str(cfg.get("command") or "").strip()
-    args, env, headers = cfg.get("args"), cfg.get("env"), cfg.get("headers")
-    return {
-        "transport": str(cfg.get("transport") or "").strip() or ("http" if url else "stdio"),
-        "command": command,
-        "url": url,
-        "args": "\n".join(str(a) for a in args) if isinstance(args, list) else str(args or ""),
-        "env": "\n".join(f"{k}={v}" for k, v in env.items()) if isinstance(env, dict) else str(env or ""),
-        "headers": "\n".join(f"{k}={v}" for k, v in headers.items()) if isinstance(headers, dict) else str(headers or ""),
-    }
-
-
-async def save_user_mcp(settings, user_id, name, cfg) -> dict:
-    name = (name or "").strip()
-    if not _valid_name(name):
-        return {"ok": False, "error": "invalid server name"}
-    if await _is_global_mcp(name):
-        return {"ok": False, "error": f"'{name}' is a global (read-only) server"}
-    if not isinstance(cfg, dict) or not (cfg.get("command") or cfg.get("url")):
-        return {"ok": False, "error": "server needs a 'command' (stdio) or 'url' (http)"}
-    cols = _cfg_to_mcp_columns(cfg)
-    async with db_session() as s:
-        row = await s.scalar(
-            select(UserMcp).where(UserMcp.user_id == str(user_id), UserMcp.name == name)
-        )
-        if row is None:
-            row = UserMcp(user_id=str(user_id), name=name)
-            s.add(row)
-        for k, v in cols.items():
-            setattr(row, k, v)
-        if "enabled" in cfg:
-            row.is_active = bool(cfg["enabled"])
-    _invalidate_user_cache(user_id)
-    return {"ok": True, "name": name}
-
-
-async def delete_user_mcp(settings, user_id, name) -> dict:
-    name = (name or "").strip()
-    if await _is_global_mcp(name):
-        return {"ok": False, "error": f"'{name}' is a global (read-only) server"}
-    async with db_session() as s:
-        res = await s.execute(
-            sa_delete(UserMcp).where(UserMcp.user_id == str(user_id), UserMcp.name == name)
-        )
-        existed = (res.rowcount or 0) > 0
-    if existed:
-        _invalidate_user_cache(user_id)
-    return {"ok": existed, "name": name}
-
-
-async def toggle_user_mcp(settings, user_id, name, enabled) -> dict:
-    name = (name or "").strip()
-    if await _is_global_mcp(name):
-        return {"ok": False, "error": f"'{name}' is a global (read-only) server"}
-    async with db_session() as s:
-        row = await s.scalar(
-            select(UserMcp).where(UserMcp.user_id == str(user_id), UserMcp.name == name)
-        )
-        if row is None:
-            return {"ok": False, "error": f"server '{name}' not found"}
-        row.is_active = bool(enabled)
-    _invalidate_user_cache(user_id)
-    return {"ok": True, "name": name, "enabled": bool(enabled)}
-
-
+# MCP plugins (connection build, tool load, UI introspection, CRUD) moved to
+# mcp_runtime.py; skills introspection/CRUD below, model catalog further down.
+# Skills introspection + CRUD moved to skills_store.py (re-exported above).
 # ---- per-user model catalog CRUD (data/users/<uid>/models.json; global is read-only) ----
-_VALID_PROVIDERS = {"azure_openai", "anthropic", "bedrock", "openai", "gemini"}
+# Single source of truth for provider names = the `Provider` StrEnum (enums.py),
+# which `build_model_for` dispatches on and the seeded `global_providers` rows use.
+# `_VALID_PROVIDERS` (derived from the enum) validates input.
+_VALID_PROVIDERS: frozenset[str] = frozenset(p.value for p in Provider)
 
 # Field schema per provider — drives the Providers-tab add/edit form in the UI.
 PROVIDER_TYPES = [
@@ -1028,17 +515,17 @@ async def describe_models(settings: Settings, user_id: str) -> list[dict]:
 
 
 def _validate_model_entry(e: dict) -> str | None:
-    p = e["provider"]
-    if p in ("azure_openai", "anthropic"):
+    p = Provider.coerce(e["provider"])
+    if p in (Provider.AZURE_OPENAI, Provider.ANTHROPIC):
         if not e.get("endpoint"):
             return "endpoint / URL is required"
         if not e.get("api_key"):
             return "api_key is required"
-    if p == "azure_openai" and not e.get("api_version"):
+    if p == Provider.AZURE_OPENAI and not e.get("api_version"):
         return "api_version is required for Azure OpenAI"
-    if p == "bedrock" and not e.get("deployment"):
+    if p == Provider.BEDROCK and not e.get("deployment"):
         return "Bedrock model id (deployment) is required"
-    if p in ("openai", "gemini"):
+    if p in (Provider.OPENAI, Provider.GEMINI):
         if not e.get("deployment"):
             return "model name (deployment) is required"
         if not e.get("api_key"):
@@ -1057,7 +544,7 @@ async def save_user_model(settings, user_id, raw: dict) -> dict:
         return {"ok": False, "error": f"'{mid}' is a global (read-only) model"}
     provider = str(raw.get("provider") or "azure_openai").strip().lower()
     if provider not in _VALID_PROVIDERS:
-        return {"ok": False, "error": "provider must be azure_openai | anthropic | bedrock | openai | gemini"}
+        return {"ok": False, "error": "provider must be one of: " + " | ".join(sorted(_VALID_PROVIDERS))}
     async with db_session() as s:
         pid = await s.scalar(select(GlobalProvider.id).where(GlobalProvider.name == provider))
         if not pid:
@@ -1111,39 +598,6 @@ async def delete_user_model(settings, user_id, mid) -> dict:
     return {"ok": existed, "id": mid}
 
 
-# ---- per-user long-term memory — a single AGENTS.md (user_configs.agents_md) ----
-# deepagents' MemoryMiddleware loads this into the prompt; the agent edits it with
-# edit_file; the UI Memory panel edits the same column.
-
-
-async def read_memory(user_id) -> dict:
-    """Return {agents_md} text for a user (empty string if unset)."""
-    out = {"agents_md": ""}
-    try:
-        async with db_session() as s:
-            cfg = await s.get(UserConfig, str(user_id or ""))
-            if cfg:
-                out["agents_md"] = getattr(cfg, "agents_md", "") or ""
-    except Exception:  # noqa: BLE001
-        logger.debug("read_memory failed", exc_info=True)
-    return out
-
-
-async def write_memory(user_id, content) -> dict:
-    try:
-        async with db_session() as s:
-            cfg = await s.get(UserConfig, str(user_id or ""))
-            if cfg is None:
-                cfg = UserConfig(user_id=str(user_id))
-                s.add(cfg)
-            cfg.agents_md = content or ""
-    except Exception as e:  # noqa: BLE001
-        logger.warning("write_memory failed", exc_info=True)
-        return {"ok": False, "error": str(e)}
-    _invalidate_user_cache(user_id)  # memory feeds the prompt via MemoryMiddleware
-    return {"ok": True}
-
-
 async def _system_prompt_for(user_id) -> str:
     """Just the base prompt — the user's long-term memory (AGENTS.md) is injected
     separately by deepagents' MemoryMiddleware (see ``memory=`` in create_deep_agent)."""
@@ -1184,7 +638,7 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
         # with edit_file. Replaces the old hand-rolled soul/profile/notes injection.
         memory=["/memory/AGENTS.md"],
     )
-    _AGENT_CACHE[key] = agent
+    cache_put(key, agent)
     logger.info(
         "compiled %s agent user=%s model=%s reasoning=%s mcp_tools=%d gated=%s",
         "run" if run_mode else "chat", uid, mid, effort or "off", len(mcp_tools), list(interrupt_on or {}),

@@ -109,12 +109,15 @@ export type ReasoningEffort =
 	| "high"
 	| "extra_high";
 
+// Mirrors the backend `McpStatus` StrEnum (app/enums.py).
+export type McpStatus = "configured" | "active" | "invalid_config" | "disabled";
+
 export interface McpServer {
 	name: string;
 	scope: "global" | "user";
 	transport: string;
 	enabled: boolean;
-	status: "configured" | "active" | "invalid_config" | "disabled" | string;
+	status: McpStatus;
 	tool_count: number | null;
 	command?: string;
 	args?: string[];
@@ -161,6 +164,16 @@ export interface SkillContent {
 export interface Memory {
 	// The user's single long-term memory doc (deepagents AGENTS.md convention).
 	agents_md: string;
+}
+
+// A dynamic, agent-managed memory file in the per-user /memories/ folder
+// (LangGraph store; created/edited by the agent on demand, and via this UI).
+export interface MemoryFile {
+	path: string;
+	size: number;
+	modified_at?: string;
+	// false = kept but hidden from the agent (disabled), like a disabled skill.
+	enabled: boolean;
 }
 
 // ── Sessions (conversation threads) ────────────────────────────────────────

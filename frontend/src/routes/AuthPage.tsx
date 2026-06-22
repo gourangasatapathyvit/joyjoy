@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { authApi } from "@/api/auth";
 import { Button } from "@/components/ui/button";
@@ -10,26 +11,8 @@ import { cn } from "@/lib/utils";
 
 type Mode = "signin" | "signup" | "forgot" | "reset";
 
-const TITLES: Record<Mode, { title: string; subtitle: string }> = {
-	signin: {
-		title: "Sign in to joyjoy",
-		subtitle: "Enter your credentials to continue.",
-	},
-	signup: {
-		title: "Create your account",
-		subtitle: "Sign up to start using joyjoy.",
-	},
-	forgot: {
-		title: "Reset your password",
-		subtitle: "We'll email you a one-time code.",
-	},
-	reset: {
-		title: "Enter your reset code",
-		subtitle: "Check your email for the 6-digit code.",
-	},
-};
-
 export function AuthPage() {
+	const { t } = useTranslation();
 	const qc = useQueryClient();
 	const navigate = useNavigate();
 	const location = useLocation();
@@ -86,38 +69,37 @@ export function AuthPage() {
 			if (mode === "signin") {
 				const r = await authApi.login(username, password);
 				if (r.ok) return await finishAuthed();
-				setError(r.error ?? "Sign-in failed.");
+				setError(r.error ?? t("auth.signinFailed"));
 			} else if (mode === "signup") {
-				if (password.length < 8)
-					return setError("Password must be at least 8 characters.");
-				if (password !== confirm) return setError("Passwords do not match.");
+				if (password.length < 8) return setError(t("auth.pwTooShort"));
+				if (password !== confirm) return setError(t("auth.pwMismatch"));
 				const r = await authApi.signup(username, email, password);
 				if (r.ok) return await finishAuthed();
-				setError(r.error ?? "Could not create account.");
+				setError(r.error ?? t("auth.createFailed"));
 			} else if (mode === "forgot") {
 				const r = await authApi.forgot(email);
 				// Always succeeds (never reveals whether the email exists).
 				switchMode("reset");
 				setInfo(
 					r.dev_otp
-						? `Dev mode (no email configured) — your code is ${r.dev_otp}`
-						: "If that email has an account, a reset code is on its way.",
+						? t("auth.devCode", { code: r.dev_otp })
+						: t("auth.resetSent"),
 				);
 				if (r.dev_otp) setOtp(r.dev_otp);
 			} else {
-				if (password.length < 8)
-					return setError("Password must be at least 8 characters.");
-				if (password !== confirm) return setError("Passwords do not match.");
+				if (password.length < 8) return setError(t("auth.pwTooShort"));
+				if (password !== confirm) return setError(t("auth.pwMismatch"));
 				const r = await authApi.reset(email, otp.trim(), password);
 				if (r.ok) return await finishAuthed();
-				setError(r.error ?? "Could not reset password.");
+				setError(r.error ?? t("auth.resetFailed"));
 			}
 		} finally {
 			setBusy(false);
 		}
 	};
 
-	const { title, subtitle } = TITLES[mode];
+	const title = t(`auth.${mode}Title`);
+	const subtitle = t(`auth.${mode}Subtitle`);
 	const linkCls = "text-primary hover:underline";
 
 	return (
@@ -128,6 +110,7 @@ export function AuthPage() {
 			>
 				<div className="flex flex-col items-center gap-2 text-center">
 					<img src="/joyjoy-icon.svg" alt="joyjoy" className="size-12" />
+					{/* brand name, not translated */}
 					<h1 className="font-heading text-xl font-semibold">{title}</h1>
 					<p className="text-xs text-muted-foreground">{subtitle}</p>
 				</div>
@@ -135,18 +118,18 @@ export function AuthPage() {
 				{/* Username — signin + signup */}
 				{(mode === "signin" || mode === "signup") && (
 					<div className="space-y-1.5">
-						<Label htmlFor="username">Username</Label>
+						<Label htmlFor="username">{t("auth.username")}</Label>
 						<Input
 							id="username"
 							value={username}
 							onChange={(e) => setUsername(e.target.value)}
 							autoComplete="username"
-							placeholder="your-username"
+							placeholder={t("auth.usernamePlaceholder")}
 							autoFocus
 						/>
 						{mode === "signup" && usernameTaken && (
 							<p className="text-xs text-destructive">
-								That username is already taken.
+								{t("auth.usernameTaken")}
 							</p>
 						)}
 					</div>
@@ -155,14 +138,14 @@ export function AuthPage() {
 				{/* Email — signup + forgot + reset */}
 				{(mode === "signup" || mode === "forgot" || mode === "reset") && (
 					<div className="space-y-1.5">
-						<Label htmlFor="email">Email</Label>
+						<Label htmlFor="email">{t("auth.email")}</Label>
 						<Input
 							id="email"
 							type="email"
 							value={email}
 							onChange={(e) => setEmail(e.target.value)}
 							autoComplete="email"
-							placeholder="you@example.com"
+							placeholder={t("auth.emailPlaceholder")}
 							disabled={mode === "reset"}
 							autoFocus={mode === "forgot"}
 						/>
@@ -172,13 +155,13 @@ export function AuthPage() {
 				{/* OTP — reset */}
 				{mode === "reset" && (
 					<div className="space-y-1.5">
-						<Label htmlFor="otp">Reset code</Label>
+						<Label htmlFor="otp">{t("auth.resetCode")}</Label>
 						<Input
 							id="otp"
 							value={otp}
 							onChange={(e) => setOtp(e.target.value)}
 							inputMode="numeric"
-							placeholder="6-digit code"
+							placeholder={t("auth.resetCodePlaceholder")}
 							autoComplete="one-time-code"
 						/>
 					</div>
@@ -188,7 +171,7 @@ export function AuthPage() {
 				{(mode === "signin" || mode === "signup" || mode === "reset") && (
 					<div className="space-y-1.5">
 						<Label htmlFor="password">
-							{mode === "signin" ? "Password" : "New password"}
+							{mode === "signin" ? t("auth.password") : t("auth.newPassword")}
 						</Label>
 						<Input
 							id="password"
@@ -199,7 +182,9 @@ export function AuthPage() {
 								mode === "signin" ? "current-password" : "new-password"
 							}
 							placeholder={
-								mode === "signin" ? "••••••••" : "At least 8 characters"
+								mode === "signin"
+									? t("auth.passwordPlaceholder")
+									: t("auth.newPasswordPlaceholder")
 							}
 						/>
 					</div>
@@ -208,7 +193,7 @@ export function AuthPage() {
 				{/* Confirm — signup + reset */}
 				{(mode === "signup" || mode === "reset") && (
 					<div className="space-y-1.5">
-						<Label htmlFor="confirm">Confirm password</Label>
+						<Label htmlFor="confirm">{t("auth.confirmPassword")}</Label>
 						<Input
 							id="confirm"
 							type="password"
@@ -224,14 +209,14 @@ export function AuthPage() {
 
 				<Button type="submit" className="w-full" disabled={busy}>
 					{busy
-						? "Please wait…"
+						? t("auth.pleaseWait")
 						: mode === "signin"
-							? "Sign in"
+							? t("auth.signinSubmit")
 							: mode === "signup"
-								? "Create account"
+								? t("auth.signupSubmit")
 								: mode === "forgot"
-									? "Send reset code"
-									: "Reset password"}
+									? t("auth.forgotSubmit")
+									: t("auth.resetSubmit")}
 				</Button>
 
 				{/* Mode switches */}
@@ -244,30 +229,30 @@ export function AuthPage() {
 									className={linkCls}
 									onClick={() => switchMode("forgot")}
 								>
-									Forgot password?
+									{t("auth.forgotLink")}
 								</button>
 							</p>
 							<p>
-								New here?{" "}
+								{t("auth.newHere")}{" "}
 								<button
 									type="button"
 									className={linkCls}
 									onClick={() => switchMode("signup")}
 								>
-									Create an account
+									{t("auth.createAccount")}
 								</button>
 							</p>
 						</>
 					)}
 					{mode === "signup" && (
 						<p>
-							Already have an account?{" "}
+							{t("auth.haveAccount")}{" "}
 							<button
 								type="button"
 								className={linkCls}
 								onClick={() => switchMode("signin")}
 							>
-								Sign in
+								{t("auth.signinSubmit")}
 							</button>
 						</p>
 					)}
@@ -278,7 +263,7 @@ export function AuthPage() {
 								className={cn(linkCls)}
 								onClick={() => switchMode("signin")}
 							>
-								← Back to sign in
+								{t("auth.backToSignin")}
 							</button>
 							{mode === "reset" && (
 								<>
@@ -288,7 +273,7 @@ export function AuthPage() {
 										className={linkCls}
 										onClick={() => switchMode("forgot")}
 									>
-										Resend code
+										{t("auth.resend")}
 									</button>
 								</>
 							)}

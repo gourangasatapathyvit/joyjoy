@@ -2,7 +2,7 @@ import { Plus } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMcpMutations, useMcpServers, useMcpTools } from "@/api/queries";
-import type { McpServer } from "@/api/types";
+import type { McpServer, McpStatus } from "@/api/types";
 import { PanelLayout } from "@/components/layout/PanelLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,8 +24,11 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { NEW_ITEM } from "@/lib/constants";
 
-const statusVariant = (s: string): "default" | "secondary" | "destructive" =>
+const statusVariant = (
+	s: McpStatus,
+): "default" | "secondary" | "destructive" =>
 	s === "active"
 		? "default"
 		: s === "invalid_config"
@@ -133,8 +136,8 @@ function McpServerDialog({
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="stdio">stdio (command)</SelectItem>
-								<SelectItem value="http">HTTP (url)</SelectItem>
+								<SelectItem value="stdio">{t("mcp.transportStdio")}</SelectItem>
+								<SelectItem value="http">{t("mcp.transportHttp")}</SelectItem>
 							</SelectContent>
 						</Select>
 					</div>
@@ -244,9 +247,7 @@ export function McpPanel() {
 					<p className="text-sm text-muted-foreground">{t("common.loading")}</p>
 				)}
 				{!isLoading && servers.length === 0 && (
-					<p className="text-sm text-muted-foreground">
-						No MCP servers configured.
-					</p>
+					<p className="text-sm text-muted-foreground">{t("mcp.noServers")}</p>
 				)}
 				{servers.map((s) => (
 					<Card
@@ -334,7 +335,7 @@ export function McpPanel() {
 
 			{dialogOpen && (
 				<McpServerDialog
-					key={editTarget?.name ?? "__new__"}
+					key={editTarget?.name ?? NEW_ITEM}
 					initial={editTarget}
 					onClose={() => setDialogOpen(false)}
 				/>

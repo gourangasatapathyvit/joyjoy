@@ -1,14 +1,15 @@
 import { create } from "zustand";
 import { persistPref } from "@/api/prefs";
 import type { ReasoningEffort } from "@/api/types";
+import { STORAGE_KEYS } from "@/lib/constants";
 
 const newThreadId = () => `t-${crypto.randomUUID()}`;
 
 // Persisted UI state (webui parity): the workspace dock's open/closed flag and
 // the ACTIVE thread/session — so the last conversation (and therefore its
 // workspace) is restored across screen navigation and full reloads.
-const WS_KEY = "joyjoy-workspace-open";
-const TID_KEY = "joyjoy-active-thread";
+const WS_KEY = STORAGE_KEYS.workspaceOpen;
+const TID_KEY = STORAGE_KEYS.activeThread;
 
 const readWorkspaceOpen = (): boolean => {
 	try {

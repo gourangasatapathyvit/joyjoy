@@ -38,17 +38,12 @@ export const workspaceApi = {
 			method: "POST",
 			body: JSON.stringify({ thread_id: threadId, from, to }),
 		}),
-	upload: async (threadId: string, dir: string, file: File): Promise<Ok> => {
+	upload: (threadId: string, dir: string, file: File): Promise<Ok> => {
 		const fd = new FormData();
 		fd.append("thread_id", threadId);
 		fd.append("dir", dir);
 		fd.append("file", file);
-		const r = await fetch("/v1/workspace/upload", {
-			method: "POST",
-			body: fd,
-			credentials: "include",
-		});
-		return r.json();
+		return http<Ok>("/v1/workspace/upload", { method: "POST", body: fd });
 	},
 };
 

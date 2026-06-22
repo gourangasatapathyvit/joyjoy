@@ -25,6 +25,8 @@ import shutil
 import subprocess
 import tempfile
 
+from .constants import MAX_MEDIA_B64_BYTES, MAX_MEDIA_BYTES
+
 logger = logging.getLogger("joyjoy.media")
 
 # Extension groups we serve / preview. Images, A/V and PDF render directly; office
@@ -48,8 +50,7 @@ TEXT_EXTS = {
 }
 ALLOWED_EXTS = IMAGE_EXTS | PDF_EXTS | OFFICE_EXTS | AV_EXTS | TEXT_EXTS
 
-_MAX_BYTES = 25_000_000  # 25 MB hard cap on a served file
-_MAX_B64 = 8_000_000  # ~6 MB binary → skip embedding a bigger base64 block in the stream
+# Byte caps centralized in constants.py (MAX_MEDIA_BYTES / MAX_MEDIA_B64_BYTES).
 
 
 def is_office(path: str) -> bool:
@@ -119,10 +120,20 @@ def _win_to_wsl(p: str) -> str:
 
 
 def _safe_roots(settings, user_id: str) -> list[str]:
-    """Dirs an absolute media path is allowed to live under (realpath'd)."""
-    roots: list[str] = []
+    """Dirs an absolute media path is allowed to live under (realpath'd).
+
+    Prod is locked to the per-user workspace only. The broad host roots (the WSL
+    home + Windows ``/mnt/c/Users``) are DEV-only — they're a convenience for
+    testing imported-conversation media that references absolute host paths, but
+    in prod they'd let a crafted ``MEDIA:`` marker surface arbitrary host/home
+    files to the chat client, so they're excluded there.
+    """
     ws = os.path.join(settings.user_data_root, str(user_id or "default"), "workspace")
-    for cand in (ws, os.path.expanduser("~"), "/mnt/c/Users"):
+    cands = [ws]
+    if not settings.is_prod:
+        cands += [os.path.expanduser("~"), "/mnt/c/Users"]
+    roots: list[str] = []
+    for cand in cands:
         try:
             rp = os.path.realpath(cand)
             if os.path.isdir(rp):
@@ -147,7 +158,7 @@ def resolve_media(settings, user_id: str, raw_path: str) -> tuple[str, str] | No
     if not os.path.isfile(full):
         return None
     try:
-        if os.path.getsize(full) > _MAX_BYTES:
+        if os.path.getsize(full) > MAX_MEDIA_BYTES:
             return None
     except OSError:
         return None
@@ -181,7 +192,7 @@ def media_from_message(m) -> list[dict]:
         if kind not in ("image", "audio", "video", "file"):
             continue
         b64 = b.get("base64") or b.get("data")
-        if not isinstance(b64, str) or not b64 or len(b64) > _MAX_B64:
+        if not isinstance(b64, str) or not b64 or len(b64) > MAX_MEDIA_B64_BYTES:
             continue
         mime = b.get("mime_type") or b.get("mimeType") or "application/octet-stream"
         out.append(

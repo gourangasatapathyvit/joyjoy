@@ -76,9 +76,15 @@ def _bearer_sub(settings: Settings, request: Request) -> str | None:
 def current_user_id(request: Request, settings: Settings) -> str | None:
     """Authenticated identity (User.id) with NO dev fallback — for /v1/auth/me
     and gating."""
-    uid = request.headers.get(settings.user_id_header.lower())
-    if uid:
-        return uid.strip()
+    # The X-User-Id header is only trusted from a trusted caller: dev, or when a
+    # gateway API key is configured (verify_gateway_key validates it upstream on
+    # the same request). In prod with NO gateway key the header is ignored — else
+    # any client could impersonate any user by setting it. Identity then comes
+    # from the signed session cookie / bearer JWT only.
+    if not settings.is_prod or settings.gateway_api_key:
+        uid = request.headers.get(settings.user_id_header.lower())
+        if uid:
+            return uid.strip()
     sess = read_session_user_id(settings, request)
     if sess:
         return sess

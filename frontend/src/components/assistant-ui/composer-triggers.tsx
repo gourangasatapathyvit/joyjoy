@@ -6,6 +6,7 @@ import {
 	useComposerRuntime,
 } from "@assistant-ui/react";
 import type { FC } from "react";
+import { useTranslation } from "react-i18next";
 import { useMcpTools, useSkills } from "@/api/queries";
 import { ComposerTriggerPopover } from "@/components/assistant-ui/composer-trigger-popover";
 
@@ -75,6 +76,7 @@ const mentionFormatter: Unstable_DirectiveFormatter = {
 };
 
 export const ComposerTriggers: FC = () => {
+	const { t } = useTranslation();
 	const composerRuntime = useComposerRuntime();
 	const skills = useSkills();
 	const tools = useMcpTools();
@@ -88,7 +90,10 @@ export const ComposerTriggers: FC = () => {
 				label: s.name,
 				description: s.description,
 				execute: () =>
-					appendAfterTrigger(composerRuntime, `Use the "${s.name}" skill. `),
+					appendAfterTrigger(
+						composerRuntime,
+						t("composer.slashInsert", { name: s.name }),
+					),
 			})),
 	});
 
@@ -110,13 +115,13 @@ export const ComposerTriggers: FC = () => {
 				char="/"
 				adapter={slash.adapter}
 				action={slash.action}
-				emptyItemsLabel="No skills available"
+				emptyItemsLabel={t("composer.noSkills")}
 			/>
 			<ComposerTriggerPopover
 				char="@"
 				adapter={mention.adapter}
 				directive={mention.directive}
-				emptyItemsLabel="No tools available"
+				emptyItemsLabel={t("composer.noTools")}
 			/>
 		</>
 	);

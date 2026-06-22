@@ -33,6 +33,16 @@ export function useSkillContent(name: string | null, file?: string | null) {
 export function useMemory() {
 	return useQuery({ queryKey: ["memory"], queryFn: dataApi.memory });
 }
+export function useMemoryFiles() {
+	return useQuery({ queryKey: ["memories"], queryFn: dataApi.memoryFiles });
+}
+export function useMemoryFile(path: string | null) {
+	return useQuery({
+		queryKey: ["memory-file", path],
+		queryFn: () => dataApi.readMemoryFile(path as string),
+		enabled: !!path,
+	});
+}
 
 // ── Mutations (invalidate the relevant cache on success) ─────────────────────
 export function useMcpMutations() {
@@ -128,4 +138,27 @@ export function useWriteMemory() {
 		mutationFn: (content: string) => dataApi.writeMemory(content),
 		onSuccess: () => qc.invalidateQueries({ queryKey: ["memory"] }),
 	});
+}
+export function useMemoryFileMutations() {
+	const qc = useQueryClient();
+	const onSuccess = () => {
+		qc.invalidateQueries({ queryKey: ["memories"] });
+		qc.invalidateQueries({ queryKey: ["memory-file"] });
+	};
+	return {
+		save: useMutation({
+			mutationFn: ({ path, content }: { path: string; content: string }) =>
+				dataApi.writeMemoryFile(path, content),
+			onSuccess,
+		}),
+		remove: useMutation({
+			mutationFn: (path: string) => dataApi.deleteMemoryFile(path),
+			onSuccess,
+		}),
+		toggle: useMutation({
+			mutationFn: ({ path, enabled }: { path: string; enabled: boolean }) =>
+				dataApi.toggleMemoryFile(path, enabled),
+			onSuccess,
+		}),
+	};
 }

@@ -8,11 +8,15 @@
 import type { CreateRunRequest, CreateRunResponse } from "@/api/types";
 
 export async function http<T>(path: string, init?: RequestInit): Promise<T> {
+	// For FormData bodies (file uploads) the browser must set the multipart
+	// Content-Type (with boundary) itself — don't force application/json.
+	const isFormData =
+		typeof FormData !== "undefined" && init?.body instanceof FormData;
 	const res = await fetch(path, {
 		credentials: "include",
 		...init,
 		headers: {
-			"Content-Type": "application/json",
+			...(isFormData ? {} : { "Content-Type": "application/json" }),
 			...(init?.headers ?? {}),
 		},
 	});

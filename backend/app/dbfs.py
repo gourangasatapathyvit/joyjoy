@@ -27,17 +27,29 @@ from deepagents.backends.protocol import (
     ReadResult,
     WriteResult,
 )
+from deepagents.backends import StoreBackend
 from deepagents.backends.utils import (
     create_file_data,
     perform_string_replacement,
     slice_read_response,
 )
+from langgraph.config import get_store
 from sqlalchemy import select
 
-from .db import db_session
+from .db import db_session, get_or_create_user_config
 from .db.models import GlobalSkill, SkillFile, UserConfig, UserSkill
 
 logger = logging.getLogger("joyjoy.dbfs")
+
+# All dynamic memory files live in ONE store namespace (uid, "memories"); a
+# disabled file carries enabled=False in its value (NOT a separate namespace —
+# langgraph's sqlite store returns stale search results when the same key exists
+# in two namespaces). This is the shared key/namespace contract.
+MEMORIES_NS = "memories"
+
+
+def memories_namespace(user_id) -> tuple[str, str]:
+    return (str(user_id or "default"), MEMORIES_NS)
 
 # /memory/<file> -> UserConfig column. A single AGENTS.md per user (deepagents'
 # MemoryMiddleware convention); the UI Memory panel edits the same row.
@@ -63,11 +75,11 @@ class MemoryBackend(BackendProtocol):
         return _MEM_FILES.get((path or "").strip("/").split("/")[-1])
 
     def _invalidate(self) -> None:
-        # soul/profile/notes feed the system prompt — drop cached agents on change.
+        # memory edits feed the system prompt — drop cached agents on change.
         try:
-            from .agent import _invalidate_user_cache
+            from .agent_common import invalidate_user_cache
 
-            _invalidate_user_cache(self.user_id)
+            invalidate_user_cache(self.user_id)
         except Exception:  # noqa: BLE001
             logger.debug("memory invalidate failed", exc_info=True)
 
@@ -91,10 +103,7 @@ class MemoryBackend(BackendProtocol):
 
     async def _set(self, col: str, content: str) -> None:
         async with db_session() as s:
-            cfg = await s.get(UserConfig, self.user_id)
-            if cfg is None:
-                cfg = UserConfig(user_id=self.user_id)
-                s.add(cfg)
+            cfg = await get_or_create_user_config(s, self.user_id)
             setattr(cfg, col, content or "")
         self._invalidate()
 
@@ -261,6 +270,73 @@ class DbSkillsBackend(BackendProtocol):
 
     async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         return [FileUploadResponse(path=p, error="permission_denied") for p, _ in files]
+
+    def grep(self, pattern, path=None, glob=None) -> GrepResult:  # noqa: ANN001
+        return GrepResult(matches=[])
+
+    def glob(self, pattern, path=None) -> GlobResult:  # noqa: ANN001
+        return GlobResult(matches=[])
+
+
+class MemoriesBackend(BackendProtocol):
+    """The agent's ``/memories/`` mount — a ``StoreBackend`` on namespace
+    ``(uid,"memories")`` (LangGraph store) that HIDES disabled files (value
+    ``enabled == False``) from the agent, mirroring how a disabled skill is
+    hidden. Disabled files are filtered out of ``als`` and blocked from
+    ``aread``/``adownload`` so the agent neither lists nor reads them; the UI
+    still manages them via the ``/v1/memories`` endpoints. Everything else
+    delegates to the wrapped ``StoreBackend``."""
+
+    def __init__(self, user_id: str) -> None:
+        self.user_id = str(user_id or "default")
+        self._ns = (self.user_id, MEMORIES_NS)
+        self._inner = StoreBackend(namespace=lambda _rt, _ns=(self.user_id, MEMORIES_NS): _ns)
+
+    @staticmethod
+    def _norm(p: str) -> str:
+        return p if (p or "").startswith("/") else f"/{p or ''}"
+
+    async def _is_enabled(self, store, path: str) -> bool:
+        it = await store.aget(self._ns, self._norm(path))
+        # absent (just-created by the agent, no flag) or enabled → visible.
+        return it is None or (it.value or {}).get("enabled", True) is not False
+
+    async def als(self, path: str = "/") -> LsResult:
+        res = await self._inner.als(path)
+        if getattr(res, "error", None) or not res.entries:
+            return res
+        store = get_store()
+        # entries are FileInfo TypedDicts (plain dicts), not attribute objects.
+        kept = [
+            e
+            for e in res.entries
+            if e.get("is_dir") or await self._is_enabled(store, e.get("path", ""))
+        ]
+        return LsResult(entries=kept)
+
+    async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
+        if not await self._is_enabled(get_store(), file_path):
+            return ReadResult(error=f"File '{file_path}' not found")
+        return await self._inner.aread(file_path, offset, limit)
+
+    async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
+        store = get_store()
+        out: list[FileDownloadResponse] = []
+        for p in paths:
+            if not await self._is_enabled(store, p):
+                out.append(FileDownloadResponse(path=p, content=None, error="file_not_found"))
+            else:
+                out.append((await self._inner.adownload_files([p]))[0])
+        return out
+
+    async def awrite(self, file_path: str, content: str) -> WriteResult:
+        return await self._inner.awrite(file_path, content)
+
+    async def aedit(self, file_path: str, old_string: str, new_string: str, replace_all: bool = False) -> EditResult:
+        return await self._inner.aedit(file_path, old_string, new_string, replace_all)
+
+    async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
+        return await self._inner.aupload_files(files)
 
     def grep(self, pattern, path=None, glob=None) -> GrepResult:  # noqa: ANN001
         return GrepResult(matches=[])
