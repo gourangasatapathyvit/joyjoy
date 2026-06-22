@@ -80,7 +80,11 @@ async def seed_all(settings) -> None:
     with open(_SEED_SQL, encoding="utf-8") as f:
         statements = _split_sql(f.read())
     engine = get_engine()
+    # psycopg (Postgres) parses `%` in the SQL text as a parameter placeholder, so a
+    # literal `%` in content (e.g. "%s") errors. Double it — psycopg halves `%%` back,
+    # preserving any count. SQLite (aiosqlite) does no such parsing, so leave it as-is.
+    is_pg = engine.dialect.name == "postgresql"
     async with engine.begin() as conn:
         for stmt in statements:
-            await conn.exec_driver_sql(stmt)
+            await conn.exec_driver_sql(stmt.replace("%", "%%") if is_pg else stmt)
     logger.info("Loaded global seed: %d statements from %s", len(statements), os.path.basename(_SEED_SQL))

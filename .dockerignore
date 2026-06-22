@@ -1,0 +1,14 @@
+# keep the build context small + reproducible (deps/build artifacts are regenerated in-image)
+.git
+**/__pycache__/
+**/*.pyc
+backend/.venv/
+backend/data/
+frontend/node_modules/
+frontend/dist/
+webui/
+data/
+*.sqlite
+*.sqlite-*
+.env
+docs/

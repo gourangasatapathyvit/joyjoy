@@ -1,0 +1,73 @@
+# joyjoy — self-contained stack: Postgres + the single FastAPI app (serves the
+# React SPA and the /v1 API on :8080; all app data is relational, prod = Postgres).
+#
+#   1. set the required secrets in .env (compose reads it for ${VAR} interpolation):
+#        JWT_SECRET, CREDENTIAL_ENCRYPTION_KEY   (generate-once; keep stable!)
+#        AZURE_OPENAI_API_KEY                     (base-model key; the seed refs ${AZURE_OPENAI_API_KEY})
+#   2. docker compose up --build
+#   3. open http://localhost:8080  → sign up / log in
+#
+# On first boot the app creates the schema and loads backend/app/db/seeds/global_seed.sql
+# into the empty DB (skins, providers, base models, MCP, skills). No secret is in the
+# SQL — model keys are ${AZURE_OPENAI_API_KEY} env-refs resolved at runtime.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-joyjoy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-joyjoy}
+      POSTGRES_DB: ${POSTGRES_DB:-joyjoy_db}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-joyjoy} -d ${POSTGRES_DB:-joyjoy_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: prod
+      # Bundled Postgres above. To use an EXTERNAL DB instead, set DATABASE_URL here
+      # (url-encode special chars in the password, e.g. @ -> %40) and drop the `db` service.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-joyjoy}:${POSTGRES_PASSWORD:-joyjoy}@db:5432/${POSTGRES_DB:-joyjoy_db}
+      # Generate-once secrets — MUST be set and STABLE in prod (rotating
+      # CREDENTIAL_ENCRYPTION_KEY orphans every stored encrypted secret).
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?set CREDENTIAL_ENCRYPTION_KEY in .env}
+      # Base/global model API key — the seeded models reference ${AZURE_OPENAI_API_KEY}.
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      BACKEND_HOST: 0.0.0.0
+      BACKEND_PORT: "8080"
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - workspaces:/app/backend/data    # per-session agent workspace files (the only on-disk state in prod)
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # ---- Optional: the jira MCP server (mcp-atlassian) on the same network ----
+  # The seeded global "jira" MCP points at http://localhost:9000/mcp; in containers
+  # update that global_mcps row to http://jira-mcp:9000/mcp, then enable this:
+  # jira-mcp:
+  #   image: ghcr.io/sooperset/mcp-atlassian:latest
+  #   restart: unless-stopped
+  #   command: ["--transport", "streamable-http", "--port", "9000", "--host", "0.0.0.0", "--stateless"]
+  #   env_file: [mcp-atlassian.env]   # JIRA_URL / JIRA_USERNAME / JIRA_API_TOKEN, etc.
+
+volumes:
+  pgdata:
+  workspaces:

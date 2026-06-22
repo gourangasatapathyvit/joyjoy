@@ -95,7 +95,7 @@ joyjoy/
 - [x] **Relational-DB refactor** — all app data → SQLAlchemy (dev SQLite / prod Postgres via `APP_ENV`); Fernet secrets-at-rest; identity = `User.id`; memory → `UserConfig`; DB→agent bridge `dbfs.py`; frontend prefs → `/v1/settings/ui`; Alembic baseline. **Validated live (HTTP + browser).**
 - [x] **Credentials** — provider secrets Fernet-encrypted at rest in the DB (no plaintext files).
 - [~] **Prod Postgres** — store+saver + app DB on isolated `joyjoy_db` proven; load test + sandboxed `execute` still pending.
-- [ ] **Ops** — docker-compose (backend + postgres), CI; pin provider SDKs (`langchain-anthropic`/`-aws`/`-google-genai`) into `pyproject.toml`.
+- [~] **Ops** — **docker-compose (Postgres + app) DONE** (`Dockerfile` + `docker-compose.yml`, validated against Postgres). Still pending: CI; pin provider SDKs (`langchain-anthropic`/`-aws`/`-google-genai`) into `pyproject.toml`.
 
 ## 7b. Runs queue & streaming — current design + agreed prod hardening
 **Current (single-process — correct for now):** `backend/app/runs.py` uses one in-process

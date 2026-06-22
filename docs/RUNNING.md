@@ -61,6 +61,25 @@ cd backend
 The app DB and the LangGraph checkpointer share the one Postgres database
 (`joyjoy_db`) but use disjoint tables, so they don't collide.
 
+## Run — Docker (self-contained: Postgres + app)
+
+`Dockerfile` (multi-stage: builds the SPA, then the FastAPI app serves it + `/v1` on
+:8080) and `docker-compose.yml` (bundled Postgres + the app) are at the repo root.
+
+```bash
+# set in .env (compose reads it): JWT_SECRET, CREDENTIAL_ENCRYPTION_KEY (generate-once,
+# stable!), AZURE_OPENAI_API_KEY (the seeded models reference ${AZURE_OPENAI_API_KEY}).
+docker compose up --build           # → http://localhost:8080
+```
+
+On first boot the app creates the schema and loads `global_seed.sql` into the empty
+Postgres. The only persistent on-disk state is the `workspaces` volume (agent files);
+everything else is in Postgres. To use an external DB, set `DATABASE_URL` in the
+backend service and drop the `db` service. **Note:** the seeded global MCP servers
+point at dev-host paths/`localhost` and won't connect inside the container (the app
+runs fine with them skipped) — reconfigure the `global_mcps` rows (and enable the
+optional `jira-mcp` service) for a containerized MCP setup.
+
 ## Workspace files
 
 Agent working files stay on disk under `WORKSPACE_ROOT/<uid>/workspace/<workspace_id>`
