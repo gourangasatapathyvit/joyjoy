@@ -44,7 +44,7 @@ from .db.models import (
     UserModel,
     UserSkill,
 )
-from .dbfs import MemoryBackend, UserSkillsBackend
+from .dbfs import DbSkillsBackend, MemoryBackend, _file_text
 
 logger = logging.getLogger("joyjoy.agent")
 
@@ -272,10 +272,10 @@ def build_backend(settings: Settings, user_id: str = "default"):
       ``virtual_mode=True`` so every op is confined there (``..``/``~``/absolute
       escapes are blocked). This is the SAME dir the webui workspace panel browses,
       so whatever the agent reads/writes shows up there — and nowhere else.
-    - ``/memory/`` → ``MemoryBackend`` (DB ``user_configs``) and ``/skills/user/`` →
-      ``UserSkillsBackend`` (DB ``user_skills``/``skill_files``) so the agent shares
-      one source of truth with the memory/skills CRUD endpoints.
-    - ``/skills/global/`` → read-only global skills from disk (shared by all users).
+    - ``/memory/`` → ``MemoryBackend`` (DB ``user_configs``); ``/skills/user/`` and
+      ``/skills/global/`` → ``DbSkillsBackend`` (DB ``user_skills``/``global_skills`` +
+      ``skill_files``). Everything but the working files is served from the DB — no
+      disk dependency for memory or skills.
     """
     uid = str(user_id or "default")
     host_root = os.path.join(settings.workspace_root_dir, uid, "workspace")
@@ -283,11 +283,9 @@ def build_backend(settings: Settings, user_id: str = "default"):
     working_fs = SessionFilesystemBackend(root_dir=host_root, virtual_mode=True)
     routes: dict[str, object] = {
         "/memory/": MemoryBackend(uid),
-        "/skills/user/": UserSkillsBackend(uid),
+        "/skills/user/": DbSkillsBackend(user_id=uid),
+        "/skills/global/": DbSkillsBackend(),  # shipped, read-only — from the DB
     }
-    gdir = settings.global_skills_dir
-    if gdir and os.path.isdir(gdir):
-        routes["/skills/global/"] = FilesystemBackend(root_dir=gdir, virtual_mode=True)
     return CompositeBackend(default=working_fs, routes=routes)
 
 
@@ -549,74 +547,36 @@ async def list_skills(settings: Settings, user_id: str) -> list[dict]:
     return skills
 
 
-def _read_text(path: str) -> str:
-    try:
-        with open(path, encoding="utf-8") as f:
-            return f.read()
-    except Exception:  # noqa: BLE001
-        logger.debug("failed to read %s", path, exc_info=True)
-        return ""
-
-
-def _safe_skill_dir(root: str, name: str) -> str | None:
-    """Resolve <root>/<name> ensuring it stays within root (no traversal)."""
-    if not name or any(c in name for c in ("/", "\\")) or ".." in name:
-        return None
-    root_real = os.path.realpath(root)
-    p = os.path.realpath(os.path.join(root_real, name))
-    if p != root_real and not p.startswith(root_real + os.sep):
-        return None
-    return p
-
-
 async def read_skill_content(settings: Settings, user_id: str, name: str, file: str | None = None) -> dict:
-    """Read a global skill (read-only, from disk for full fidelity incl. linked
-    files) or a per-user skill (from the DB) for the UI viewer.
+    """Read a global skill (shipped, read-only) or a per-user skill — both entirely
+    from the DB (``global_skills``/``user_skills`` + ``skill_files``) for the UI viewer.
 
     Returns ``{success, name, content, linked_files}`` on success, or
     ``{success: False, error}`` when not found.
     """
     if not name:
         return {"success": False, "error": "name required"}
-    # Global skills are shipped assets on disk (the global_skills table mirrors
-    # SKILL.md for listing; the dir has the helper files too).
-    gdir = settings.global_skills_dir
-    if gdir and os.path.isdir(gdir):
-        sdir = _safe_skill_dir(gdir, name)
-        if sdir and os.path.isdir(sdir):
-            if file:
-                target = _safe_skill_dir(sdir, file) if "/" not in file and "\\" not in file else os.path.realpath(os.path.join(sdir, file))
-                if not target or os.path.commonpath([target, os.path.realpath(sdir)]) != os.path.realpath(sdir) or not os.path.isfile(target):
-                    return {"success": False, "error": "File not found"}
-                return {"success": True, "name": name, "content": _read_text(target), "path": file}
-            md = os.path.join(sdir, "SKILL.md")
-            if os.path.isfile(md):
-                linked: dict[str, bool] = {}
-                for root, _dirs, files in os.walk(sdir):
-                    for fn in files:
-                        rel = os.path.relpath(os.path.join(root, fn), sdir).replace("\\", "/")
-                        if rel != "SKILL.md":
-                            linked[rel] = True
-                return {
-                    "success": True, "name": name, "scope": "global", "editable": False,
-                    "content": _read_text(md), "linked_files": linked,
-                }
-    # Per-user skill from the DB (created/edited via the UI).
     async with db_session() as s:
-        sk = await s.scalar(select(UserSkill).where(UserSkill.user_id == str(user_id), UserSkill.name == name))
-        if sk:
-            if file:
-                f = await s.scalar(select(SkillFile).where(SkillFile.user_skill_id == sk.id, SkillFile.filename == file))
-                if not f:
-                    return {"success": False, "error": "File not found"}
-                return {"success": True, "name": name, "content": f.content or "", "path": file}
-            files = (await s.scalars(select(SkillFile).where(SkillFile.user_skill_id == sk.id))).all()
-            return {
-                "success": True, "name": name, "scope": "user", "editable": True,
-                "enabled": bool(sk.is_active), "content": sk.content or "",
-                "linked_files": {f.filename: True for f in files},
-            }
-    return {"success": False, "error": f"Skill '{name}' not found.", "available_skills": [], "linked_files": {}}
+        gs = await s.scalar(select(GlobalSkill).where(GlobalSkill.name == name, GlobalSkill.is_active.is_(True)))
+        if gs:
+            spec = (gs, SkillFile.global_skill_id, "global", False, True)
+        else:
+            us = await s.scalar(select(UserSkill).where(UserSkill.user_id == str(user_id), UserSkill.name == name))
+            if not us:
+                return {"success": False, "error": f"Skill '{name}' not found.", "available_skills": [], "linked_files": {}}
+            spec = (us, SkillFile.user_skill_id, "user", True, bool(us.is_active))
+        sk, file_col, scope, editable, enabled = spec
+        if file:
+            f = await s.scalar(select(SkillFile).where(file_col == sk.id, SkillFile.filename == file))
+            if not f:
+                return {"success": False, "error": "File not found"}
+            return {"success": True, "name": name, "content": _file_text(f), "path": file}
+        files = (await s.scalars(select(SkillFile).where(file_col == sk.id))).all()
+        return {
+            "success": True, "name": name, "scope": scope, "editable": editable,
+            "enabled": enabled, "content": sk.content or "",
+            "linked_files": {f.filename: True for f in files},
+        }
 
 
 # ---------------------------------------------------------------------------

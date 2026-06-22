@@ -20,7 +20,7 @@ architecture, **[PLAN.md](./PLAN.md)** for the architecture & checklist, and
 ## Layout
 - `backend/` — FastAPI + deepagents engine; `app/db/` (13 SQLAlchemy models, async engine, Fernet, seeds), `app/dbfs.py` (DB→agent backend bridge), `alembic/` (migrations)
 - `frontend/` — the React SPA (built to `frontend/dist`, served by the backend) — see [frontend/README.md](./frontend/README.md)
-- `skills/global/`, `config/global.mcp.json` — shared, read-only global skills/MCP (seeded into the DB on first boot)
+- `config/global.mcp.json`, `config/models.json` — global MCP/model seed sources (seeded into the DB on first boot). Global skills ship as a committed DB seed bundle (`backend/app/db/seeds/global_skills.json`) — there is no loose skills/ tree; global skills live entirely in the DB.
 - `data/` — dev SQLite DBs + per-user workspace files (gitignored)
 - `docs/branding/` — brand kit: logos, favicons, brand guide
 

@@ -72,7 +72,7 @@ joyjoy/
     alembic/                relational migrations (baseline = all 13 tables)
     pyproject.toml
   frontend/                 React SPA (Vite + TS); built to frontend/dist, served by the backend
-  skills/global/            read-only global skills (SKILL.md dirs) — seeded into the DB
+  backend/app/db/seeds/global_skills.json   committed global-skills bundle (SKILL.md + helper files; base64 for binaries) — the seed source; global skills then live entirely in the DB (no skills/ dir)
   config/global.mcp.json    global MCP servers — seeded into the DB
   data/                     dev SQLite DBs + per-user workspace files (gitignored)
   docs/  PLAN.md  README.md  CLAUDE.md  .env

@@ -181,6 +181,7 @@ class SkillFile(Base):
     )
     filename: Mapped[str] = mapped_column(String(255))
     content: Mapped[str] = mapped_column(Text, default="")
+    encoding: Mapped[str] = mapped_column(String(16), default="utf-8")  # utf-8 | base64 (binary)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
