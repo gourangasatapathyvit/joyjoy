@@ -36,7 +36,8 @@ cd ~/joyjoy/backend && VIRTUAL_ENV="$PWD/.venv" ~/.local/bin/uv pip install <pkg
 ## Lint / tests
 
 - Lint: `ruff` (a dev extra in pyproject).
-- There is **no backend unit-test suite**. Validation is done with **integration scripts in `scripts/`** run against a live backend: `test_providers_crud.sh`, `test_peruser_chat.sh`, `test_openai_gemini.sh`, `test_azure_selfcontained.sh`, `validate_models.py`. They curl the gateway with `Authorization: Bearer dev-gateway-key-change-me` and `X-User-Id: <user>`.- **Never `import app.main` from a standalone script** — it opens a DB connection at import and hangs. Replicate env by parsing `.env` into `os.environ` yourself (see `validate_models.py`).
+- There is **no backend unit-test suite**. `scripts/validate_models.py` is a standalone check that `config.model_specs` parses every model + resolves `${VAR}` keys. (The old pre-refactor gateway curl tests — `test_*.sh` with `X-User-Id: alice` — were removed; they assumed the deleted webui gateway + string-identity + store-backed CRUD. Validate against the live `/v1` API with a real session cookie now.)
+- **Never `import app.main` from a standalone script** — it opens a DB connection at import and hangs. Replicate env by parsing `.env` into `os.environ` yourself (see `validate_models.py`).
 
 ## Architecture
 
