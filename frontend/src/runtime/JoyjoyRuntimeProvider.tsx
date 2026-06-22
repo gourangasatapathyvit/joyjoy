@@ -513,6 +513,50 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 		await runTurn(assistantId, buildSendText(text, quote));
 	}, [runTurn]);
 
+	// Edit a previous user message: replace it (and drop everything after its
+	// parent) with the new text, then re-run. Wires the edit pencil on user
+	// bubbles. Like onReload, the backend thread keeps the prior turns (true
+	// checkpoint replace needs backend support — deferred); the agent answers the
+	// edited message with the full thread context.
+	const onEdit = useCallback(
+		async (message: AppendMessage) => {
+			const text = message.content
+				.map((c) => (c.type === "text" ? c.text : ""))
+				.join("")
+				.trim();
+			if (!text) return;
+			const quote = (
+				message.metadata?.custom as { quote?: QuoteInfo } | undefined
+			)?.quote;
+			const parentId = message.parentId;
+			const assistantId = newId("a");
+			setMessages((prev) => {
+				// Keep up to and including the edited message's parent; the edited
+				// user message + a fresh assistant placeholder replace the rest.
+				const cut = parentId ? prev.findIndex((m) => m.id === parentId) : -1;
+				const kept = cut >= 0 ? prev.slice(0, cut + 1) : [];
+				return [
+					...kept,
+					{
+						id: newId("u"),
+						role: "user",
+						parts: [{ type: "text", text }],
+						createdAt: Date.now(),
+						...(quote ? { quote } : {}),
+					},
+					{
+						id: assistantId,
+						role: "assistant",
+						parts: [],
+						createdAt: Date.now(),
+					},
+				];
+			});
+			await runTurn(assistantId, buildSendText(text, quote));
+		},
+		[runTurn],
+	);
+
 	// Stop the in-flight run (wires the composer's "Stop generating" button).
 	const onCancel = useCallback(async () => {
 		const h = activeRunRef.current;
@@ -606,6 +650,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 		isRunning,
 		convertMessage,
 		onNew,
+		onEdit,
 		onReload,
 		onCancel,
 	});
