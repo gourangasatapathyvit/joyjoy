@@ -12,3 +12,13 @@ Filesystem layout:
 - `/memory/AGENTS.md` — your core long-term memory; it is ALWAYS loaded into your context. Keep it concise; update it with `edit_file` for durable, frequently-needed facts (the user's identity, standing preferences, how to behave).
 - `/memories/` — YOUR OWN private scratch folder for notes you choose to keep across sessions (e.g. `/memories/<topic>.md`): scenario-specific context that doesn't need to be in-context every turn. Use it ONLY for your own durable memory — NEVER for files the user asked you to create (those belong in the workspace). Use `ls`/`glob`/`read_file` to recall them and `write_file`/`edit_file` to record new ones.
 """
+
+# Appended to the system prompt when the OpenSandbox execution layer is enabled.
+# ``{mount}`` is filled with settings.sandbox_mount_path (e.g. /workspace).
+SANDBOX_PROMPT_SUFFIX = """
+
+Execution environment: your working directory is `{mount}` (a persistent sandbox volume). Create, read, and RUN files under `{mount}` (e.g. `{mount}/script.py`) and use the execute tool to run shell/Python there. Files outside `{mount}` are NOT saved."""
+
+# Description for the sandbox-only `load_skill` tool (shown to the model).
+LOAD_SKILL_TOOL_DESCRIPTION = """Materialize a skill's files into your sandbox workspace so you can RUN its scripts. Pass the skill name (from the skills list). After loading, read /workspace/.skills/<name>/SKILL.md and execute its scripts."""
+

@@ -43,7 +43,11 @@ from .constants import DEFAULT_USER_ID
 from .context import AgentContext
 from .db import SECRET_FIELDS, db_session, decrypt_secrets, encrypt
 from .enums import Provider
-from .prompts import DEFAULT_SYSTEM_PROMPT
+from .prompts import (
+    DEFAULT_SYSTEM_PROMPT,
+    LOAD_SKILL_TOOL_DESCRIPTION,
+    SANDBOX_PROMPT_SUFFIX,
+)
 from .textutils import safe_segment
 from .db.models import (
     GlobalModel,
@@ -323,11 +327,7 @@ def _make_load_skill_tool(settings: Settings, uid: str):
     return StructuredTool.from_function(
         coroutine=_load,
         name="load_skill",
-        description=(
-            "Materialize a skill's files into your sandbox workspace so you can RUN "
-            "its scripts. Pass the skill name (from the skills list). After loading, "
-            "read /workspace/.skills/<name>/SKILL.md and execute its scripts."
-        ),
+        description=LOAD_SKILL_TOOL_DESCRIPTION,
     )
 
 
@@ -611,12 +611,7 @@ async def _system_prompt_for(user_id, settings: Settings | None = None) -> str:
     prompt = DEFAULT_SYSTEM_PROMPT
     if settings is not None and sandbox.is_enabled(settings):
         mount = settings.sandbox_mount_path.rstrip("/") or "/workspace"
-        prompt += (
-            f"\n\nExecution environment: your working directory is `{mount}` (a persistent "
-            f"sandbox volume). Create, read, and RUN files under `{mount}` (e.g. "
-            f"`{mount}/script.py`) and use the execute tool to run shell/Python there. "
-            f"Files outside `{mount}` are NOT saved."
-        )
+        prompt += SANDBOX_PROMPT_SUFFIX.format(mount=mount)
     return prompt
 
 
