@@ -215,7 +215,7 @@ class Settings(BaseSettings):
             s = self.normalize_model(
                 {
                     "id": self.azure_openai_model,
-                    "provider": "azure_openai",
+                    "provider": Provider.AZURE_OPENAI,
                     "deployment": self.azure_openai_deployment,
                 }
             )

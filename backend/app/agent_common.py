@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from .constants import AGENT_CACHE_MAX
+from .constants import AGENT_CACHE_MAX, DEFAULT_USER_ID
 
 logger = logging.getLogger("joyjoy.agent")
 
@@ -27,7 +27,7 @@ def cache_put(key: tuple, agent: object) -> None:
 
 def invalidate_user_cache(user_id: str) -> None:
     """Drop cached agents for a user so skill/MCP/memory edits take effect next call."""
-    uid = str(user_id or "default")
+    uid = str(user_id or DEFAULT_USER_ID)
     for k in [k for k in _AGENT_CACHE if isinstance(k, tuple) and len(k) >= 2 and k[1] == uid]:
         _AGENT_CACHE.pop(k, None)
 

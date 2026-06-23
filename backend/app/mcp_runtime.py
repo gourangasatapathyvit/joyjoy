@@ -15,7 +15,7 @@ from sqlalchemy import select
 from .agent_common import invalidate_user_cache as _invalidate_user_cache
 from .agent_common import valid_name as _valid_name
 from .config import Settings
-from .constants import MCP_PROBE_TIMEOUT_S
+from .constants import DEFAULT_USER_ID, MCP_PROBE_TIMEOUT_S
 from .db import db_session
 from .db.models import GlobalMcp, UserMcp
 from .enums import McpStatus
@@ -115,7 +115,7 @@ async def load_mcp_tools(settings: Settings, user_id: str) -> list:
     # same per-user dir as the main process regardless of its own cwd.
     extra_env = {
         "WORKSPACE_ROOT": os.path.abspath(settings.workspace_root_dir),
-        "JOYJOY_USER_ID": str(user_id or "default"),
+        "JOYJOY_USER_ID": str(user_id or DEFAULT_USER_ID),
     }
     conns = _to_connections(
         {

@@ -10,6 +10,11 @@ them here mirrors the frontend's ``src/lib/constants.ts``.
 
 from __future__ import annotations
 
+# Fallback tenant bucket when no user id is resolved (dev / no-auth paths). The
+# real per-user identity is the auth-resolved uuid; this is only the "no user yet"
+# sentinel that the per-user stores/backends key off.
+DEFAULT_USER_ID = "default"
+
 MB = 1024 * 1024
 
 # Compiled-agent LRU cache bound (agent_common.cache_put evicts past this).

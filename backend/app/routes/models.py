@@ -15,6 +15,7 @@ from ..agent import (
     test_model,
 )
 from ..auth import resolve_user_id, verify_gateway_key
+from ..enums import Provider
 from .deps import json_body, settings
 
 router = APIRouter()
@@ -31,7 +32,7 @@ async def list_models(request: Request):
         "data": [
             {
                 "id": mid, "object": "model", "owned_by": "joyjoy",
-                "provider": s.get("provider", "azure_openai"),
+                "provider": s.get("provider", Provider.AZURE_OPENAI),
                 "supports_reasoning": model_supports_reasoning(s),
             }
             for mid, s in specs.items()

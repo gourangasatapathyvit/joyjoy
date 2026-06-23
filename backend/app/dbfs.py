@@ -36,6 +36,7 @@ from deepagents.backends.utils import (
 from langgraph.config import get_store
 from sqlalchemy import select
 
+from .constants import DEFAULT_USER_ID
 from .db import db_session, get_or_create_user_config
 from .db.models import GlobalSkill, SkillFile, UserConfig, UserSkill
 
@@ -49,7 +50,7 @@ MEMORIES_NS = "memories"
 
 
 def memories_namespace(user_id) -> tuple[str, str]:
-    return (str(user_id or "default"), MEMORIES_NS)
+    return (str(user_id or DEFAULT_USER_ID), MEMORIES_NS)
 
 # /memory/<file> -> UserConfig column. A single AGENTS.md per user (deepagents'
 # MemoryMiddleware convention); the UI Memory panel edits the same row.
@@ -69,7 +70,7 @@ class MemoryBackend(BackendProtocol):
     MemoryMiddleware + edit_file and the UI Memory panel share one source of truth."""
 
     def __init__(self, user_id: str) -> None:
-        self.user_id = str(user_id or "default")
+        self.user_id = str(user_id or DEFAULT_USER_ID)
 
     def _col(self, path: str) -> str | None:
         return _MEM_FILES.get((path or "").strip("/").split("/")[-1])
@@ -288,7 +289,7 @@ class MemoriesBackend(BackendProtocol):
     delegates to the wrapped ``StoreBackend``."""
 
     def __init__(self, user_id: str) -> None:
-        self.user_id = str(user_id or "default")
+        self.user_id = str(user_id or DEFAULT_USER_ID)
         self._ns = (self.user_id, MEMORIES_NS)
         self._inner = StoreBackend(namespace=lambda _rt, _ns=(self.user_id, MEMORIES_NS): _ns)
 

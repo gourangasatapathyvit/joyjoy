@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from . import users as users_mod
 from .agent import get_agent
 from .config import get_settings
+from .constants import DEFAULT_USER_ID
 from .db import ensure_encryption_key, init_db, seed_all
 from .persistence import open_persistence
 from .routes import (
@@ -102,7 +103,7 @@ async def lifespan(app: FastAPI):
     async with open_persistence(settings) as (checkpointer, store):
         app.state.checkpointer = checkpointer
         app.state.store = store
-        await get_agent(settings, checkpointer, store, settings.default_model, "default")  # warm default
+        await get_agent(settings, checkpointer, store, settings.default_model, DEFAULT_USER_ID)  # warm default
         logger.info(
             "joyjoy backend ready (env=%s, prod=%s, models=%s)",
             settings.app_env, settings.is_prod, list(settings.model_specs),

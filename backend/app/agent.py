@@ -38,8 +38,9 @@ from .agent_common import (
     valid_name as _valid_name,
 )
 from .config import Settings
+from .constants import DEFAULT_USER_ID
 from .context import AgentContext
-from .db import db_session, decrypt_secrets, encrypt
+from .db import SECRET_FIELDS, db_session, decrypt_secrets, encrypt
 from .enums import Provider
 from .prompts import DEFAULT_SYSTEM_PROMPT
 from .textutils import safe_segment
@@ -267,19 +268,16 @@ def _session_workspace_seg() -> str | None:
     return safe_segment(seg) or None
 
 
-# Tools exposed by the workspace-fs MCP server whose ``workspace_id`` arg joyjoy
-# fills from the runtime context — the model never sets it (and couldn't know it).
-_WORKSPACE_FS_TOOLS = {"delete_file", "move_file", "make_dir"}
-
-
 def _bind_session_workspace(tools: list) -> list:
-    """Wrap workspace-fs MCP tools so each call injects the CURRENT session's
-    ``workspace_id`` (resolved from the runtime context, same as the native file
-    backend). The model calls them with just a path; per-thread scoping is enforced
-    here rather than trusted to the model. Non-workspace-fs tools pass through."""
+    """Wrap any MCP tool that declares a ``workspace_id`` arg (e.g. the workspace-fs
+    server's delete_file/move_file/make_dir) so each call injects the CURRENT
+    session's workspace_id from the runtime context — the model calls them with just
+    a path; per-thread scoping is enforced here, not trusted to the model. Detected
+    by the arg's presence (no hardcoded tool-name list), so new workspace-scoped MCP
+    tools bind automatically. Tools without that arg pass through untouched."""
     out: list = []
     for t in tools:
-        if getattr(t, "name", None) not in _WORKSPACE_FS_TOOLS:
+        if "workspace_id" not in (getattr(t, "args", None) or {}):
             out.append(t)
             continue
 
@@ -324,7 +322,7 @@ class SessionFilesystemBackend(FilesystemBackend):
         self._base = Path(value).resolve() if value else Path.cwd()
 
 
-def build_backend(settings: Settings, user_id: str = "default"):
+def build_backend(settings: Settings, user_id: str = DEFAULT_USER_ID):
     """Composite backend — per-user HOST workspace for the agent's files.
 
     - default (the agent's working files) → ``FilesystemBackend`` rooted at a real
@@ -344,7 +342,7 @@ def build_backend(settings: Settings, user_id: str = "default"):
       sessions. Store resolved at runtime via ``get_store()`` (the store passed to
       ``create_deep_agent``).
     """
-    uid = str(user_id or "default")
+    uid = str(user_id or DEFAULT_USER_ID)
     host_root = os.path.join(settings.workspace_root_dir, uid, "workspace")
     os.makedirs(host_root, exist_ok=True)
     working_fs = SessionFilesystemBackend(root_dir=host_root, virtual_mode=True)
@@ -389,7 +387,7 @@ async def describe_providers() -> list[dict]:
         for r in rows
     ]
 
-_SECRET_FIELDS = ("api_key", "aws_secret_access_key", "aws_session_token")
+# Secret keys to mask in API responses = the SAME set db.crypto encrypts at rest.
 _MASK = "••••"  # ••••
 
 
@@ -509,7 +507,7 @@ async def save_user_model(settings, user_id, raw: dict) -> dict:
         return {"ok": False, "error": "invalid model id"}
     if await _is_global_model(mid):
         return {"ok": False, "error": f"'{mid}' is a global (read-only) model"}
-    provider = str(raw.get("provider") or "azure_openai").strip().lower()
+    provider = str(raw.get("provider") or Provider.AZURE_OPENAI).strip().lower()
     if provider not in _VALID_PROVIDERS:
         return {"ok": False, "error": "provider must be one of: " + " | ".join(sorted(_VALID_PROVIDERS))}
     async with db_session() as s:
@@ -532,7 +530,7 @@ async def save_user_model(settings, user_id, raw: dict) -> dict:
             except (TypeError, ValueError):
                 pass
         # Secrets: a fresh (non-masked) value is encrypted; blank/masked keeps the prior.
-        for sk in _SECRET_FIELDS:
+        for sk in SECRET_FIELDS:
             v = str(raw.get(sk) or "").strip()
             if v and not v.startswith(_MASK):
                 detail[sk] = encrypt(v)
@@ -572,7 +570,7 @@ async def _system_prompt_for(user_id) -> str:
 
 
 async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run_mode, reasoning=None):
-    uid = str(user_id or "default")
+    uid = str(user_id or DEFAULT_USER_ID)
     mid = await resolve_model(settings, model_id, uid)
     # Reasoning is per-request: bake the (normalized, support-gated) effort into the
     # cache key so a thinking-enabled model is a distinct compiled agent.
@@ -614,12 +612,12 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
     return agent
 
 
-async def get_agent(settings, checkpointer, store, model_id=None, user_id="default", reasoning=None):
+async def get_agent(settings, checkpointer, store, model_id=None, user_id=DEFAULT_USER_ID, reasoning=None):
     """Streaming/chat agent (no approval gating)."""
     return await _get_or_build(settings, checkpointer, store, model_id, user_id, run_mode=False, reasoning=reasoning)
 
 
-async def get_run_agent(settings, checkpointer, store, model_id=None, user_id="default", reasoning=None):
+async def get_run_agent(settings, checkpointer, store, model_id=None, user_id=DEFAULT_USER_ID, reasoning=None):
     """Runs-API agent (MCP/plugin tools gated for HITL approval)."""
     return await _get_or_build(settings, checkpointer, store, model_id, user_id, run_mode=True, reasoning=reasoning)
 

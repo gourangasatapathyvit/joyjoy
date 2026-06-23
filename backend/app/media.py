@@ -25,7 +25,7 @@ import shutil
 import subprocess
 import tempfile
 
-from .constants import MAX_MEDIA_B64_BYTES, MAX_MEDIA_BYTES
+from .constants import DEFAULT_USER_ID, MAX_MEDIA_B64_BYTES, MAX_MEDIA_BYTES
 
 logger = logging.getLogger("joyjoy.media")
 
@@ -128,7 +128,7 @@ def _safe_roots(settings, user_id: str) -> list[str]:
     in prod they'd let a crafted ``MEDIA:`` marker surface arbitrary host/home
     files to the chat client, so they're excluded there.
     """
-    ws = os.path.join(settings.user_data_root, str(user_id or "default"), "workspace")
+    ws = os.path.join(settings.user_data_root, str(user_id or DEFAULT_USER_ID), "workspace")
     cands = [ws]
     if not settings.is_prod:
         cands += [os.path.expanduser("~"), "/mnt/c/Users"]

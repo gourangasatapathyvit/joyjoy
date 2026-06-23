@@ -15,7 +15,7 @@ import mimetypes
 import os
 import shutil
 
-from .constants import MAX_WORKSPACE_PREVIEW_BYTES
+from .constants import DEFAULT_USER_ID, MAX_WORKSPACE_PREVIEW_BYTES
 from .textutils import safe_segment
 
 logger = logging.getLogger("joyjoy.workspace")
@@ -32,7 +32,7 @@ def workspace_root(settings, user_id: str, workspace_id: str) -> str:
     # agent's files and this panel always resolve to the SAME dir — and the root
     # can be repointed at a shared volume / mount for multi-node deployments.
     return os.path.join(
-        settings.workspace_root_dir, str(user_id or "default"), "workspace", _seg(workspace_id)
+        settings.workspace_root_dir, str(user_id or DEFAULT_USER_ID), "workspace", _seg(workspace_id)
     )
 
 
