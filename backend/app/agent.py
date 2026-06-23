@@ -605,10 +605,19 @@ async def delete_user_model(settings, user_id, mid) -> dict:
     return {"ok": existed, "id": mid}
 
 
-async def _system_prompt_for(user_id) -> str:
+async def _system_prompt_for(user_id, settings: Settings | None = None) -> str:
     """Just the base prompt — the user's long-term memory (AGENTS.md) is injected
     separately by deepagents' MemoryMiddleware (see ``memory=`` in create_deep_agent)."""
-    return DEFAULT_SYSTEM_PROMPT
+    prompt = DEFAULT_SYSTEM_PROMPT
+    if settings is not None and sandbox.is_enabled(settings):
+        mount = settings.sandbox_mount_path.rstrip("/") or "/workspace"
+        prompt += (
+            f"\n\nExecution environment: your working directory is `{mount}` (a persistent "
+            f"sandbox volume). Create, read, and RUN files under `{mount}` (e.g. "
+            f"`{mount}/script.py`) and use the execute tool to run shell/Python there. "
+            f"Files outside `{mount}` are NOT saved."
+        )
+    return prompt
 
 
 async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run_mode, reasoning=None):
@@ -627,7 +636,7 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
     tools = list(mcp_tools)
     if sandbox.is_enabled(settings):
         tools.append(_make_load_skill_tool(settings, uid))  # materialize skills into the sandbox
-    system_prompt = await _system_prompt_for(uid)
+    system_prompt = await _system_prompt_for(uid, settings)
     interrupt_on = None
     if run_mode:
         # Approval policy: gate all MCP/plugin tools, plus any configured built-ins.

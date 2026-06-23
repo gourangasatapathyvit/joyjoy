@@ -66,12 +66,51 @@ class OpenSandboxBackend(BaseSandbox):
         return sb
 
     @property
+    def _mount(self) -> str:
+        return self.settings.sandbox_mount_path.rstrip("/") or "/workspace"
+
+    def _w(self, path: str) -> str:
+        """Map an agent file path into the durable volume mount. The deepagents file
+        tools use root-relative paths (e.g. ``/data.txt``); those must land under the
+        mounted volume (``/workspace``) or they'd hit the container's ephemeral layer
+        (lost on restart, invisible to the dock). Paths already under the mount pass
+        through unchanged."""
+        mount = self._mount
+        if not path:
+            return mount
+        if path == mount or path.startswith(mount + "/"):
+            return path
+        return f"{mount}{path}" if path.startswith("/") else f"{mount}/{path}"
+
+    @property
     def id(self) -> str:
         return self._sb().id
 
+    # File ops: remap the agent path into the volume, then reuse BaseSandbox's logic.
+    def ls(self, path: str):
+        return super().ls(self._w(path))
+
+    def read(self, file_path: str, offset: int = 0, limit: int = 2000):
+        return super().read(self._w(file_path), offset, limit)
+
+    def write(self, file_path: str, content: str):
+        return super().write(self._w(file_path), content)
+
+    def edit(self, file_path: str, old_string: str, new_string: str, replace_all: bool = False):  # noqa: FBT001, FBT002
+        return super().edit(self._w(file_path), old_string, new_string, replace_all)
+
+    def glob(self, pattern: str, path: str | None = None):
+        return super().glob(pattern, self._w(path) if path else self._mount)
+
+    def grep(self, pattern: str, path: str | None = None, glob: str | None = None):
+        return super().grep(pattern, self._w(path) if path else self._mount, glob)
+
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         sb = self._sb()
-        execution = sandbox_mgr.run_sync(sb.commands.run(command))
+        # Run with the volume as cwd so relative paths + the agent's working dir
+        # resolve inside the durable workspace.
+        wrapped = f"cd {self._mount} 2>/dev/null; {command}"
+        execution = sandbox_mgr.run_sync(sb.commands.run(wrapped))
         return ExecuteResponse(
             output=_combined_output(execution),
             exit_code=getattr(execution, "exit_code", None),
