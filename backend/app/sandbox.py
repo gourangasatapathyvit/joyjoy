@@ -26,6 +26,7 @@ fall back to the host FilesystemBackend when off.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import threading
 import time
@@ -34,6 +35,9 @@ from .config import Settings
 from .textutils import safe_segment
 
 logger = logging.getLogger("joyjoy.sandbox")
+
+# How often the reaper wakes to pause idle sandboxes (seconds).
+_REAPER_POLL_S = 60
 
 # --- dedicated sandbox event loop (owns all SDK + pool state) ----------------
 _LOOP: asyncio.AbstractEventLoop | None = None
@@ -106,8 +110,6 @@ async def _ensure_volume(name: str) -> None:
 
 
 async def _create(settings: Settings, workspace_id: str):
-    import datetime as _dt
-
     from opensandbox import Sandbox
     from opensandbox.models.sandboxes import PVC, Volume
 
@@ -117,7 +119,7 @@ async def _create(settings: Settings, workspace_id: str):
         settings.sandbox_image,
         volumes=[Volume(name="workspace", pvc=PVC(claimName=vol), mountPath=settings.sandbox_mount_path)],
         resource={"cpu": settings.sandbox_cpu, "memory": settings.sandbox_memory},
-        timeout=_dt.timedelta(minutes=settings.sandbox_timeout_minutes),
+        timeout=datetime.timedelta(minutes=settings.sandbox_timeout_minutes),
         connection_config=_conn(settings),
     )
     logger.info("created sandbox %s for ws=%s (vol=%s)", sb.id, workspace_id, vol)
@@ -125,10 +127,8 @@ async def _create(settings: Settings, workspace_id: str):
 
 
 async def _renew(settings: Settings, sb) -> None:
-    import datetime as _dt
-
     try:
-        await sb.renew(_dt.timedelta(minutes=settings.sandbox_timeout_minutes))
+        await sb.renew(datetime.timedelta(minutes=settings.sandbox_timeout_minutes))
     except Exception:  # noqa: BLE001
         logger.debug("sandbox renew failed", exc_info=True)
 
@@ -203,7 +203,7 @@ async def _reaper_loop(settings: Settings) -> None:
     idle_s = settings.sandbox_idle_minutes * 60
     while True:
         try:
-            await asyncio.sleep(60)
+            await asyncio.sleep(_REAPER_POLL_S)
             now = time.monotonic()
             async with _LOCK:
                 stale = [(w, e) for w, e in _POOL.items() if now - e.last_used > idle_s]

@@ -24,6 +24,7 @@ from deepagents.backends.protocol import (
 
 from . import sandbox as sandbox_mgr
 from .config import Settings
+from .constants import DEFAULT_USER_ID
 
 logger = logging.getLogger("joyjoy.sandbox")
 
@@ -51,7 +52,7 @@ class OpenSandboxBackend(BaseSandbox):
         workspace_id: str | None = None,
     ):
         self.settings = settings
-        self.user_id = str(user_id or "default")
+        self.user_id = str(user_id or DEFAULT_USER_ID)
         self._seg_fn = seg_fn
         self._workspace_id = workspace_id
 

@@ -205,13 +205,19 @@ async def delete_session(checkpointer, user_id: str, thread_id: str) -> dict:
     return {"ok": True, "thread_id": thread_id}
 
 
-async def owns_session(user_id: str, thread_id: str) -> bool:
+async def session_owner(thread_id: str) -> str | None:
+    """Return the owning user id for ``thread_id``, or ``None`` if no such session
+    exists yet (e.g. a brand-new thread the client created optimistically before its
+    first run persisted it)."""
     try:
         async with db_session() as s:
-            owner = await s.scalar(select(Session.user_id).where(Session.thread_id == thread_id))
-            return owner == str(user_id)
+            return await s.scalar(select(Session.user_id).where(Session.thread_id == thread_id))
     except Exception:
-        return False
+        return None
+
+
+async def owns_session(user_id: str, thread_id: str) -> bool:
+    return await session_owner(thread_id) == str(user_id)
 
 
 def _serialize_message(m: Any) -> dict | None:

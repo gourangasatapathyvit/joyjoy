@@ -34,7 +34,11 @@ async def sessions_create(request: Request):
 async def sessions_messages(thread_id: str, request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
-    if not await sessions_mod.owns_session(uid, thread_id):
+    owner = await sessions_mod.session_owner(thread_id)
+    if owner is None:
+        # Brand-new thread the client created optimistically; nothing persisted yet.
+        return {"thread_id": thread_id, "messages": []}
+    if owner != uid:
         return JSONResponse({"error": "not found"}, status_code=404)
     agent = await get_run_agent(
         settings, request.app.state.checkpointer, request.app.state.store, await resolve_model(settings, None, uid), uid
