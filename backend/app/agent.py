@@ -80,6 +80,7 @@ from .skills_store import (  # noqa: F401 (re-exported for callers)
     import_user_skill,
     list_skills,
     read_skill_content,
+    read_skill_tree,
     save_user_skill,
     save_user_skill_file,
     toggle_user_skill,
@@ -296,6 +297,38 @@ def _bind_session_workspace(tools: list) -> list:
 
         out.append(_wrap(t))
     return out
+
+
+def _make_load_skill_tool(settings: Settings, uid: str):
+    """A ``load_skill`` tool (sandbox mode only): materializes a skill's DB file tree
+    into the session sandbox so the agent can run its scripts. Skills are stored in
+    the DB and mounted read-only at /skills; this drops a runnable copy into the
+    sandbox workspace under ``/workspace/.skills/<name>/``."""
+    from langchain_core.tools import StructuredTool
+
+    from . import workspace_sandbox as _wsx
+
+    async def _load(name: str) -> str:
+        seg = _session_workspace_seg() or DEFAULT_USER_ID
+        tree = await read_skill_tree(settings, uid, name)
+        if not tree:
+            return f"Skill '{name}' not found."
+        base = f"{settings.sandbox_mount_path.rstrip('/')}/.skills/{name}"
+        n = await _wsx.materialize(settings, seg, base, tree)
+        return (
+            f"Skill '{name}' loaded into {base} ({n} files). Read {base}/SKILL.md and "
+            f"run its scripts from there with the execute tool."
+        )
+
+    return StructuredTool.from_function(
+        coroutine=_load,
+        name="load_skill",
+        description=(
+            "Materialize a skill's files into your sandbox workspace so you can RUN "
+            "its scripts. Pass the skill name (from the skills list). After loading, "
+            "read /workspace/.skills/<name>/SKILL.md and execute its scripts."
+        ),
+    )
 
 
 class SessionFilesystemBackend(FilesystemBackend):
@@ -591,6 +624,9 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
         return agent
     mcp_tools = await load_mcp_tools(settings, uid)
     mcp_tools = _bind_session_workspace(mcp_tools)  # inject per-thread workspace_id
+    tools = list(mcp_tools)
+    if sandbox.is_enabled(settings):
+        tools.append(_make_load_skill_tool(settings, uid))  # materialize skills into the sandbox
     system_prompt = await _system_prompt_for(uid)
     interrupt_on = None
     if run_mode:
@@ -603,7 +639,7 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
         interrupt_on = {t: True for t in gated if t} or None
     agent = create_deep_agent(
         model=await build_model_for(settings, mid, uid, reasoning=effort),
-        tools=mcp_tools,
+        tools=tools,
         system_prompt=system_prompt,
         backend=build_backend(settings, uid),
         checkpointer=checkpointer,

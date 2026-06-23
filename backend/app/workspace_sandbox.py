@@ -221,3 +221,18 @@ async def rename_path(settings, workspace_id, src, dst):
 
 async def save_upload(settings, workspace_id, dir_rel, filename, data):
     return await sbx.run_async(_upload_impl(settings, workspace_id, dir_rel, filename, data))
+
+
+async def _materialize_impl(settings: Settings, workspace_id: str, dest_base: str, files: list[tuple[str, bytes]]) -> int:
+    from opensandbox.models.filesystem import WriteEntry
+
+    sb, _ = await sbx._acquire(settings, workspace_id)
+    base = dest_base.rstrip("/")
+    entries = [WriteEntry(path=f"{base}/{rel.lstrip('/')}", data=data) for rel, data in files]
+    await sb.files.write_files(entries)
+    return len(entries)
+
+async def materialize(settings, workspace_id, dest_base: str, files: list[tuple[str, bytes]]) -> int:
+    """Write a set of ``(relpath, bytes)`` files into the session sandbox under
+    ``dest_base`` (used to drop a skill's tree in so its scripts can run)."""
+    return await sbx.run_async(_materialize_impl(settings, workspace_id, dest_base, files))

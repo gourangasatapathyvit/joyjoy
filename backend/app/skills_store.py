@@ -19,7 +19,7 @@ from .config import Settings
 from .constants import MAX_SKILL_FILE_BYTES, MAX_SKILL_FILES, MAX_SKILL_TOTAL_BYTES
 from .db import db_session
 from .db.models import GlobalSkill, SkillFile, UserSkill
-from .dbfs import _file_text
+from .dbfs import _file_bytes, _file_text
 
 logger = logging.getLogger("joyjoy.agent")
 
@@ -103,6 +103,26 @@ async def read_skill_content(settings: Settings, user_id: str, name: str, file: 
             "enabled": enabled, "content": sk.content or "",
             "linked_files": {f.filename: True for f in files},
         }
+
+
+async def read_skill_tree(settings: Settings, user_id: str, name: str) -> list[tuple[str, bytes]] | None:
+    """All files of a skill as ``(relpath, bytes)`` — SKILL.md + helper files,
+    binary-safe (base64 helper files decoded). Used to materialize a skill into a
+    sandbox so its scripts can run. Global skills resolve first, then per-user."""
+    async with db_session() as s:
+        gs = await s.scalar(select(GlobalSkill).where(GlobalSkill.name == name, GlobalSkill.is_active.is_(True)))
+        if gs:
+            sk, file_col = gs, SkillFile.global_skill_id
+        else:
+            us = await s.scalar(select(UserSkill).where(UserSkill.user_id == str(user_id), UserSkill.name == name))
+            if not us:
+                return None
+            sk, file_col = us, SkillFile.user_skill_id
+        out: list[tuple[str, bytes]] = [("SKILL.md", (sk.content or "").encode("utf-8"))]
+        files = (await s.scalars(select(SkillFile).where(file_col == sk.id))).all()
+        for f in files:
+            out.append((f.filename, _file_bytes(f)))
+    return out
 
 
 # ---- per-user skill CRUD. Global is READ-ONLY — writes only touch user rows. ----

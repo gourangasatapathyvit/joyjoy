@@ -110,7 +110,11 @@ class Settings(BaseSettings):
     sandbox_server_domain: str = "127.0.0.1:8090"  # host:port of the OpenSandbox server
     sandbox_server_protocol: str = "http"
     opensandbox_api_key: str = Field(default="", alias="OPENSANDBOX_API_KEY")
-    sandbox_image: str = "python:3.12-slim"  # fat image (interpreter+browser) once built
+    # Fat image (built from backend/../sandbox-image/Dockerfile): Playwright +
+    # browsers (headless automation) + pandas/numpy/matplotlib/openpyxl/python-pptx
+    # (code-interpreter / data / file-conversion). One image for exec + interpreter
+    # + browser. Rebuild: docker build -t joyjoy/sandbox-fat:1 sandbox-image/
+    sandbox_image: str = "joyjoy/sandbox-fat:1"
     sandbox_cpu: str = "1"
     sandbox_memory: str = "2Gi"
     sandbox_timeout_minutes: int = 30  # sandbox TTL (renewed on use)
