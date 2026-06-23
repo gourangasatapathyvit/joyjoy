@@ -3,8 +3,6 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Textarea } from "@/components/ui/textarea";
 
-export const baseName = (p: string) => p.replace(/^\//, "");
-
 // Renders the document body: a raw textarea in edit mode, otherwise a
 // formatted markdown view (.md) or a plain text block.
 export function DocBody({

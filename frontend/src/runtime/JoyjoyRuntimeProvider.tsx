@@ -25,13 +25,13 @@ import {
 import { sessionApi } from "@/api/sessions";
 import type { MediaItem, RunEvent, SessionMessageWire } from "@/api/types";
 import {
-	baseName,
 	isMediaFile,
 	mediaUrl,
 	mimeOf,
 	splitMediaMarkers,
 	workspaceRawUrl,
 } from "@/lib/media";
+import { baseName } from "@/lib/text";
 import { useChatStore } from "@/store/chat";
 
 type JsonValue =

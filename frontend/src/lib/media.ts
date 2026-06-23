@@ -127,11 +127,6 @@ export const formatSize = (bytes?: number): string => {
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
-export const baseName = (p: string): string =>
-	p
-		.replace(/[\\/]+$/, "")
-		.split(/[\\/]/)
-		.pop() || p;
 export const isImageFile = (name: string): boolean =>
 	IMAGE_EXTS.has(extOf(name));
 export const isAudioFile = (name: string): boolean =>

@@ -4,7 +4,6 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
 	asPdf,
-	baseName,
 	isAudioFile,
 	isImageFile,
 	isMarkdownFile,
@@ -13,6 +12,7 @@ import {
 	isTextFile,
 	isVideoFile,
 } from "@/lib/media";
+import { baseName } from "@/lib/text";
 
 // Renderers for assistant-ui's native `image` / `file` content parts. The runtime
 // (convertMessage) emits these from MEDIA: markers, agent-written workspace files,

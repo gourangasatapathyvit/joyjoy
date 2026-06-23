@@ -4,7 +4,8 @@ import { useTranslation } from "react-i18next";
 import { useMemoryFile, useMemoryFileMutations } from "@/api/queries";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { baseName, DocBody } from "./DocBody";
+import { stripLeadingSlash } from "@/lib/text";
+import { DocBody } from "./DocBody";
 
 // A dynamic /memories/ file. View (markdown/text) / Edit (textarea) + Delete.
 export function FileEditor({
@@ -31,7 +32,7 @@ export function FileEditor({
 			<div className="flex items-center justify-between gap-3 border-b border-border px-6 py-3">
 				<div className="flex min-w-0 items-center gap-2">
 					<h1 className="truncate font-heading text-lg font-semibold text-foreground">
-						{baseName(path)}
+						{stripLeadingSlash(path)}
 					</h1>
 					{data && data.enabled === false && (
 						<Badge variant="outline" className="shrink-0 text-[10px]">

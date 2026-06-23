@@ -6,9 +6,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from ..agent import (
-    PROVIDER_TYPES,
     delete_user_model,
     describe_models,
+    describe_providers,
     merged_model_specs,
     model_supports_reasoning,
     save_user_model,
@@ -45,7 +45,7 @@ async def models_config(request: Request):
     provider field-schema the UI renders its add/edit forms from. Keys are masked."""
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
-    return {"models": await describe_models(settings, uid), "providers": PROVIDER_TYPES}
+    return {"models": await describe_models(settings, uid), "providers": await describe_providers()}
 
 
 @router.post("/v1/models/config/save")

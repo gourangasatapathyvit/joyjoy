@@ -19,6 +19,7 @@ from .constants import MCP_PROBE_TIMEOUT_S
 from .db import db_session
 from .db.models import GlobalMcp, UserMcp
 from .enums import McpStatus
+from .textutils import parse_kv, split_lines
 
 logger = logging.getLogger("joyjoy.agent")
 
@@ -75,23 +76,6 @@ def _to_connections(servers: dict, extra_env: dict | None = None) -> dict:
     return conns
 
 
-def _split_lines(text: str | None) -> list[str]:
-    return [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
-
-
-def _parse_kv(text: str | None) -> dict:
-    """Parse ``KEY=value`` lines (env / headers textareas) into a dict."""
-    out: dict[str, str] = {}
-    for ln in (text or "").splitlines():
-        ln = ln.strip()
-        if not ln or "=" not in ln:
-            continue
-        k, _sep, v = ln.partition("=")
-        if k.strip():
-            out[k.strip()] = v.strip()
-    return out
-
-
 def _mcp_row_to_cfg(row) -> dict:
     """An MCP table row -> the ``.mcp.json``-shaped cfg dict the connection builder
     and the UI describe path expect (args as a list; env/headers as dicts)."""
@@ -100,12 +84,12 @@ def _mcp_row_to_cfg(row) -> dict:
         cfg["url"] = row.url
         cfg["transport"] = row.transport or "streamable_http"
         if row.headers:
-            cfg["headers"] = _parse_kv(row.headers)
+            cfg["headers"] = parse_kv(row.headers)
     elif row.command:
         cfg["command"] = row.command
-        cfg["args"] = _split_lines(row.args)
+        cfg["args"] = split_lines(row.args)
         if row.env:
-            cfg["env"] = _parse_kv(row.env)
+            cfg["env"] = parse_kv(row.env)
     return cfg
 
 

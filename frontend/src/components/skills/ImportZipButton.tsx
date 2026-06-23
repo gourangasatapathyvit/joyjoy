@@ -3,16 +3,7 @@ import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useSkillMutations } from "@/api/queries";
 import { Button } from "@/components/ui/button";
-
-// Read a File into a base64 string (for the zip-import endpoint).
-async function fileToBase64(file: File): Promise<string> {
-	const bytes = new Uint8Array(await file.arrayBuffer());
-	let bin = "";
-	for (let i = 0; i < bytes.length; i += 0x8000) {
-		bin += String.fromCharCode(...Array.from(bytes.subarray(i, i + 0x8000)));
-	}
-	return btoa(bin);
-}
+import { fileToBase64 } from "@/lib/text";
 
 // Import a skill folder from a .zip (SKILL.md + helper tree). Used both to create
 // a new skill and to re-import/replace an existing one.

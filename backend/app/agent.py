@@ -41,6 +41,8 @@ from .config import Settings
 from .context import AgentContext
 from .db import db_session, decrypt_secrets, encrypt
 from .enums import Provider
+from .prompts import DEFAULT_SYSTEM_PROMPT
+from .textutils import safe_segment
 from .db.models import (
     GlobalModel,
     GlobalProvider,
@@ -82,28 +84,6 @@ from .skills_store import (  # noqa: F401 (re-exported for callers)
 )
 
 logger = logging.getLogger("joyjoy.agent")
-
-DEFAULT_SYSTEM_PROMPT = (
-    "You are joyjoy, a helpful AI assistant running as a multi-tenant deep agent. "
-    "Each user has a private, isolated workspace, long-term memory, and skills. "
-    "Use your filesystem and memory tools to keep durable, per-user context, and use "
-    "your skills and plugin tools when they help.\n\n"
-    "Filesystem layout:\n"
-    "- Your **working directory** is the user's per-session WORKSPACE — it is the "
-    "DEFAULT location for `write_file`/`read_file`/`ls`/`edit_file` whenever you use a "
-    "plain or root-relative path (e.g. `notes.txt`, `data/report.csv`, `/lorem.txt`). "
-    "Any file the USER asks you to create or work with goes HERE — this is the folder "
-    "they see and download in the workspace panel. Default to it for all real output "
-    "files unless the user explicitly says otherwise.\n"
-    "- `/memory/AGENTS.md` — your core long-term memory; it is ALWAYS loaded into "
-    "your context. Keep it concise; update it with `edit_file` for durable, "
-    "frequently-needed facts (the user's identity, standing preferences, how to behave).\n"
-    "- `/memories/` — YOUR OWN private scratch folder for notes you choose to keep "
-    "across sessions (e.g. `/memories/<topic>.md`): scenario-specific context that "
-    "doesn't need to be in-context every turn. Use it ONLY for your own durable memory "
-    "— NEVER for files the user asked you to create (those belong in the workspace). "
-    "Use `ls`/`glob`/`read_file` to recall them and `write_file`/`edit_file` to record new ones."
-)
 
 # Skill sources the agent reads on demand: read-only global (shared) + per-user.
 SKILL_SOURCES = ["/skills/global/", "/skills/user/"]
@@ -284,8 +264,7 @@ def _session_workspace_seg() -> str | None:
         seg = conf.get("workspace_id") or conf.get("thread_id")
     if not seg:
         return None
-    seg = re.sub(r"[^A-Za-z0-9._-]", "_", str(seg))[:128]
-    return seg or None
+    return safe_segment(seg) or None
 
 
 # Tools exposed by the workspace-fs MCP server whose ``workspace_id`` arg joyjoy
@@ -396,64 +375,19 @@ async def resolve_model(settings: Settings, requested: str | None, uid: str | No
 # `_VALID_PROVIDERS` (derived from the enum) validates input.
 _VALID_PROVIDERS: frozenset[str] = frozenset(p.value for p in Provider)
 
-# Field schema per provider — drives the Providers-tab add/edit form in the UI.
-PROVIDER_TYPES = [
-    {
-        "id": "azure_openai",
-        "label": "Azure OpenAI",
-        "fields": [
-            {"key": "id", "label": "Model ID", "required": True, "placeholder": "e.g. o4-mini"},
-            {"key": "deployment", "label": "Deployment name", "required": True, "placeholder": "Azure deployment"},
-            {"key": "endpoint", "label": "Endpoint URL", "required": True, "placeholder": "https://<res>.openai.azure.com"},
-            {"key": "api_version", "label": "API version", "required": True, "placeholder": "2024-12-01-preview"},
-            {"key": "api_key", "label": "API key", "required": True, "secret": True},
-        ],
-    },
-    {
-        "id": "anthropic",
-        "label": "Azure AI Foundry / Anthropic (Claude)",
-        "fields": [
-            {"key": "id", "label": "Model ID", "required": True, "placeholder": "e.g. claude-opus-4-7"},
-            {"key": "deployment", "label": "Model name", "required": True, "placeholder": "claude-opus-4-7"},
-            {"key": "endpoint", "label": "Base URL", "required": True, "placeholder": "https://<res>.services.ai.azure.com/anthropic"},
-            {"key": "api_key", "label": "API key", "required": True, "secret": True},
-            {"key": "max_tokens", "label": "Max tokens", "required": False, "placeholder": "4096"},
-        ],
-    },
-    {
-        "id": "bedrock",
-        "label": "Amazon Bedrock",
-        "fields": [
-            {"key": "id", "label": "Model ID", "required": True, "placeholder": "e.g. claude-sonnet-bedrock"},
-            {"key": "deployment", "label": "Bedrock model id", "required": True, "placeholder": "us.anthropic.claude-3-7-sonnet-20250219-v1:0"},
-            {"key": "region", "label": "AWS region", "required": True, "placeholder": "us-east-1"},
-            {"key": "aws_access_key_id", "label": "AWS access key id", "required": False},
-            {"key": "aws_secret_access_key", "label": "AWS secret access key", "required": False, "secret": True},
-            {"key": "max_tokens", "label": "Max tokens", "required": False, "placeholder": "4096"},
-        ],
-    },
-    {
-        "id": "openai",
-        "label": "OpenAI-compatible (OpenAI / OpenRouter / DeepSeek / Groq / local)",
-        "fields": [
-            {"key": "id", "label": "Model ID", "required": True, "placeholder": "e.g. gpt-4o or openrouter-claude"},
-            {"key": "deployment", "label": "Model name", "required": True, "placeholder": "gpt-4o"},
-            {"key": "endpoint", "label": "Base URL (blank = api.openai.com)", "required": False, "placeholder": "https://openrouter.ai/api/v1"},
-            {"key": "api_key", "label": "API key", "required": True, "secret": True},
-            {"key": "max_tokens", "label": "Max tokens", "required": False, "placeholder": "(optional)"},
-        ],
-    },
-    {
-        "id": "gemini",
-        "label": "Google Gemini",
-        "fields": [
-            {"key": "id", "label": "Model ID", "required": True, "placeholder": "e.g. gemini-2.0-flash"},
-            {"key": "deployment", "label": "Model name", "required": True, "placeholder": "gemini-2.0-flash"},
-            {"key": "api_key", "label": "API key (Google AI Studio)", "required": True, "secret": True},
-            {"key": "max_tokens", "label": "Max output tokens", "required": False, "placeholder": "(optional)"},
-        ],
-    },
-]
+async def describe_providers() -> list[dict]:
+    """Provider field-schemas for the Providers-tab add/edit form — read from the
+    ``global_providers`` table (the single source of truth, also what the seed
+    populates). Each row's ``config_schema`` JSON holds the ``fields`` list the UI
+    renders; ``name``/``label``/``sort_order`` give the id, heading, and order."""
+    async with db_session() as s:
+        rows = (
+            await s.scalars(select(GlobalProvider).order_by(GlobalProvider.sort_order))
+        ).all()
+    return [
+        {"id": r.name, "label": r.label, "fields": (r.config_schema or {}).get("fields", [])}
+        for r in rows
+    ]
 
 _SECRET_FIELDS = ("api_key", "aws_secret_access_key", "aws_session_token")
 _MASK = "••••"  # ••••

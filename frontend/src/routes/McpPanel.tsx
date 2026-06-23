@@ -25,6 +25,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { NEW_ITEM } from "@/lib/constants";
+import { parseKV, parseLines } from "@/lib/text";
 
 const statusVariant = (
 	s: McpStatus,
@@ -34,20 +35,6 @@ const statusVariant = (
 		: s === "invalid_config"
 			? "destructive"
 			: "secondary";
-
-const parseLines = (t: string) =>
-	t
-		.split("\n")
-		.map((s) => s.trim())
-		.filter(Boolean);
-const parseKV = (t: string): Record<string, string> => {
-	const out: Record<string, string> = {};
-	for (const line of t.split("\n")) {
-		const i = line.indexOf("=");
-		if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
-	}
-	return out;
-};
 
 // Add/edit a per-user MCP server. The GET endpoint never returns env/headers
 // (secrets), so on edit those start blank — re-enter to change them.

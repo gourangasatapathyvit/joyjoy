@@ -3,11 +3,11 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMemoryFileMutations, useMemoryFiles } from "@/api/queries";
 import { AgentsEditor } from "@/components/memory/AgentsEditor";
-import { baseName } from "@/components/memory/DocBody";
 import { FileEditor } from "@/components/memory/FileEditor";
 import { NewFileForm } from "@/components/memory/NewFileForm";
 import { Switch } from "@/components/ui/switch";
 import { AGENTS_DOC as AGENTS, NEW_ITEM as NEW } from "@/lib/constants";
+import { stripLeadingSlash } from "@/lib/text";
 import { cn } from "@/lib/utils";
 
 // Memory = master/detail (like Skills): AGENTS.md pinned on top of a searchable
@@ -137,7 +137,7 @@ export function MemoryPanel() {
 															active ? "text-primary" : "text-foreground",
 														)}
 													>
-														{baseName(f.path)}
+														{stripLeadingSlash(f.path)}
 													</span>
 													<span className="truncate text-[11px] text-muted-foreground">
 														{f.size} B

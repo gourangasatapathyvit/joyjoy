@@ -4,17 +4,8 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { sessionApi, useSessionMutations } from "@/api/sessions";
 import { Button } from "@/components/ui/button";
+import { downloadFile } from "@/lib/text";
 import { useChatStore } from "@/store/chat";
-
-function downloadFile(name: string, content: string, type: string) {
-	const blob = new Blob([content], { type });
-	const url = URL.createObjectURL(blob);
-	const a = document.createElement("a");
-	a.href = url;
-	a.download = name;
-	a.click();
-	URL.revokeObjectURL(url);
-}
 
 // Conversation = transcript/JSON export, import, and clear of the active chat.
 export function ConversationPane() {

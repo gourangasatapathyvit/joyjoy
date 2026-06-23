@@ -13,19 +13,18 @@ from __future__ import annotations
 import logging
 import mimetypes
 import os
-import re
 import shutil
 
 from .constants import MAX_WORKSPACE_PREVIEW_BYTES
+from .textutils import safe_segment
 
 logger = logging.getLogger("joyjoy.workspace")
 
 
 def _seg(value: str) -> str:
-    """Sanitize a workspace id into a single safe path segment (matches the
-    agent-side ``SessionFilesystemBackend`` sanitizer so both resolve the same dir)."""
-    s = re.sub(r"[^A-Za-z0-9._-]", "_", str(value or ""))[:128]
-    return s or "default"
+    """Workspace id -> a single safe path segment (``default`` when empty). Shares
+    the sanitizer with the agent-side backend so both resolve the same dir."""
+    return safe_segment(value) or "default"
 
 
 def workspace_root(settings, user_id: str, workspace_id: str) -> str:
