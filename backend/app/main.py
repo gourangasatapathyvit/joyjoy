@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -72,9 +74,25 @@ def _load_env_file_into_environ() -> None:
             logger.debug("env load from %s failed", envfile, exc_info=True)
 
 
+def _inject_runtime_path_vars() -> None:
+    """Resolve machine-specific paths to env vars so the committed MCP seed stays
+    portable. The ``global_mcps`` rows reference ``${JOYJOY_PYTHON}`` (this venv's
+    interpreter), ``${JOYJOY_BACKEND}`` (the backend dir, for bundled stdio servers),
+    and ``${JOYJOY_UVX}`` (the uvx launcher) instead of absolute ``/home/...`` paths;
+    ``agent._expand_env_vars`` expands them per-machine at MCP connection build.
+    ``setdefault`` so an explicit env/.env override still wins (e.g. in containers)."""
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .../backend
+    os.environ.setdefault("JOYJOY_PYTHON", sys.executable)
+    os.environ.setdefault("JOYJOY_BACKEND", backend_dir)
+    os.environ.setdefault(
+        "JOYJOY_UVX", shutil.which("uvx") or os.path.expanduser("~/.local/bin/uvx")
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _load_env_file_into_environ()
+    _inject_runtime_path_vars()
     # App relational DB: resolve the encryption key (generate+persist on first
     # run), create tables, seed the global catalogs. Dev → SQLite, prod → Postgres.
     ensure_encryption_key(settings)

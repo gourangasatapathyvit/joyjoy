@@ -34,12 +34,16 @@ def _expand_env_vars(value):
     return value
 
 
-def _to_connections(servers: dict) -> dict:
+def _to_connections(servers: dict, extra_env: dict | None = None) -> dict:
     """Convert .mcp.json ``mcpServers`` entries to langchain-mcp-adapters connections.
 
     ``${VAR}`` references in command/args/url/headers/env expand from the process
     env (the backend loads ``.env`` into os.environ at startup), so API keys stay
     out of the config file and only the referenced var reaches the server.
+
+    ``extra_env`` (per-caller values, e.g. the resolved ``WORKSPACE_ROOT`` +
+    ``JOYJOY_USER_ID`` for the workspace-fs server) is merged into every stdio
+    server's env — harmless to servers that ignore it.
     """
     conns: dict[str, dict] = {}
     for name, cfg in (servers or {}).items():
@@ -64,6 +68,8 @@ def _to_connections(servers: dict) -> dict:
                           "npm_config_cache", "XDG_CACHE_HOME", "XDG_DATA_HOME", "UV_CACHE_DIR")
                 if k in os.environ
             }
+            if extra_env:
+                env.update({k: str(v) for k, v in extra_env.items()})
             env.update(_expand_env_vars(cfg.get("env") or {}))
             conns[name]["env"] = env
     return conns
@@ -120,10 +126,20 @@ async def load_mcp_tools(settings: Settings, user_id: str) -> list:
     """Load global + per-user MCP tools (user entries override/extend global; disabled
     skipped). Each server is loaded independently so one unreachable provider (e.g. a
     copied-but-not-running server) can't blank out everyone's tools."""
-    conns = _to_connections({
-        n: cfg for n, (cfg, _s) in (await _merged_mcp_servers(user_id)).items()
-        if not (isinstance(cfg, dict) and cfg.get("enabled") is False)
-    })
+    # Per-caller env for the workspace-fs server (and harmless to others): the
+    # ABSOLUTE workspace root + this user's id, so the stdio child resolves the
+    # same per-user dir as the main process regardless of its own cwd.
+    extra_env = {
+        "WORKSPACE_ROOT": os.path.abspath(settings.workspace_root_dir),
+        "JOYJOY_USER_ID": str(user_id or "default"),
+    }
+    conns = _to_connections(
+        {
+            n: cfg for n, (cfg, _s) in (await _merged_mcp_servers(user_id)).items()
+            if not (isinstance(cfg, dict) and cfg.get("enabled") is False)
+        },
+        extra_env=extra_env,
+    )
     if not conns:
         return []
     from langchain_mcp_adapters.client import MultiServerMCPClient

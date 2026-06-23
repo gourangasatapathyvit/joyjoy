@@ -24,6 +24,7 @@ from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend, FilesystemBackend
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from langchain_core.tools import StructuredTool
 from langchain_openai import AzureChatOpenAI
 from langgraph.runtime import get_runtime
 
@@ -285,6 +286,38 @@ def _session_workspace_seg() -> str | None:
         return None
     seg = re.sub(r"[^A-Za-z0-9._-]", "_", str(seg))[:128]
     return seg or None
+
+
+# Tools exposed by the workspace-fs MCP server whose ``workspace_id`` arg joyjoy
+# fills from the runtime context — the model never sets it (and couldn't know it).
+_WORKSPACE_FS_TOOLS = {"delete_file", "move_file", "make_dir"}
+
+
+def _bind_session_workspace(tools: list) -> list:
+    """Wrap workspace-fs MCP tools so each call injects the CURRENT session's
+    ``workspace_id`` (resolved from the runtime context, same as the native file
+    backend). The model calls them with just a path; per-thread scoping is enforced
+    here rather than trusted to the model. Non-workspace-fs tools pass through."""
+    out: list = []
+    for t in tools:
+        if getattr(t, "name", None) not in _WORKSPACE_FS_TOOLS:
+            out.append(t)
+            continue
+
+        def _wrap(orig):
+            async def _acall(**kwargs):
+                kwargs["workspace_id"] = _session_workspace_seg() or ""
+                return await orig.ainvoke(kwargs)
+
+            return StructuredTool(
+                name=orig.name,
+                description=orig.description,
+                args_schema=orig.args_schema,
+                coroutine=_acall,
+            )
+
+        out.append(_wrap(t))
+    return out
 
 
 class SessionFilesystemBackend(FilesystemBackend):
@@ -616,6 +649,7 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
     if agent is not None:
         return agent
     mcp_tools = await load_mcp_tools(settings, uid)
+    mcp_tools = _bind_session_workspace(mcp_tools)  # inject per-thread workspace_id
     system_prompt = await _system_prompt_for(uid)
     interrupt_on = None
     if run_mode:
