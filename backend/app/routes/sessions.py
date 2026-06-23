@@ -6,6 +6,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from .. import sandbox as sandbox_mgr
 from .. import sessions as sessions_mod
 from ..agent import get_run_agent, resolve_model
 from ..auth import resolve_user_id, verify_gateway_key
@@ -70,6 +71,13 @@ async def sessions_rename(thread_id: str, request: Request):
 async def sessions_delete(thread_id: str, request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
-    return JSONResponse(
-        await sessions_mod.delete_session(request.app.state.checkpointer, uid, thread_id)
-    )
+    res = await sessions_mod.delete_session(request.app.state.checkpointer, uid, thread_id)
+    # Reclaim the session's sandbox + its durable volume (the files are deliberately
+    # destroyed here — the conversation itself is being deleted).
+    if sandbox_mgr.is_enabled(settings):
+        try:
+            ws = await sessions_mod.workspace_id_for(uid, thread_id)
+            await sandbox_mgr.kill_session(settings, ws, remove_volume=True)
+        except Exception:  # noqa: BLE001 - cleanup is best-effort
+            pass
+    return JSONResponse(res)

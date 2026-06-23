@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import sandbox
 from . import users as users_mod
 from .agent import get_agent
 from .config import get_settings
@@ -104,11 +105,15 @@ async def lifespan(app: FastAPI):
         app.state.checkpointer = checkpointer
         app.state.store = store
         await get_agent(settings, checkpointer, store, settings.default_model, DEFAULT_USER_ID)  # warm default
+        sandbox.start_reaper(settings)  # idle-pause per-session sandboxes (no-op unless enabled)
         logger.info(
-            "joyjoy backend ready (env=%s, prod=%s, models=%s)",
-            settings.app_env, settings.is_prod, list(settings.model_specs),
+            "joyjoy backend ready (env=%s, prod=%s, sandbox=%s, models=%s)",
+            settings.app_env, settings.is_prod, settings.sandbox_enabled, list(settings.model_specs),
         )
-        yield
+        try:
+            yield
+        finally:
+            await sandbox.shutdown()  # pause live sandboxes (files persist via volumes)
 
 
 app = FastAPI(title="joyjoy backend", version="0.2.0", lifespan=lifespan)

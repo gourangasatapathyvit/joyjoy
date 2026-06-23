@@ -37,6 +37,7 @@ from .agent_common import (
     invalidate_user_cache as _invalidate_user_cache,
     valid_name as _valid_name,
 )
+from . import sandbox
 from .config import Settings
 from .constants import DEFAULT_USER_ID
 from .context import AgentContext
@@ -343,16 +344,24 @@ def build_backend(settings: Settings, user_id: str = DEFAULT_USER_ID):
       ``create_deep_agent``).
     """
     uid = str(user_id or DEFAULT_USER_ID)
-    host_root = os.path.join(settings.workspace_root_dir, uid, "workspace")
-    os.makedirs(host_root, exist_ok=True)
-    working_fs = SessionFilesystemBackend(root_dir=host_root, virtual_mode=True)
     routes: dict[str, object] = {
         "/memory/": MemoryBackend(uid),
         "/memories/": MemoriesBackend(uid),  # hides disabled files from the agent
         "/skills/user/": DbSkillsBackend(user_id=uid),
         "/skills/global/": DbSkillsBackend(),  # shipped, read-only — from the DB
     }
-    return CompositeBackend(default=working_fs, routes=routes)
+    # Default (working files + execution) backend: an OpenSandbox per-(user,thread)
+    # sandbox when enabled (CRUD + code run inside the container, on a durable
+    # per-session volume), else the host per-session FilesystemBackend.
+    if sandbox.is_enabled(settings):
+        from .sandbox_backend import OpenSandboxBackend
+
+        default = OpenSandboxBackend(settings, uid, seg_fn=_session_workspace_seg)
+    else:
+        host_root = os.path.join(settings.workspace_root_dir, uid, "workspace")
+        os.makedirs(host_root, exist_ok=True)
+        default = SessionFilesystemBackend(root_dir=host_root, virtual_mode=True)
+    return CompositeBackend(default=default, routes=routes)
 
 
 async def resolve_model(settings: Settings, requested: str | None, uid: str | None = None) -> str:
@@ -588,6 +597,9 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
         # Approval policy: gate all MCP/plugin tools, plus any configured built-ins.
         gated = {t.strip() for t in (settings.interrupt_tools or "").split(",") if t.strip()}
         gated |= {getattr(t, "name", None) for t in mcp_tools if getattr(t, "name", None)}
+        # Sandbox code execution is destructive/high-risk → gate the execute tool too.
+        if sandbox.is_enabled(settings):
+            gated.add("execute")
         interrupt_on = {t: True for t in gated if t} or None
     agent = create_deep_agent(
         model=await build_model_for(settings, mid, uid, reasoning=effort),

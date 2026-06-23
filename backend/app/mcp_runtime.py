@@ -121,6 +121,10 @@ async def load_mcp_tools(settings: Settings, user_id: str) -> list:
         {
             n: cfg for n, (cfg, _s) in (await _merged_mcp_servers(user_id)).items()
             if not (isinstance(cfg, dict) and cfg.get("enabled") is False)
+            # workspace-fs targets the HOST dir; when the sandbox owns the workspace
+            # the agent's shell does rm/mv/mkdir, so retire it to avoid touching the
+            # wrong (unused) host dir.
+            and not (settings.sandbox_enabled and n == "workspace-fs")
         },
         extra_env=extra_env,
     )

@@ -101,6 +101,24 @@ class Settings(BaseSettings):
     # Global skills + MCP live in the DB, bootstrapped on first boot from the
     # committed SQL seed (app/db/seeds/global_seed.sql). No loose config files.
 
+    # ---- OpenSandbox (per-session agent execution sandbox) ----
+    # When enabled, the agent's filesystem + code/shell execution run inside a
+    # per-(user,thread) OpenSandbox container backed by a durable Docker named
+    # volume (one per workspace_id). Off by default → falls back to the host
+    # FilesystemBackend, so the stack works whether or not the sandbox server runs.
+    sandbox_enabled: bool = False
+    sandbox_server_domain: str = "127.0.0.1:8090"  # host:port of the OpenSandbox server
+    sandbox_server_protocol: str = "http"
+    opensandbox_api_key: str = Field(default="", alias="OPENSANDBOX_API_KEY")
+    sandbox_image: str = "python:3.12-slim"  # fat image (interpreter+browser) once built
+    sandbox_cpu: str = "1"
+    sandbox_memory: str = "2Gi"
+    sandbox_timeout_minutes: int = 30  # sandbox TTL (renewed on use)
+    sandbox_idle_minutes: int = 15  # pause a sandbox after this much idle
+    sandbox_max_live: int = 16  # cap concurrent live sandboxes (LRU-pause beyond)
+    sandbox_volume_prefix: str = "joyjoy-ws-"  # docker volume name = prefix + workspace_id
+    sandbox_mount_path: str = "/workspace"  # where the per-session volume mounts
+
     # ---- Azure OpenAI ----
     azure_openai_endpoint: str = ""
     azure_openai_api_key: str = ""
