@@ -133,6 +133,8 @@ export const ja: Resources = {
 		cleared: "会話をクリアしました。",
 		importFailed: "インポートに失敗しました。",
 		readError: "そのファイルを読み取れませんでした（JSON 会話が必要です）。",
+		autoApproveDefault: "新しいチャットでツールを自動承認",
+		autoApproveDefaultHint: "新しい会話はツールの承認がオフの状態で始まります。チャットごとに切り替えることもできます。",
 	},
 	profile: {
 		subtitle: "アカウントの詳細とセッション。",

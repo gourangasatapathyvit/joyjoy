@@ -35,6 +35,48 @@ function parentOf(path: string): string {
 	return path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : "";
 }
 
+// Draggable divider on the dock's left edge: drag left to expand, right to
+// collapse. Width is clamped + persisted in the chat store. Pointer capture keeps
+// the drag alive even when the cursor passes over an embedded iframe (PDF view).
+function ResizeHandle() {
+	const setWorkspaceWidth = useChatStore((s) => s.setWorkspaceWidth);
+	const [dragging, setDragging] = useState(false);
+
+	const onPointerDown = (e: React.PointerEvent) => {
+		e.preventDefault();
+		(e.target as HTMLElement).setPointerCapture(e.pointerId);
+		setDragging(true);
+	};
+	const onPointerMove = (e: React.PointerEvent) => {
+		if (!dragging) return;
+		// Dock is flush to the viewport's right edge → width = right edge − cursor.
+		setWorkspaceWidth(window.innerWidth - e.clientX);
+	};
+	const stop = (e: React.PointerEvent) => {
+		if (!dragging) return;
+		setDragging(false);
+		(e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+	};
+
+	return (
+		<button
+			type="button"
+			aria-label="Resize workspace panel"
+			tabIndex={-1}
+			onPointerDown={onPointerDown}
+			onPointerMove={onPointerMove}
+			onPointerUp={stop}
+			onPointerCancel={stop}
+			className={cn(
+				"absolute left-0 top-0 z-10 h-full w-2 -translate-x-1/2 cursor-col-resize touch-none",
+				"before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-transparent before:transition-colors",
+				"hover:before:bg-primary/40",
+				dragging && "before:bg-primary/60",
+			)}
+		/>
+	);
+}
+
 interface TreeCtx {
 	selected: string | null;
 	onSelect: (p: string) => void;
@@ -294,6 +336,7 @@ export function WorkspaceDock() {
 	const open = useChatStore((s) => s.workspaceOpen);
 	const toggle = useChatStore((s) => s.toggleWorkspace);
 	const threadId = useChatStore((s) => s.threadId);
+	const workspaceWidth = useChatStore((s) => s.workspaceWidth);
 	const { data, isLoading, refetch, isFetching } = useWorkspaceTree(threadId);
 	const { save, mkdir, remove, rename, upload } =
 		useWorkspaceMutations(threadId);
@@ -367,7 +410,11 @@ export function WorkspaceDock() {
 		"inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors";
 
 	return (
-		<aside className="flex w-[360px] shrink-0 flex-col border-l border-border bg-sidebar">
+		<aside
+			style={{ width: workspaceWidth }}
+			className="relative flex shrink-0 flex-col border-l border-border bg-sidebar"
+		>
+			<ResizeHandle />
 			<div className="flex items-center justify-between border-b border-border px-3 py-2.5">
 				<span
 					title={`Session: ${threadId}`}

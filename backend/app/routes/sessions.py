@@ -64,11 +64,18 @@ async def sessions_import(request: Request):
 
 
 @router.patch("/v1/sessions/{thread_id}")
-async def sessions_rename(thread_id: str, request: Request):
+async def sessions_update(thread_id: str, request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
     body = await json_body(request)
-    return JSONResponse(await sessions_mod.rename_session(uid, thread_id, body.get("title", "")))
+    return JSONResponse(
+        await sessions_mod.update_session(
+            uid,
+            thread_id,
+            title=body.get("title") if "title" in body else None,
+            auto_approve=body.get("auto_approve") if "auto_approve" in body else None,
+        )
+    )
 
 
 @router.delete("/v1/sessions/{thread_id}")

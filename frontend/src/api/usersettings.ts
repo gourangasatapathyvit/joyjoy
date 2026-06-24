@@ -12,6 +12,7 @@ export interface UiSettings {
 	auto_follow?: boolean;
 	default_model?: string;
 	default_reasoning?: string;
+	auto_approve_default?: boolean;
 }
 
 export interface SkinOption {

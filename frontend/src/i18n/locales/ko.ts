@@ -131,6 +131,8 @@ export const ko: Resources = {
 		cleared: "대화를 지웠습니다.",
 		importFailed: "가져오기에 실패했습니다.",
 		readError: "해당 파일을 읽을 수 없습니다(JSON 대화가 필요합니다).",
+		autoApproveDefault: "새 채팅에서 도구 자동 승인",
+		autoApproveDefaultHint: "새 대화는 도구 승인이 꺼진 상태로 시작됩니다. 채팅별로 계속 전환할 수 있습니다.",
 	},
 	profile: {
 		subtitle: "계정 정보 및 세션.",

@@ -132,6 +132,9 @@ export const af: Resources = {
 		cleared: "Gesprek skoongemaak.",
 		importFailed: "Invoer het misluk.",
 		readError: "Kon nie daardie lêer lees nie (het 'n JSON-gesprek verwag).",
+		autoApproveDefault: "Keur gereedskap outomaties goed in nuwe geselsies",
+		autoApproveDefaultHint:
+			"Nuwe gesprekke begin met gereedskapgoedkeurings afgeskakel. Jy kan dit steeds per geselsie wissel.",
 	},
 	profile: {
 		subtitle: "Jou rekeningbesonderhede en sessie.",

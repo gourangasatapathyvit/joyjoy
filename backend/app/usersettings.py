@@ -25,6 +25,7 @@ _WRITABLE = {
     "activity_display": str,
     "default_model": str,
     "default_reasoning": str,
+    "auto_approve_default": bool,
     "locale": str,
     "sidebar_order": list,
 }
@@ -69,12 +70,25 @@ async def read_ui(user_id: str) -> dict:
                 "activity_display": cfg.activity_display,
                 "default_model": cfg.default_model or "",
                 "default_reasoning": cfg.default_reasoning or "off",
+                "auto_approve_default": bool(cfg.auto_approve_default),
                 "locale": cfg.locale or "en",
                 "email": email or "",
             }
     except Exception:
         logger.debug("read_ui failed", exc_info=True)
         return {}
+
+
+async def auto_approve_default(user_id: str) -> bool:
+    """The account-level default applied to new chats when the client doesn't
+    send an explicit per-run auto_approve flag."""
+    try:
+        async with db_session() as s:
+            cfg = await s.get(UserConfig, str(user_id or ""))
+            return bool(cfg.auto_approve_default) if cfg else False
+    except Exception:
+        logger.debug("auto_approve_default read failed", exc_info=True)
+        return False
 
 
 async def write_ui(user_id: str, data: dict) -> dict:

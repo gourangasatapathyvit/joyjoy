@@ -74,6 +74,9 @@ export const it: Resources = {
 		importFailed: "Importazione non riuscita.",
 		readError:
 			"Impossibile leggere il file (era prevista una conversazione JSON).",
+		autoApproveDefault: "Approva automaticamente gli strumenti nelle nuove chat",
+		autoApproveDefaultHint:
+			"Le nuove conversazioni iniziano con l'approvazione degli strumenti disattivata. Puoi comunque attivarla per ogni chat.",
 	},
 	profile: {
 		subtitle: "I dettagli del tuo account e della sessione.",

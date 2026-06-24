@@ -135,6 +135,9 @@ export const ga: Resources = {
 		importFailed: "Theip ar iompórtáil.",
 		readError:
 			"Níorbh fhéidir an comhad sin a léamh (bhíothas ag súil le comhrá JSON).",
+		autoApproveDefault: "Uirlisí a uathcheadú i gcomhráite nua",
+		autoApproveDefaultHint:
+			"Tosaíonn comhráite nua le ceadú uirlisí casta as. Is féidir leat é a athrú i ngach comhrá fós.",
 	},
 	profile: {
 		subtitle: "Sonraí do chuntais agus do sheisiúin.",

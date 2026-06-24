@@ -56,6 +56,7 @@ def _to_wire(s: Session) -> dict:
         "updated_at": _epoch(s.updated_at),
         "model": s.default_model or "",
         "reasoning": s.reasoning or "off",
+        "auto_approve": bool(s.auto_approve),
         "workspace_id": s.workspace_path or s.thread_id,
         "forked_from": s.forked_from,
     }
@@ -69,6 +70,7 @@ async def record_session(
     model: str | None = None,
     reasoning: str | None = None,
     workspace_id: str | None = None,
+    auto_approve: bool | None = None,
 ) -> None:
     """Upsert a session on run start: create with a title derived from the first
     message, or bump ``updated_at`` (and backfill the title) for an existing one.
@@ -85,6 +87,8 @@ async def record_session(
                     row.default_model = model
                 if reasoning:
                     row.reasoning = reasoning
+                if auto_approve is not None:
+                    row.auto_approve = bool(auto_approve)
                 if first_text and (not row.title or row.title == "New chat"):
                     row.title = _title_from_text(first_text)
                 if not row.workspace_path:
@@ -97,6 +101,7 @@ async def record_session(
                         title=_title_from_text(first_text or ""),
                         default_model=model or "",
                         reasoning=reasoning or "off",
+                        auto_approve=bool(auto_approve),
                         workspace_path=workspace_id or thread_id,
                     )
                 )
@@ -176,13 +181,23 @@ async def create_session(user_id: str, title: str | None = None) -> dict:
         return _to_wire(row)
 
 
-async def rename_session(user_id: str, thread_id: str, title: str) -> dict:
+async def update_session(
+    user_id: str,
+    thread_id: str,
+    *,
+    title: str | None = None,
+    auto_approve: bool | None = None,
+) -> dict:
+    """Patch mutable per-thread session fields (title and/or auto-approve)."""
     async with db_session() as s:
         row = await s.get(Session, thread_id)
         if not row or row.user_id != str(user_id):
             return {"ok": False, "error": "not found"}
-        row.title = (title or "").strip()[:120] or row.title or "New chat"
-        return {"ok": True, "thread_id": thread_id, "title": row.title}
+        if title is not None:
+            row.title = (title or "").strip()[:120] or row.title or "New chat"
+        if auto_approve is not None:
+            row.auto_approve = bool(auto_approve)
+        return {"ok": True, "thread_id": thread_id, "title": row.title, "auto_approve": bool(row.auto_approve)}
 
 
 async def delete_session(checkpointer, user_id: str, thread_id: str) -> dict:

@@ -132,6 +132,9 @@ export const en = {
 		cleared: "Conversation cleared.",
 		importFailed: "Import failed.",
 		readError: "Could not read that file (expected a JSON conversation).",
+		autoApproveDefault: "Auto-approve tools in new chats",
+		autoApproveDefaultHint:
+			"New conversations start with tool approvals turned off. You can still toggle it per chat.",
 	},
 	profile: {
 		subtitle: "Your account details and session.",

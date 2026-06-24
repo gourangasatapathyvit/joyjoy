@@ -1,6 +1,7 @@
 import { useTheme } from "next-themes";
 import { useEffect, useRef } from "react";
 import { suspendPrefSave } from "@/api/prefs";
+import { useSessions } from "@/api/sessions";
 import type { ReasoningEffort } from "@/api/types";
 import { useUiSettings } from "@/api/usersettings";
 import { setLanguage } from "@/i18n/config";
@@ -17,6 +18,9 @@ import {
 // Renders nothing.
 export function PrefsSync() {
 	const { data: ui } = useUiSettings();
+	const { data: sessions } = useSessions();
+	const threadId = useChatStore((s) => s.threadId);
+	const autoApproveDefault = useChatStore((s) => s.autoApproveDefault);
 	const { setTheme } = useTheme();
 	const applied = useRef(false);
 
@@ -39,10 +43,21 @@ export function PrefsSync() {
 				useChatStore
 					.getState()
 					.setReasoningEffort(ui.default_reasoning as ReasoningEffort);
+			if (typeof ui.auto_approve_default === "boolean")
+				useChatStore.getState().setAutoApproveDefault(ui.auto_approve_default);
 		} finally {
 			suspendPrefSave(false);
 		}
 	}, [ui, setTheme]);
+
+	// Per-thread auto-approve: reflect the opened conversation's stored value, or
+	// the account default for a brand-new chat not yet in the session list.
+	useEffect(() => {
+		const row = sessions?.sessions.find((x) => x.thread_id === threadId);
+		useChatStore
+			.getState()
+			.hydrateAutoApprove(row ? Boolean(row.auto_approve) : autoApproveDefault);
+	}, [threadId, sessions, autoApproveDefault]);
 
 	return null;
 }

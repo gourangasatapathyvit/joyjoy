@@ -20,6 +20,11 @@ export const sessionApi = {
 			method: "PATCH",
 			body: JSON.stringify({ title }),
 		}),
+	setAutoApprove: (tid: string, auto_approve: boolean) =>
+		http<Ok>(`/v1/sessions/${encodeURIComponent(tid)}`, {
+			method: "PATCH",
+			body: JSON.stringify({ auto_approve }),
+		}),
 	remove: (tid: string) =>
 		http<Ok>(`/v1/sessions/${encodeURIComponent(tid)}`, { method: "DELETE" }),
 	importConversation: (messages: unknown[], title?: string) =>

@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { sessionApi, useSessionMutations } from "@/api/sessions";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { downloadFile } from "@/lib/text";
 import { useChatStore } from "@/store/chat";
 
@@ -13,6 +14,8 @@ export function ConversationPane() {
 	const threadId = useChatStore((s) => s.threadId);
 	const newChat = useChatStore((s) => s.newChat);
 	const selectThread = useChatStore((s) => s.selectThread);
+	const autoApproveDefault = useChatStore((s) => s.autoApproveDefault);
+	const setAutoApproveDefault = useChatStore((s) => s.setAutoApproveDefault);
 	const { remove } = useSessionMutations();
 	const qc = useQueryClient();
 	const fileRef = useRef<HTMLInputElement>(null);
@@ -87,6 +90,20 @@ export function ConversationPane() {
 
 	return (
 		<div className="mx-auto max-w-2xl space-y-3">
+			<div className="flex items-start justify-between gap-4 rounded-lg border border-border p-3">
+				<div className="space-y-0.5">
+					<p className="text-sm font-medium">
+						{t("conversation.autoApproveDefault")}
+					</p>
+					<p className="text-[11px] text-muted-foreground">
+						{t("conversation.autoApproveDefaultHint")}
+					</p>
+				</div>
+				<Switch
+					checked={autoApproveDefault}
+					onCheckedChange={setAutoApproveDefault}
+				/>
+			</div>
 			<div className="flex flex-wrap gap-2">
 				<Button variant="outline" onClick={onTranscript} disabled={busy}>
 					{t("conversation.transcript")}

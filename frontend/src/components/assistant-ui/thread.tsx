@@ -32,7 +32,9 @@ import {
 	createContext,
 	type FC,
 	type PropsWithChildren,
+	type ReactNode,
 	useContext,
+	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -64,7 +66,39 @@ import {
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useApprovals } from "@/runtime/JoyjoyRuntimeProvider";
 import { useSettingsStore } from "@/store/settings";
+
+// Tool-call group that auto-expands while a HITL approval is pending in the
+// ACTIVE (not-yet-complete) group, so the Allow / Deny buttons are visible
+// without a manual expand. Historical (complete) groups are untouched, and the
+// user can still collapse/expand any group freely once it's open.
+function ApprovalAwareToolGroup({
+	count,
+	statusType,
+	defaultOpen,
+	children,
+}: {
+	count: number;
+	statusType: string;
+	defaultOpen: boolean;
+	children: ReactNode;
+}) {
+	const { hasPending } = useApprovals();
+	const forceOpen = hasPending && statusType !== "complete";
+	const [open, setOpen] = useState(defaultOpen || forceOpen);
+	const [prevForceOpen, setPrevForceOpen] = useState(forceOpen);
+	if (forceOpen !== prevForceOpen) {
+		setPrevForceOpen(forceOpen);
+		if (forceOpen) setOpen(true);
+	}
+	return (
+		<ToolGroupRoot variant="ghost" open={open} onOpenChange={setOpen}>
+			<ToolGroupTrigger count={count} active={statusType === "running"} />
+			<ToolGroupContent>{children}</ToolGroupContent>
+		</ToolGroupRoot>
+	);
+}
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
 
@@ -401,16 +435,13 @@ const AssistantMessage: FC = () => {
 									return <ToolGroup group={part}>{children}</ToolGroup>;
 								}
 								return (
-									<ToolGroupRoot
-										variant="ghost"
+									<ApprovalAwareToolGroup
+										count={part.indices.length}
+										statusType={part.status.type}
 										defaultOpen={activityDisplay === "stream"}
 									>
-										<ToolGroupTrigger
-											count={part.indices.length}
-											active={part.status.type === "running"}
-										/>
-										<ToolGroupContent>{children}</ToolGroupContent>
-									</ToolGroupRoot>
+										{children}
+									</ApprovalAwareToolGroup>
 								);
 							case "group-reasoning": {
 								if (ReasoningGroup) {
@@ -543,12 +574,15 @@ const UserMessage: FC = () => {
 				</MessagePrimitive.Quote>
 			</div>
 
-			<div className="aui-user-message-content-wrapper relative col-start-2 min-w-0">
+			<div className="group/user-bubble aui-user-message-content-wrapper relative col-start-2 min-w-0">
 				<div className="aui-user-message-content peer bg-muted text-foreground rounded-xl px-4 py-2 wrap-break-word empty:hidden">
 					<MessagePrimitive.Parts />
 				</div>
 				<div className="aui-user-action-bar-wrapper absolute start-0 top-1/2 -translate-x-full -translate-y-1/2 pe-2 peer-empty:hidden rtl:translate-x-full">
 					<UserActionBar />
+				</div>
+				<div className="absolute end-1 -bottom-3 peer-empty:hidden">
+					<UserCopyBar />
 				</div>
 			</div>
 
@@ -574,6 +608,33 @@ const UserActionBar: FC = () => {
 			>
 				<PencilIcon />
 			</ActionBarPrimitive.Edit>
+		</ActionBarPrimitive.Root>
+	);
+};
+
+// Copy-whole-question button, pinned to the bottom-right of the user bubble and
+// revealed on hover. ActionBarPrimitive.Copy copies the full message text.
+const UserCopyBar: FC = () => {
+	return (
+		<ActionBarPrimitive.Root
+			autohide="always"
+			className="aui-user-copy-bar-root text-muted-foreground animate-in fade-in duration-150"
+		>
+			<ActionBarPrimitive.Copy
+				render={
+					<TooltipIconButton
+						tooltip="Copy"
+						className="bg-background/80 size-7 rounded-full border shadow-sm backdrop-blur-sm"
+					/>
+				}
+			>
+				<AuiIf condition={(s) => s.message.isCopied}>
+					<CheckIcon className="animate-in zoom-in-50 fade-in duration-200 ease-out" />
+				</AuiIf>
+				<AuiIf condition={(s) => !s.message.isCopied}>
+					<CopyIcon className="animate-in zoom-in-75 fade-in duration-150" />
+				</AuiIf>
+			</ActionBarPrimitive.Copy>
 		</ActionBarPrimitive.Root>
 	);
 };

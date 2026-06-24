@@ -134,6 +134,9 @@ export const hu: Resources = {
 		importFailed: "Az importálás sikertelen.",
 		readError:
 			"Nem sikerült beolvasni a fájlt (JSON-beszélgetés volt várható).",
+		autoApproveDefault: "Eszközök automatikus jóváhagyása új csevegésekben",
+		autoApproveDefaultHint:
+			"Az új beszélgetések kikapcsolt eszközjóváhagyással indulnak. Csevegésenként továbbra is átkapcsolhatja.",
 	},
 	profile: {
 		subtitle: "A fiókja adatai és munkamenete.",

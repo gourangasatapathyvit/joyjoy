@@ -74,6 +74,9 @@ export const es: Resources = {
 		importFailed: "Error al importar.",
 		readError:
 			"No se pudo leer el archivo (se esperaba una conversación JSON).",
+		autoApproveDefault: "Aprobar herramientas automáticamente en nuevos chats",
+		autoApproveDefaultHint:
+			"Las nuevas conversaciones empiezan con la aprobación de herramientas desactivada. Aún puedes activarla en cada chat.",
 	},
 	profile: {
 		subtitle: "Los datos de tu cuenta y sesión.",

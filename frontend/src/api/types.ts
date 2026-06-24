@@ -68,6 +68,7 @@ export interface CreateRunRequest {
 	model?: string;
 	reasoning_effort?: string;
 	thread_id?: string;
+	auto_approve?: boolean;
 }
 
 export interface CreateRunResponse {
@@ -183,6 +184,7 @@ export interface Session {
 	created_at: number;
 	updated_at: number;
 	model?: string;
+	auto_approve?: boolean;
 }
 
 // A persisted message as returned by GET /v1/sessions/{tid}/messages.

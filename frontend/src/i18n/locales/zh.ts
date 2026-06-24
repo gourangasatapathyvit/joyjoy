@@ -130,6 +130,8 @@ export const zh: Resources = {
 		cleared: "已清除对话。",
 		importFailed: "导入失败。",
 		readError: "无法读取该文件（应为 JSON 对话）。",
+		autoApproveDefault: "在新聊天中自动批准工具",
+		autoApproveDefaultHint: "新对话以关闭工具批准的状态开始。你仍可按聊天单独切换。",
 	},
 	profile: {
 		subtitle: "你的账户详情和会话。",

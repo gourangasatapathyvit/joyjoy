@@ -132,6 +132,9 @@ export const tr: Resources = {
 		cleared: "Konuşma temizlendi.",
 		importFailed: "İçe aktarma başarısız.",
 		readError: "Bu dosya okunamadı (JSON konuşması bekleniyordu).",
+		autoApproveDefault: "Yeni sohbetlerde araçları otomatik onayla",
+		autoApproveDefaultHint:
+			"Yeni konuşmalar araç onayları kapalı olarak başlar. Yine de her sohbet için açıp kapatabilirsiniz.",
 	},
 	profile: {
 		subtitle: "Hesap bilgileriniz ve oturumunuz.",

@@ -73,6 +73,10 @@ export const fr: Resources = {
 		cleared: "Conversation effacée.",
 		importFailed: "Échec de l'import.",
 		readError: "Impossible de lire ce fichier (conversation JSON attendue).",
+		autoApproveDefault:
+			"Approuver automatiquement les outils dans les nouveaux chats",
+		autoApproveDefaultHint:
+			"Les nouvelles conversations démarrent avec l'approbation des outils désactivée. Vous pouvez toujours l'activer pour chaque chat.",
 	},
 	profile: {
 		subtitle: "Les détails de votre compte et session.",

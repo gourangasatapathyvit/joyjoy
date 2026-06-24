@@ -12,6 +12,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from .. import runs as runs_mod
 from .. import sessions as sessions_mod
+from .. import usersettings
 from ..agent import get_run_agent, resolve_model
 from ..auth import resolve_user_id, verify_gateway_key
 from ..context import AgentContext
@@ -41,14 +42,18 @@ async def create_run(request: Request):
     reasoning = body.get("reasoning_effort")
     if reasoning is None:
         reasoning = body.get("reasoning")
+    # Effective auto-approve: the client's per-run flag if sent, else the account
+    # default. Drives server-side gate resolution AND is persisted on the session.
+    auto_approve = body.get("auto_approve")
+    auto_approve = bool(auto_approve) if auto_approve is not None else await usersettings.auto_approve_default(user_id)
     ws_id = await sessions_mod.workspace_id_for(user_id, thread_id)
     ctx = AgentContext(user_id=user_id, thread_id=thread_id, workspace_id=ws_id)
     agent = await get_run_agent(settings, request.app.state.checkpointer, request.app.state.store, model, user_id, reasoning=reasoning)
-    run_id = await runs_mod.start_run(agent, ctx, text)
-    logger.info("run start id=%s user=%s thread=%s ws=%s model=%s reasoning=%s", run_id, user_id, thread_id, ws_id, model, reasoning)
+    run_id = await runs_mod.start_run(agent, ctx, text, auto_approve=auto_approve)
+    logger.info("run start id=%s user=%s thread=%s ws=%s model=%s reasoning=%s auto_approve=%s", run_id, user_id, thread_id, ws_id, model, reasoning, auto_approve)
     try:
         await sessions_mod.record_session(
-            user_id, thread_id, first_text=text, model=model, reasoning=reasoning, workspace_id=ws_id
+            user_id, thread_id, first_text=text, model=model, reasoning=reasoning, workspace_id=ws_id, auto_approve=auto_approve
         )
     except Exception:  # noqa: BLE001
         logger.warning("record_session failed", exc_info=True)

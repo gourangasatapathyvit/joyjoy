@@ -30,11 +30,14 @@ logger = logging.getLogger("joyjoy.runs")
 
 
 class _Run:
-    def __init__(self, run_id: str, agent, ctx: AgentContext, text: str):
+    def __init__(self, run_id: str, agent, ctx: AgentContext, text: str, auto_approve: bool = False):
         self.run_id = run_id
         self.agent = agent
         self.ctx = ctx
         self.text = text
+        # Per-thread HITL policy captured at run start: when true, gated tools are
+        # approved server-side (no approval.request emitted, no client round-trip).
+        self.auto_approve = auto_approve
         self.queue: asyncio.Queue = asyncio.Queue()
         self.pending: dict[str, asyncio.Future] = {}  # approval_id -> future(decision)
         self.final_text = ""
@@ -128,6 +131,12 @@ async def _drive(run: _Run) -> None:
             if status == "interrupt":
                 action_requests = (val or {}).get("action_requests") if isinstance(val, dict) else None
                 action_requests = action_requests or []
+                # Auto-approve mode: resolve every gate server-side without surfacing
+                # a card. Tools still streamed their started/completed events above, so
+                # the calls remain visible; we just skip the human round-trip.
+                if run.auto_approve:
+                    agent_input = Command(resume={"decisions": [{"type": "approve"} for _ in action_requests]})
+                    continue
                 futs: list[asyncio.Future] = []
                 for ar in action_requests:
                     aid = "ap-" + uuid.uuid4().hex
@@ -154,9 +163,9 @@ async def _drive(run: _Run) -> None:
         await run.queue.put({"event": "__end__"})
 
 
-async def start_run(agent, ctx: AgentContext, text: str) -> str:
+async def start_run(agent, ctx: AgentContext, text: str, *, auto_approve: bool = False) -> str:
     run_id = "run-" + uuid.uuid4().hex
-    run = _Run(run_id, agent, ctx, text)
+    run = _Run(run_id, agent, ctx, text, auto_approve=auto_approve)
     _RUNS[run_id] = run
     run.task = asyncio.create_task(_drive(run))
     return run_id

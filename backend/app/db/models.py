@@ -126,6 +126,8 @@ class UserConfig(Base):
     sidebar_order: Mapped[list] = mapped_column(JSON, default=list)
     default_model: Mapped[str] = mapped_column(String(128), default="")
     default_reasoning: Mapped[str] = mapped_column(String(16), default="off")
+    # Account default for new chats' auto-approve (per-chat override lives on Session).
+    auto_approve_default: Mapped[bool] = mapped_column(Boolean, default=False)
     locale: Mapped[str] = mapped_column(String(16), default="en")
     # Single per-user long-term memory doc (deepagents AGENTS.md convention),
     # loaded by MemoryMiddleware and editable by the agent (edit_file) + the UI.
@@ -192,6 +194,10 @@ class Session(Base):
     title: Mapped[str] = mapped_column(String(255), default="New chat")
     default_model: Mapped[str] = mapped_column(String(128), default="")
     reasoning: Mapped[str] = mapped_column(String(16), default="off")
+    # Per-thread HITL policy: when true, gated tool calls in this conversation are
+    # approved automatically (no approval card). Seeded from the user's account
+    # default on creation; overridable per chat. See runs._drive enforcement.
+    auto_approve: Mapped[bool] = mapped_column(Boolean, default=False)
     workspace_path: Mapped[str] = mapped_column(String(255), default="")  # relative to workspace_root
     forked_from: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

@@ -74,6 +74,9 @@ export const de: Resources = {
 		importFailed: "Import fehlgeschlagen.",
 		readError:
 			"Datei konnte nicht gelesen werden (JSON-Unterhaltung erwartet).",
+		autoApproveDefault: "Tools in neuen Chats automatisch genehmigen",
+		autoApproveDefaultHint:
+			"Neue Unterhaltungen starten mit deaktivierter Tool-Genehmigung. Du kannst sie weiterhin pro Chat umschalten.",
 	},
 	profile: {
 		subtitle: "Deine Konto- und Sitzungsdaten.",

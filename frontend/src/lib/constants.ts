@@ -11,8 +11,16 @@ export const AGENTS_DOC = "__agents__";
 // All prefixed `joyjoy-` to namespace this app's entries.
 export const STORAGE_KEYS = {
 	workspaceOpen: "joyjoy-workspace-open",
+	workspaceWidth: "joyjoy-workspace-width",
 	activeThread: "joyjoy-active-thread",
 	skin: "joyjoy-skin",
 	activity: "joyjoy-activity",
 	autoFollow: "joyjoy-autofollow",
+} as const;
+
+// Resizable workspace dock bounds (px). The handle clamps drags to this range.
+export const WORKSPACE_DOCK = {
+	minWidth: 240,
+	maxWidth: 720,
+	defaultWidth: 360,
 } as const;
