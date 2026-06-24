@@ -27,6 +27,27 @@ if ! docker info >/dev/null 2>&1; then
   log "         sandboxes. Start Docker, then re-run this script."
 fi
 
+# 0.5) Ensure dependencies are installed (first run on a fresh machine). uv sync
+#      is idempotent + fast when already in sync; npm install only if missing.
+if command -v uv >/dev/null 2>&1; then
+  log "ensuring backend deps (uv sync) ..."
+  ( cd "$ROOT/backend" && uv sync >/tmp/joyjoy_uv_sync.log 2>&1 ) \
+    && log "  backend deps OK" || log "  uv sync FAILED (see /tmp/joyjoy_uv_sync.log)"
+else
+  log "WARNING: uv not found — install uv (astral.sh/uv) or pre-create backend/.venv"
+fi
+
+# 0.6) Ensure the multi-language sandbox image exists (first run = several-minute
+#      build). Tag must match config.py sandbox_image; override via SANDBOX_IMAGE.
+SANDBOX_IMAGE="${SANDBOX_IMAGE:-joyjoy/sandbox-fat:3}"
+if docker image inspect "$SANDBOX_IMAGE" >/dev/null 2>&1; then
+  log "sandbox image $SANDBOX_IMAGE present"
+else
+  log "building sandbox image $SANDBOX_IMAGE (first run, several minutes) ..."
+  ( cd "$ROOT" && docker build -t "$SANDBOX_IMAGE" sandbox-image/ >/tmp/joyjoy_sandbox_build.log 2>&1 ) \
+    && log "  sandbox image built" || log "  sandbox image build FAILED (see /tmp/joyjoy_sandbox_build.log)"
+fi
+
 # 1) OpenSandbox server on :8090 (uvx; config = sandbox.toml, docker runtime).
 if running 8090 || pgrep -f opensandbox-server >/dev/null 2>&1; then
   log ":8090 OpenSandbox server already running"
@@ -50,13 +71,14 @@ else
   log "jira MCP dir not found ($JIRA_MCP_DIR) — skipping (set JIRA_MCP_DIR to enable)"
 fi
 
-# 3) Build the React SPA (the FE the backend serves). Fast (~1-2s); always build
-#    so the backend serves the latest dist.
+# 3) Build the React SPA (the FE the backend serves). Installs node_modules first
+#    if missing (fresh machine), then builds (~1-2s) so the backend serves latest.
 log "building frontend SPA ..."
 ( cd "$ROOT/frontend" || exit 1
   export NVM_DIR="$HOME/.nvm"
   [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && nvm use 22 >/dev/null 2>&1
-  npm run build >/tmp/joyjoy_fe_build.log 2>&1 ) \
+  [ -d node_modules ] || npm install
+  npm run build ) >/tmp/joyjoy_fe_build.log 2>&1 \
   && log "  SPA built" || log "  SPA build FAILED (see /tmp/joyjoy_fe_build.log)"
 
 # 4) joyjoy backend on :8080 — serves BOTH the SPA and the /v1 API.
