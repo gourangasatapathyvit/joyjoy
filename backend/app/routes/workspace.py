@@ -30,6 +30,25 @@ def _sbx() -> bool:
     return sandbox_mgr.is_enabled(settings)
 
 
+def _norm_path(p: str | None) -> str:
+    """Normalize an incoming workspace path before it reaches either backend.
+
+    Tolerates absolute mount-prefixed paths (``/workspace/foo``) as
+    workspace-relative (``foo``). The agent records absolute mount paths in its
+    write_file/edit_file tool-call args whenever the sandbox prompt sets its cwd
+    to the mount; those reach the dock/media layer verbatim. Stripping the prefix
+    here fixes BOTH backends: the sandbox facade (else ``_abs`` doubles it →
+    ``/workspace/workspace/foo``) AND the host resolver (else ``os.path.join``
+    treats the leading ``/`` as absolute, escaping the root → confinement 404)."""
+    mount = (settings.sandbox_mount_path or "/workspace").rstrip("/")
+    p = str(p or "").strip()
+    if p == mount:
+        return ""
+    if p.startswith(mount + "/"):
+        return p[len(mount) + 1 :]
+    return p
+
+
 async def _ws_id(uid: str, thread_id) -> str:
     return await sessions_mod.workspace_id_for(uid, str(thread_id or ""))
 
@@ -51,7 +70,7 @@ async def workspace_file(request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
     ws = await _ws_id(uid, request.query_params.get("thread_id"))
-    path = request.query_params.get("path") or ""
+    path = _norm_path(request.query_params.get("path"))
     data = (
         await ws_sbx.read_file(settings, ws, path)
         if _sbx()
@@ -87,7 +106,7 @@ async def workspace_raw(request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
     ws = await _ws_id(uid, request.query_params.get("thread_id"))
-    path = request.query_params.get("path") or ""
+    path = _norm_path(request.query_params.get("path"))
     want_pdf = request.query_params.get("convert") == "pdf"
     if _sbx():
         # Sandbox files have no host path → stream bytes directly. (Office→PDF
@@ -115,7 +134,7 @@ async def workspace_save(request: Request):
     uid = resolve_user_id(request, settings)
     body = await json_body(request)
     ws = await _ws_id(uid, body.get("thread_id"))
-    path, content = body.get("path"), body.get("content", "")
+    path, content = _norm_path(body.get("path")), body.get("content", "")
     res = (
         await ws_sbx.save_file(settings, ws, path, content)
         if _sbx()
@@ -130,7 +149,7 @@ async def workspace_mkdir(request: Request):
     uid = resolve_user_id(request, settings)
     body = await json_body(request)
     ws = await _ws_id(uid, body.get("thread_id"))
-    path = body.get("path")
+    path = _norm_path(body.get("path"))
     res = (
         await ws_sbx.make_dir(settings, ws, path)
         if _sbx()
@@ -145,7 +164,7 @@ async def workspace_delete(request: Request):
     uid = resolve_user_id(request, settings)
     body = await json_body(request)
     ws = await _ws_id(uid, body.get("thread_id"))
-    path = body.get("path")
+    path = _norm_path(body.get("path"))
     res = (
         await ws_sbx.delete_path(settings, ws, path)
         if _sbx()
@@ -160,7 +179,7 @@ async def workspace_rename(request: Request):
     uid = resolve_user_id(request, settings)
     body = await json_body(request)
     ws = await _ws_id(uid, body.get("thread_id"))
-    src, dst = body.get("from"), body.get("to")
+    src, dst = _norm_path(body.get("from")), _norm_path(body.get("to"))
     res = (
         await ws_sbx.rename_path(settings, ws, src, dst)
         if _sbx()
@@ -181,7 +200,7 @@ async def workspace_upload(request: Request):
     if len(data) > MAX_UPLOAD_BYTES:
         return JSONResponse({"ok": False, "error": "file too large"}, status_code=413)
     ws = await _ws_id(uid, form.get("thread_id"))
-    dir_rel, filename = str(form.get("dir") or ""), getattr(up, "filename", "upload")
+    dir_rel, filename = _norm_path(form.get("dir")), getattr(up, "filename", "upload")
     res = (
         await ws_sbx.save_upload(settings, ws, dir_rel, filename, data)
         if _sbx()

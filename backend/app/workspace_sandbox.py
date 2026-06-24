@@ -24,10 +24,22 @@ def _mount(settings: Settings) -> str:
 
 
 def _abs(settings: Settings, rel: str) -> str | None:
-    """Resolve a workspace-relative path to an absolute sandbox path, refusing
-    ``..`` escapes outside the mount."""
+    """Resolve a workspace path to an absolute sandbox path, refusing ``..``
+    escapes outside the mount.
+
+    Accepts both workspace-relative paths (``brand/logo.svg`` — what the dock
+    tree emits) and absolute mount-prefixed paths (``/workspace/brand/logo.svg``
+    — what the agent's write_file/edit_file tool calls record, since the sandbox
+    prompt sets its working dir to the mount). Both must resolve to the same file;
+    without stripping the prefix the join would double it (``/workspace/workspace/…``)
+    and 404 every agent-written media file rendered inline in chat."""
     mount = _mount(settings)
-    full = posixpath.normpath(posixpath.join(mount, (rel or "").lstrip("/")))
+    rel = rel or ""
+    if rel == mount:
+        rel = ""
+    elif rel.startswith(mount + "/"):
+        rel = rel[len(mount) + 1:]
+    full = posixpath.normpath(posixpath.join(mount, rel.lstrip("/")))
     if full != mount and not full.startswith(mount + "/"):
         return None
     return full
