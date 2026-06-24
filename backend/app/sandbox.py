@@ -100,21 +100,18 @@ def volume_name(settings: Settings, workspace_id: str) -> str:
     return f"{settings.sandbox_volume_prefix}{safe_segment(workspace_id) or 'default'}"
 
 
-def _volume(settings: Settings, vol: str, *, delete_on_terminate: bool = False) -> Volume:
-    """Runtime-neutral durable-volume spec. The OpenSandbox **server** provisions the
-    backing store per ITS OWN runtime — a Docker named volume OR a Kubernetes PVC —
-    because ``createIfNotExists`` is set, so joyjoy never shells out to ``docker`` and
-    this works identically on a single Docker host and on multi-pod Kubernetes.
-    ``deleteOnSandboxTermination`` removes the volume when the sandbox is killed
-    (Docker only; on K8s the PVC reclaim policy governs deletion — the flag is a no-op
-    there, which is the correct K8s model)."""
+def _volume(settings: Settings, vol: str) -> Volume:
+    """Runtime-neutral PERSISTENT per-workspace volume. ``createIfNotExists`` lets the
+    OpenSandbox **server** provision the backing store per ITS OWN runtime — a Docker
+    named volume OR a Kubernetes PVC — so joyjoy never shells out to ``docker`` and this
+    works identically on a single Docker host and on multi-pod Kubernetes.
+    We deliberately do NOT set ``deleteOnSandboxTermination`` (it defaults False): the
+    volume must OUTLIVE the sandbox (pause/kill/GC) and reattach to the next one — that
+    durability is the whole point. Volume deletion is the platform's job (K8s reclaim
+    policy / Docker prune)."""
     return Volume(
         name="workspace",
-        pvc=PVC(
-            claimName=vol,
-            createIfNotExists=True,
-            deleteOnSandboxTermination=delete_on_terminate,
-        ),
+        pvc=PVC(claimName=vol, createIfNotExists=True),
         mountPath=settings.sandbox_mount_path,
     )
 
