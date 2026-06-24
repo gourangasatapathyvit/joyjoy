@@ -31,6 +31,10 @@ import logging
 import threading
 import time
 
+from opensandbox import Sandbox, SandboxManager
+from opensandbox.config import ConnectionConfig
+from opensandbox.models.sandboxes import PVC, SandboxFilter, Volume
+
 from .config import Settings
 from .textutils import safe_segment
 
@@ -85,8 +89,6 @@ def is_enabled(settings: Settings) -> bool:
 
 
 def _conn(settings: Settings):
-    from opensandbox.config import ConnectionConfig
-
     return ConnectionConfig(
         domain=settings.sandbox_server_domain,
         protocol=settings.sandbox_server_protocol,
@@ -98,26 +100,32 @@ def volume_name(settings: Settings, workspace_id: str) -> str:
     return f"{settings.sandbox_volume_prefix}{safe_segment(workspace_id) or 'default'}"
 
 
-async def _ensure_volume(name: str) -> None:
-    """Idempotently create the Docker named volume (OSEP-0003: must pre-exist)."""
-    proc = await asyncio.create_subprocess_exec(
-        "docker", "volume", "create", name,
-        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+def _volume(settings: Settings, vol: str, *, delete_on_terminate: bool = False) -> Volume:
+    """Runtime-neutral durable-volume spec. The OpenSandbox **server** provisions the
+    backing store per ITS OWN runtime — a Docker named volume OR a Kubernetes PVC —
+    because ``createIfNotExists`` is set, so joyjoy never shells out to ``docker`` and
+    this works identically on a single Docker host and on multi-pod Kubernetes.
+    ``deleteOnSandboxTermination`` removes the volume when the sandbox is killed
+    (Docker only; on K8s the PVC reclaim policy governs deletion — the flag is a no-op
+    there, which is the correct K8s model)."""
+    return Volume(
+        name="workspace",
+        pvc=PVC(
+            claimName=vol,
+            createIfNotExists=True,
+            deleteOnSandboxTermination=delete_on_terminate,
+        ),
+        mountPath=settings.sandbox_mount_path,
     )
-    _, err = await proc.communicate()
-    if proc.returncode != 0:
-        raise RuntimeError(f"docker volume create {name} failed: {err.decode(errors='replace')}")
 
 
 async def _create(settings: Settings, workspace_id: str):
-    from opensandbox import Sandbox
-    from opensandbox.models.sandboxes import PVC, Volume
-
     vol = volume_name(settings, workspace_id)
-    await _ensure_volume(vol)
     sb = await Sandbox.create(
         settings.sandbox_image,
-        volumes=[Volume(name="workspace", pvc=PVC(claimName=vol), mountPath=settings.sandbox_mount_path)],
+        # Durable: server auto-creates the volume; NOT delete-on-terminate, so it
+        # survives sandbox pause/kill/GC and reattaches to the next sandbox.
+        volumes=[_volume(settings, vol)],
         resource={"cpu": settings.sandbox_cpu, "memory": settings.sandbox_memory},
         timeout=datetime.timedelta(minutes=settings.sandbox_timeout_minutes),
         connection_config=_conn(settings),
@@ -164,8 +172,6 @@ async def _acquire(settings: Settings, workspace_id: str, known_sandbox_id: str 
         sb = None
         if known_sandbox_id:
             try:
-                from opensandbox import Sandbox
-
                 sb = await Sandbox.resume(sandbox_id=known_sandbox_id, connection_config=_conn(settings))
                 logger.info("resumed sandbox %s for ws=%s", known_sandbox_id, wid)
             except Exception:  # noqa: BLE001
@@ -189,14 +195,19 @@ async def _kill_session(settings: Settings, workspace_id: str, remove_volume: bo
         except Exception:  # noqa: BLE001
             logger.debug("kill failed for ws=%s", wid, exc_info=True)
     if remove_volume:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "docker", "volume", "rm", "-f", volume_name(settings, wid),
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-            )
-            await proc.communicate()
-        except Exception:  # noqa: BLE001
-            logger.debug("volume rm failed for ws=%s", wid, exc_info=True)
+        # Durable-volume DELETION is the platform's job, runtime-neutrally — joyjoy does
+        # NOT touch it (no host ``docker`` dependency, so this is identical + safe on a
+        # single Docker host and on multi-pod Kubernetes):
+        #   * Kubernetes — the PVC's reclaim policy / namespace GC removes it.
+        #   * Docker     — prune orphaned ``joyjoy-ws-*`` volumes out of band
+        #                  (e.g. `docker volume prune`), or via an external reaper.
+        # The OpenSandbox SDK can only auto-remove a volume the *terminating* sandbox
+        # itself created (``deleteOnSandboxTermination``); that can't apply to a
+        # pre-existing durable volume, so there is no in-SDK way to delete it here.
+        logger.info(
+            "ws=%s deleted; durable volume %s retained for platform reclamation",
+            wid, volume_name(settings, wid),
+        )
 
 
 async def _reaper_loop(settings: Settings) -> None:
@@ -232,9 +243,6 @@ async def _shutdown() -> None:
 
 async def _healthy(settings: Settings) -> bool:
     try:
-        from opensandbox import SandboxManager
-        from opensandbox.models.sandboxes import SandboxFilter
-
         async with await SandboxManager.create(connection_config=_conn(settings)) as mgr:
             await mgr.list_sandbox_infos(SandboxFilter(page_size=1))
         return True
