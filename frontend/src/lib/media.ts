@@ -145,8 +145,10 @@ export const isMediaFile = (name: string): boolean =>
 export const mimeOf = (name: string): string =>
 	MIME[extOf(name)] ?? "application/octet-stream";
 
-export const mediaUrl = (path: string): string =>
-	`/v1/media?path=${encodeURIComponent(path)}`;
+// thread_id lets the backend resolve the marker inside the session's sandbox
+// volume when SANDBOX_ENABLED (else it's ignored and a host path is used).
+export const mediaUrl = (threadId: string, path: string): string =>
+	`/v1/media?thread_id=${encodeURIComponent(threadId)}&path=${encodeURIComponent(path)}`;
 export const workspaceRawUrl = (threadId: string, path: string): string =>
 	`/v1/workspace/raw?thread_id=${encodeURIComponent(threadId)}&path=${encodeURIComponent(path)}`;
 // Ask the server to convert an office doc to PDF for inline preview. Both source

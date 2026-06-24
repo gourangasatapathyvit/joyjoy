@@ -83,12 +83,22 @@ async def workspace_file(request: Request):
 
 @router.get("/v1/media")
 async def media_get(request: Request):
-    """Serve a local media file referenced by an absolute path (a chat ``MEDIA:``
-    marker). Host-path based (imported convos / the LLM's MEDIA convention) —
-    orthogonal to the sandbox workspace, so unchanged when the sandbox is on."""
+    """Serve a chat ``MEDIA:`` marker's bytes. When the sandbox is enabled the file
+    lives in the session's sandbox volume (resolved like /v1/workspace/raw, by
+    thread_id); otherwise it's a host path (imported convos / the LLM's MEDIA
+    convention), resolved under the per-user workspace root."""
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
-    res = media_mod.resolve_media(settings, uid, request.query_params.get("path") or "")
+    raw_path = request.query_params.get("path") or ""
+    if _sbx():
+        # Sandbox mode: every workspace op is in the sandbox — stream from the volume.
+        ws = await _ws_id(uid, request.query_params.get("thread_id"))
+        res = await ws_sbx.raw_file(settings, ws, _norm_path(raw_path))
+        if res is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        data, mime = res
+        return Response(content=data, media_type=mime)
+    res = media_mod.resolve_media(settings, uid, raw_path)
     if res is None:
         return JSONResponse({"error": "not found"}, status_code=404)
     full, mime = res

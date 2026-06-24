@@ -5,11 +5,18 @@ description = "Multi-tenant Deep Agents backend (single process, Postgres-backed
 requires-python = ">=3.11"
 dependencies = [
     # Agent engine
-    "deepagents==0.6.10",
+    "deepagents==0.6.11",
     "langgraph>=1.2,<2",
     "langchain-core>=0.3",
     "langchain-openai>=0.2",
     "langchain-mcp-adapters>=0.1",
+    # Model provider SDKs (the Settings→Providers picker dispatches on these)
+    "langchain-anthropic>=0.2",
+    "langchain-aws>=0.2",
+    "boto3>=1.34",
+    "langchain-google-genai>=2.0",
+    # Sandboxed execution layer (OpenSandbox SDK; gated by SANDBOX_ENABLED)
+    "opensandbox",
     # Persistence (dev sqlite / prod postgres)
     "langgraph-checkpoint-sqlite>=2.0",
     "langgraph-checkpoint-postgres>=2.0",
@@ -26,7 +33,6 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0",  # relational app DB (users/skills/mcp/models/config/sessions)
     "alembic>=1.13",  # DB migrations
     "cryptography>=42",  # Fernet encryption for secrets at rest
-    "cryptography>=42",
 ]
 
 [project.optional-dependencies]

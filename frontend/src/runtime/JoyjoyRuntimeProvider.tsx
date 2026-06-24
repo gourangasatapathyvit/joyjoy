@@ -626,7 +626,10 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 						return splitMediaMarkers(p.text).map((seg) =>
 							seg.kind === "text"
 								? { type: "text" as const, text: seg.text }
-								: urlMediaPart(mediaUrl(seg.path), baseName(seg.path)),
+								: urlMediaPart(
+										mediaUrl(threadId, seg.path),
+										baseName(seg.path),
+									),
 						);
 					if (p.type === "reasoning")
 						return [{ type: "reasoning" as const, text: p.text }];
