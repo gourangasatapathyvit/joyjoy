@@ -1,4 +1,9 @@
-import { DownloadIcon, ExternalLinkIcon, FileIcon } from "lucide-react";
+import {
+	DownloadIcon,
+	ExternalLinkIcon,
+	FileIcon,
+	FileWarningIcon,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -19,6 +24,12 @@ import { baseName } from "@/lib/text";
 // and read_file base64 blocks — so the chat shows the agent's media inline:
 // images / gif, audio, video, pdf, OFFICE docs (server-converted to PDF), and
 // markdown / code / text files (fetched + rendered).
+//
+// Every inline renderer first PROBES the source with `fetch` (which, unlike an
+// <img>/<audio>/<video>/<iframe> src, does NOT log a console 404 when missing).
+// If the source isn't reachable — deleted file, broken path, imported transcript
+// referencing a file not on this machine, failed office conversion — it shows a
+// single "Media inaccessible" placeholder instead of a broken element.
 
 interface ImagePart {
 	image: string;
@@ -30,20 +41,73 @@ interface FilePart {
 	filename?: string;
 }
 
-// Inline image with click-to-open. If the source 404s (e.g. an imported
-// conversation referencing a file that isn't on this machine) it renders nothing
-// rather than a broken-image chip, keeping imported transcripts clean.
+type MediaState = "loading" | "ok" | "error";
+
+// Probe a media URL and, when reachable, expose a blob object-URL to feed the
+// element (one fetch, no second network hit, no console 404 on failure). `data:`
+// URLs are inline and always available, so they pass straight through.
+function useMediaSrc(url: string): { state: MediaState; src: string } {
+	const isData = url.startsWith("data:");
+	const [state, setState] = useState<MediaState>(isData ? "ok" : "loading");
+	const [src, setSrc] = useState<string>(isData ? url : "");
+
+	useEffect(() => {
+		if (url.startsWith("data:")) {
+			setState("ok");
+			setSrc(url);
+			return;
+		}
+		let cancelled = false;
+		let obj: string | null = null;
+		setState("loading");
+		setSrc("");
+		fetch(url)
+			.then((r) =>
+				r.ok ? r.blob() : Promise.reject(new Error(String(r.status))),
+			)
+			.then((b) => {
+				if (cancelled) return;
+				obj = URL.createObjectURL(b);
+				setSrc(obj);
+				setState("ok");
+			})
+			.catch(() => !cancelled && setState("error"));
+		return () => {
+			cancelled = true;
+			if (obj) URL.revokeObjectURL(obj);
+		};
+	}, [url]);
+
+	return { state, src };
+}
+
+// Shown for any inline media that can't be fetched.
+function MediaInaccessible({ name }: { name: string }) {
+	return (
+		<span className="my-2 inline-flex items-center gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+			<FileWarningIcon className="size-4 shrink-0" />
+			<span>Media inaccessible</span>
+			{name && <span className="truncate text-xs opacity-70">— {name}</span>}
+		</span>
+	);
+}
+
+function MediaLoading({ name }: { name: string }) {
+	return <p className="my-2 text-xs text-muted-foreground">Loading {name}…</p>;
+}
+
+// Inline image with click-to-open; "Media inaccessible" if the source can't load.
 export function MediaImage({ image, filename }: ImagePart) {
-	const [failed, setFailed] = useState(false);
 	const name = filename ? baseName(filename) : "image";
-	if (failed) return null;
+	const { state, src } = useMediaSrc(image);
+	if (state === "error") return <MediaInaccessible name={name} />;
+	if (state === "loading") return <MediaLoading name={name} />;
 	return (
 		<figure className="my-2">
 			<a href={image} target="_blank" rel="noreferrer" title={name}>
 				<img
-					src={image}
+					src={src}
 					alt={name}
-					onError={() => setFailed(true)}
 					className="max-h-96 max-w-full rounded-lg border border-border object-contain"
 				/>
 			</a>
@@ -56,7 +120,42 @@ export function MediaImage({ image, filename }: ImagePart) {
 	);
 }
 
-// Open + Download chip for files we don't render inline (or that failed to load).
+function PdfView({ data, name }: { data: string; name: string }) {
+	const { state, src } = useMediaSrc(data);
+	if (state === "error") return <MediaInaccessible name={name} />;
+	if (state === "loading") return <MediaLoading name={name} />;
+	return (
+		<figure className="my-2">
+			<iframe
+				src={src}
+				title={name}
+				className="h-96 w-full rounded-lg border border-border"
+			/>
+			<figcaption className="mt-1 text-[11px] text-muted-foreground">
+				{name}
+			</figcaption>
+		</figure>
+	);
+}
+
+function AudioView({ data, name }: { data: string; name: string }) {
+	const { state, src } = useMediaSrc(data);
+	if (state === "error") return <MediaInaccessible name={name} />;
+	if (state === "loading") return <MediaLoading name={name} />;
+	return <audio src={src} controls className="my-2 w-full max-w-md" />;
+}
+
+function VideoView({ data, name }: { data: string; name: string }) {
+	const { state, src } = useMediaSrc(data);
+	if (state === "error") return <MediaInaccessible name={name} />;
+	if (state === "loading") return <MediaLoading name={name} />;
+	return (
+		<video src={src} controls className="my-2 max-h-96 max-w-full rounded-lg" />
+	);
+}
+
+// Open + Download chip for files we don't render inline (always-available data
+// URLs, or formats with no inline preview).
 function FileChip({ data, name }: { data: string; name: string }) {
 	return (
 		<span className="my-2 inline-flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
@@ -82,7 +181,7 @@ function FileChip({ data, name }: { data: string; name: string }) {
 }
 
 // Office docs: fetch the server-converted PDF as a blob and preview it in an
-// iframe. Falls back to a download chip if conversion/serving fails.
+// iframe. Shows "Media inaccessible" if the doc can't be fetched/converted.
 function OfficeView({ data, name }: { data: string; name: string }) {
 	const [src, setSrc] = useState<string | null>(null);
 	const [failed, setFailed] = useState(false);
@@ -103,11 +202,8 @@ function OfficeView({ data, name }: { data: string; name: string }) {
 		};
 	}, [data]);
 
-	if (failed) return <FileChip data={data} name={name} />;
-	if (!src)
-		return (
-			<p className="my-2 text-xs text-muted-foreground">Converting {name}…</p>
-		);
+	if (failed) return <MediaInaccessible name={name} />;
+	if (!src) return <MediaLoading name={name} />;
 	return (
 		<figure className="my-2">
 			<iframe
@@ -126,7 +222,7 @@ function OfficeView({ data, name }: { data: string; name: string }) {
 }
 
 // Markdown / code / text files: fetch the content and render (markdown formatted,
-// everything else as a monospace block). Renders nothing if the fetch fails.
+// everything else as a monospace block). "Media inaccessible" if the fetch fails.
 function TextFileView({
 	data,
 	name,
@@ -149,11 +245,8 @@ function TextFileView({
 		};
 	}, [data]);
 
-	if (failed) return null;
-	if (text == null)
-		return (
-			<p className="my-2 text-xs text-muted-foreground">Loading {name}…</p>
-		);
+	if (failed) return <MediaInaccessible name={name} />;
+	if (text == null) return <MediaLoading name={name} />;
 	return (
 		<figure className="my-2 overflow-hidden rounded-lg border border-border">
 			<figcaption className="border-b border-border bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
@@ -182,18 +275,7 @@ export function MediaFile({ data, mimeType, filename }: FilePart) {
 		return <MediaImage image={data} filename={filename} />;
 
 	if (mime === "application/pdf" || isPdfFile(name))
-		return (
-			<figure className="my-2">
-				<iframe
-					src={data}
-					title={name}
-					className="h-96 w-full rounded-lg border border-border"
-				/>
-				<figcaption className="mt-1 text-[11px] text-muted-foreground">
-					{name}
-				</figcaption>
-			</figure>
-		);
+		return <PdfView data={data} name={name} />;
 
 	if (isOfficeFile(name)) {
 		// Office → PDF conversion is server-side; a base64 data URL can't be
@@ -206,22 +288,10 @@ export function MediaFile({ data, mimeType, filename }: FilePart) {
 	}
 
 	if (mime.startsWith("audio/") || isAudioFile(name))
-		return (
-			<audio src={data} controls className="my-2 w-full max-w-md">
-				{name}
-			</audio>
-		);
+		return <AudioView data={data} name={name} />;
 
 	if (mime.startsWith("video/") || isVideoFile(name))
-		return (
-			<video
-				src={data}
-				controls
-				className="my-2 max-h-96 max-w-full rounded-lg"
-			>
-				{name}
-			</video>
-		);
+		return <VideoView data={data} name={name} />;
 
 	if (isMarkdownFile(name))
 		return <TextFileView data={data} name={name} markdown />;
