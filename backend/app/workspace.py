@@ -146,7 +146,8 @@ def download(settings, user_id: str, workspace_id: str, rel: str) -> tuple[bytes
                 if total > MAX_DOWNLOAD_BYTES:
                     return None
                 zf.write(fp, os.path.relpath(fp, arc_base))
-    label = os.path.basename(full) or _seg(workspace_id) or "workspace"
+    # Match the sandbox naming: <last path segment>.zip, or workspace.zip for root.
+    label = os.path.basename(rel) or "workspace"
     return buf.getvalue(), "application/zip", f"{label}.zip"
 
 
