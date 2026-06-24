@@ -128,7 +128,9 @@ def _safe_roots(settings, user_id: str) -> list[str]:
     in prod they'd let a crafted ``MEDIA:`` marker surface arbitrary host/home
     files to the chat client, so they're excluded there.
     """
-    ws = os.path.join(settings.user_data_root, str(user_id or DEFAULT_USER_ID), "workspace")
+    # Use the SAME root as the workspace dock/agent (WORKSPACE_ROOT, falling back to
+    # user_data_root) so host-mode MEDIA: markers resolve where files actually live.
+    ws = os.path.join(settings.workspace_root_dir, str(user_id or DEFAULT_USER_ID), "workspace")
     cands = [ws]
     if not settings.is_prod:
         cands += [os.path.expanduser("~"), "/mnt/c/Users"]
