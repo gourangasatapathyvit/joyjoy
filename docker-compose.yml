@@ -55,6 +55,17 @@ services:
       WORKSPACE_ROOT: /data
       BACKEND_HOST: 0.0.0.0
       BACKEND_PORT: "8080"
+      # ---- Agent sandbox (code/shell execution) — OFF by default ----
+      # false → host workspace mode (agent files on the /data volume above).
+      # true  → per-session OpenSandbox containers via the `opensandbox` service.
+      # To turn ON: set SANDBOX_ENABLED=true AND COMPOSE_PROFILES=sandbox in .env
+      # (the profile starts the server + builds the sandbox image). The backend talks
+      # to the server by its compose service name; nothing else changes.
+      SANDBOX_ENABLED: ${SANDBOX_ENABLED:-false}
+      SANDBOX_SERVER_DOMAIN: ${SANDBOX_SERVER_DOMAIN:-opensandbox:8090}
+      SANDBOX_SERVER_PROTOCOL: ${SANDBOX_SERVER_PROTOCOL:-http}
+      OPENSANDBOX_API_KEY: ${OPENSANDBOX_API_KEY:-}
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-joyjoy/sandbox-fat:4}
     ports:
       - "${PORT:-8080}:8080"
     volumes:
@@ -80,6 +91,51 @@ services:
   #   command: ["--transport", "streamable-http", "--port", "9000", "--host", "0.0.0.0", "--stateless"]
   #   env_file: [mcp-atlassian.env]   # JIRA_URL / JIRA_USERNAME / JIRA_API_TOKEN, etc.
 
+  # ──────────────────────────────────────────────────────────────────────────
+  # Sandbox execution layer — OPT-IN. Enable with:  COMPOSE_PROFILES=sandbox
+  # (and SANDBOX_ENABLED=true on the backend). Without the profile, none of this
+  # runs and the app uses host workspace mode. NOTE: this is a starting scaffold —
+  # the OpenSandbox-in-a-container networking below needs validating for your host
+  # (the proven dev path runs the server on the host via scripts/start_all.sh).
+  # ──────────────────────────────────────────────────────────────────────────
+
+  # Build-only: bakes joyjoy/sandbox-fat into the HOST Docker daemon so the server
+  # can spawn per-session sandboxes from it. Runs once and exits (not a service).
+  sandbox-image:
+    profiles: ["sandbox"]
+    build:
+      context: ./sandbox-image
+    image: ${SANDBOX_IMAGE:-joyjoy/sandbox-fat:4}
+    command: ["true"]
+    restart: "no"
+
+  # The OpenSandbox server: spawns the per-session sandbox CONTAINERS as SIBLINGS on
+  # the host daemon (via the mounted docker.sock) and proxies the backend's file/exec
+  # calls to them. SECURITY: mounting docker.sock = host-level container control; this
+  # is the privileged agent-execution tier — isolate/network-restrict it.
+  # REQUIRED for cross-container reach: set `[server] host = "0.0.0.0"` in sandbox.toml
+  # (the committed file uses 127.0.0.1, which only works when server+backend share a
+  # host as in dev) so the backend container can reach opensandbox:8090 and its proxy
+  # ports. Also set OPENSANDBOX_API_KEY in .env to match the toml's api_key.
+  opensandbox:
+    profiles: ["sandbox"]
+    image: python:3.13-slim
+    restart: unless-stopped
+    depends_on:
+      sandbox-image:
+        condition: service_completed_successfully
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./sandbox.toml:/app/sandbox.toml:ro
+      - opensandbox-state:/root/.opensandbox
+    environment:
+      # Non-interactive ack if you run with an empty api_key (prefer a real key instead).
+      OPENSANDBOX_INSECURE_SERVER: ${OPENSANDBOX_INSECURE_SERVER:-}
+    command: >
+      sh -c "pip install --no-cache-dir uv
+             && uvx --from opensandbox-server opensandbox-server --config /app/sandbox.toml"
+
 volumes:
   pgdata:
   workspaces:
+  opensandbox-state:
