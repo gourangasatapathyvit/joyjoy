@@ -114,7 +114,22 @@ interface ActiveRun {
 	assistantId: string;
 	runId: string | null;
 	es: EventSource | null;
+	// Set when the run is stopped/superseded. Guards the POST→SSE window: if Stop
+	// (or a new turn) happens before run_id arrives, we must NOT open the stream and
+	// must cancel the backend run once its id is known — otherwise the old answer
+	// streams to completion and lands alongside the edited one.
+	cancelled: boolean;
 	finish: () => void;
+}
+
+// Tear down a run handle: stop its stream and cancel the backend run (now or as
+// soon as its id is known). Idempotent.
+function teardownRun(h: ActiveRun | null): void {
+	if (!h) return;
+	h.cancelled = true;
+	h.es?.close();
+	if (h.runId) cancelRun(h.runId).catch(() => {});
+	h.finish();
 }
 
 // ── HITL approval context ──────────────────────────────────────────────────
@@ -250,6 +265,9 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 	// contract — onNew/onReload await it; isRunning is managed manually around it).
 	const runTurn = useCallback(
 		(assistantId: string, text: string): Promise<void> => {
+			// Supersede any still-active run (e.g. editing/reloading while one is in
+			// flight, or a Stop that raced the POST) so its answer can't also arrive.
+			teardownRun(activeRunRef.current);
 			setIsRunning(true);
 			const {
 				model,
@@ -390,6 +408,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 					assistantId,
 					runId: null,
 					es: null,
+					cancelled: false,
 					finish,
 				};
 				activeRunRef.current = handle;
@@ -404,6 +423,13 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 				})
 					.then(({ run_id }) => {
 						handle.runId = run_id;
+						// Stopped/superseded during the POST window — cancel the backend run
+						// and never open the stream, so its output can't arrive.
+						if (handle.cancelled) {
+							cancelRun(run_id).catch(() => {});
+							finish();
+							return;
+						}
 						const es = new EventSource(runEventsUrl(run_id));
 						handle.es = es;
 						es.onmessage = (e) => {
@@ -585,11 +611,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 
 	// Stop the in-flight run (wires the composer's "Stop generating" button).
 	const onCancel = useCallback(async () => {
-		const h = activeRunRef.current;
-		if (!h) return;
-		h.es?.close();
-		if (h.runId) cancelRun(h.runId).catch(() => {});
-		h.finish();
+		teardownRun(activeRunRef.current);
 	}, []);
 
 	// Load a saved conversation when the active thread changes (sidebar select or
@@ -597,8 +619,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 	// loadSeqRef guards against an older fetch resolving after a newer switch.
 	const loadThread = useCallback(async (tid: string) => {
 		const seq = ++loadSeqRef.current;
-		activeRunRef.current?.es?.close();
-		activeRunRef.current?.finish();
+		teardownRun(activeRunRef.current); // switching threads cancels the in-flight run
 		setPending({});
 		toolByNameRef.current = {};
 		try {
