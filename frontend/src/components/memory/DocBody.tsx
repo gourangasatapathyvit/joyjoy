@@ -44,7 +44,7 @@ export function DocBody({
 			</div>
 		);
 	return (
-		<pre className="min-h-0 flex-1 overflow-auto rounded-md bg-muted/40 p-3 font-mono text-xs text-foreground">
+		<pre className="min-h-0 w-full min-w-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/40 p-3 font-mono text-xs text-foreground">
 			{draft}
 		</pre>
 	);
