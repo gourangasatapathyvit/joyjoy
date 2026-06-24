@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { http } from "@/api/client";
-import type { WorkspaceFileContent, WorkspaceNode } from "@/api/types";
-
-type Ok = { ok: boolean; error?: string; path?: string };
+import type {
+	OkPath as Ok,
+	WorkspaceFileContent,
+	WorkspaceNode,
+} from "@/api/types";
 
 // Every call is scoped to a chat's workspace via thread_id; the backend maps it
 // to the session's workspace_id (forks share one). The dock passes the active

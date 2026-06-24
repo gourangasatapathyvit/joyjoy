@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useMemory, useWriteMemory } from "@/api/queries";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AGENTS_MANIFEST } from "@/lib/constants";
 import { DocBody } from "./DocBody";
 
 // AGENTS.md — always-loaded core memory. View (markdown) / Edit (textarea).
@@ -25,7 +26,7 @@ export function AgentsEditor() {
 			<div className="flex items-center justify-between gap-3 border-b border-border px-6 py-3">
 				<div className="flex min-w-0 items-center gap-2">
 					<h1 className="font-heading text-lg font-semibold text-foreground">
-						AGENTS.md
+						{AGENTS_MANIFEST}
 					</h1>
 					<Badge variant="secondary" className="shrink-0 text-[10px]">
 						{t("memory.alwaysLoaded")}
@@ -70,7 +71,7 @@ export function AgentsEditor() {
 				<p className="text-xs text-muted-foreground">{t("memory.notesHint")}</p>
 				<DocBody
 					editing={editing}
-					name="AGENTS.md"
+					name={AGENTS_MANIFEST}
 					draft={draft}
 					onChange={(v) => {
 						setDraft(v);

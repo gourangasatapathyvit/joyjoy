@@ -79,7 +79,8 @@ export const tr: Resources = {
 		noSkills: "Kullanılabilir yetenek yok",
 		noTools: "Kullanılabilir araç yok",
 		autoApprove: "Otomatik onayla",
-		autoApproveHint: "Araçları sormadan otomatik çalıştır — yalnızca bu sohbette",
+		autoApproveHint:
+			"Araçları sormadan otomatik çalıştır — yalnızca bu sohbette",
 	},
 	tools: {
 		used: "Araç kullanıldı",

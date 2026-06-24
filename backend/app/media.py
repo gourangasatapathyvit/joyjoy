@@ -24,7 +24,7 @@ import shutil
 import subprocess
 import tempfile
 
-from .constants import DEFAULT_USER_ID, MAX_MEDIA_B64_BYTES, MAX_MEDIA_BYTES
+from .constants import DEFAULT_USER_ID, MAX_MEDIA_B64_BYTES, MAX_MEDIA_BYTES, OFFICE_TO_PDF_TIMEOUT_S
 
 logger = logging.getLogger("joyjoy.media")
 
@@ -85,7 +85,7 @@ def _convert_office_to_pdf(src: str) -> str | None:
                 f"-env:UserInstallation=file://{profile}",
                 "--convert-to", "pdf", "--outdir", _PDF_CACHE, src,
             ],
-            capture_output=True, timeout=90, check=False,
+            capture_output=True, timeout=OFFICE_TO_PDF_TIMEOUT_S, check=False,
         )
     except Exception:  # noqa: BLE001 - treat any failure as "no preview"
         logger.warning("office→pdf conversion failed for %s", src, exc_info=True)

@@ -1,8 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { http } from "@/api/client";
-import type { Session, SessionMessageWire } from "@/api/types";
-
-type Ok = { ok: boolean; error?: string };
+import type { Ok, Session, SessionMessageWire } from "@/api/types";
 
 export const sessionApi = {
 	list: () => http<{ sessions: Session[] }>("/v1/sessions"),

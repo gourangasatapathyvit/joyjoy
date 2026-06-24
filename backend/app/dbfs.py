@@ -37,7 +37,7 @@ from langgraph.config import get_store
 from sqlalchemy import select
 
 from .agent_common import invalidate_user_cache
-from .constants import DEFAULT_USER_ID
+from .constants import DEFAULT_USER_ID, FILE_READ_DEFAULT_LIMIT
 from .db import db_session, get_or_create_user_config
 from .db.models import GlobalSkill, SkillFile, UserConfig, UserSkill
 
@@ -92,7 +92,7 @@ class MemoryBackend(BackendProtocol):
                 entries.append(FileInfo(path=f"/{fn}", is_dir=False, size=len(content), modified_at=""))
             return LsResult(entries=entries)
 
-    async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
+    async def aread(self, file_path: str, offset: int = 0, limit: int = FILE_READ_DEFAULT_LIMIT) -> ReadResult:
         col = self._col(file_path)
         if not col:
             return ReadResult(error=f"File '{file_path}' not found")
@@ -241,7 +241,7 @@ class DbSkillsBackend(BackendProtocol):
             f = await self._file_row(s, sk.id, filename)
             return _file_bytes(f) if f else None
 
-    async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
+    async def aread(self, file_path: str, offset: int = 0, limit: int = FILE_READ_DEFAULT_LIMIT) -> ReadResult:
         parts = self._parts(file_path)
         if len(parts) < 2:
             return ReadResult(error=f"File '{file_path}' not found")
@@ -314,7 +314,7 @@ class MemoriesBackend(BackendProtocol):
         ]
         return LsResult(entries=kept)
 
-    async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
+    async def aread(self, file_path: str, offset: int = 0, limit: int = FILE_READ_DEFAULT_LIMIT) -> ReadResult:
         if not await self._is_enabled(get_store(), file_path):
             return ReadResult(error=f"File '{file_path}' not found")
         return await self._inner.aread(file_path, offset, limit)

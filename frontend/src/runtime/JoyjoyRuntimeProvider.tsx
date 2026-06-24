@@ -32,6 +32,7 @@ import {
 	workspaceRawUrl,
 } from "@/lib/media";
 import { baseName } from "@/lib/text";
+import { prefixedId } from "@/lib/utils";
 import { useChatStore } from "@/store/chat";
 
 type JsonValue =
@@ -137,7 +138,7 @@ const ApprovalsContext = createContext<ApprovalsContextValue>({
 export const useApprovals = (): ApprovalsContextValue =>
 	useContext(ApprovalsContext);
 
-const newId = (prefix: string): string => `${prefix}-${crypto.randomUUID()}`;
+const newId = prefixedId; // namespaced id generator (shared — see lib/utils)
 const textOf = (m: UIMessage): string =>
 	m.parts
 		.map((p) => (p.type === "text" ? p.text : ""))

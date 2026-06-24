@@ -1,6 +1,7 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 import { persistPref } from "@/api/prefs";
+import { STORAGE_KEYS } from "@/lib/constants";
 import { DEFAULT_LANGUAGE, LANGUAGE_CODES } from "./languages";
 import { af } from "./locales/af";
 import { de } from "./locales/de";
@@ -19,7 +20,7 @@ import { uk } from "./locales/uk";
 import { zh } from "./locales/zh";
 import { zhHant } from "./locales/zh-hant";
 
-const STORAGE_KEY = "joyjoy-locale";
+const STORAGE_KEY = STORAGE_KEYS.locale;
 
 // Per-locale resources. en is the source; every other file mirrors its shape and
 // any gaps fall back to English (fallbackLng).

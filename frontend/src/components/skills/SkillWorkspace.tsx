@@ -8,6 +8,8 @@ import type { Skill } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { SKILL_MANIFEST } from "@/lib/constants";
+import { isMarkdownFile } from "@/lib/media";
 import { buildTree, FileTreeNodes } from "./fileTree";
 import { ImportZipButton } from "./ImportZipButton";
 
@@ -25,8 +27,8 @@ export function SkillWorkspace({
 	const { remove, saveFile, deleteFile } = useSkillMutations();
 	const editable = skill.editable;
 	const { data: meta } = useSkillContent(skill.name); // SKILL.md + linked_files
-	const [sel, setSel] = useState("SKILL.md");
-	const isMd = sel === "SKILL.md";
+	const [sel, setSel] = useState(SKILL_MANIFEST);
+	const isMd = sel === SKILL_MANIFEST;
 	const { data: fileData, isLoading } = useSkillContent(
 		skill.name,
 		isMd ? null : sel,
@@ -50,7 +52,10 @@ export function SkillWorkspace({
 		setErr(null);
 	}, [current?.content]);
 
-	const files = ["SKILL.md", ...Object.keys(meta?.linked_files ?? {}).sort()];
+	const files = [
+		SKILL_MANIFEST,
+		...Object.keys(meta?.linked_files ?? {}).sort(),
+	];
 	const tree = buildTree(files);
 
 	const onSaveFile = () => {
@@ -84,7 +89,7 @@ export function SkillWorkspace({
 	};
 
 	const onDeleteFile = (p: string) => {
-		if (p === "SKILL.md") return;
+		if (p === SKILL_MANIFEST) return;
 		if (
 			!window.confirm(
 				t("skills.deleteFileConfirm", { defaultValue: "Delete this file?" }),
@@ -93,11 +98,11 @@ export function SkillWorkspace({
 			return;
 		deleteFile.mutate(
 			{ skill: skill.name, path: p },
-			{ onSuccess: () => sel === p && setSel("SKILL.md") },
+			{ onSuccess: () => sel === p && setSel(SKILL_MANIFEST) },
 		);
 	};
 
-	const isMarkdown = sel.toLowerCase().endsWith(".md");
+	const isMarkdown = isMarkdownFile(sel);
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
@@ -120,7 +125,7 @@ export function SkillWorkspace({
 						<ImportZipButton
 							defaultName={skill.name}
 							label={t("skills.reimport", "Re-import .zip")}
-							onImported={() => setSel("SKILL.md")}
+							onImported={() => setSel(SKILL_MANIFEST)}
 						/>
 						<Button
 							size="sm"

@@ -3,8 +3,9 @@ import { persistPref } from "@/api/prefs";
 import { sessionApi } from "@/api/sessions";
 import type { ReasoningEffort } from "@/api/types";
 import { STORAGE_KEYS, WORKSPACE_DOCK } from "@/lib/constants";
+import { prefixedId } from "@/lib/utils";
 
-const newThreadId = () => `t-${crypto.randomUUID()}`;
+const newThreadId = () => prefixedId("t");
 
 // Persisted UI state (webui parity): the workspace dock's open/closed flag and
 // the ACTIVE thread/session — so the last conversation (and therefore its

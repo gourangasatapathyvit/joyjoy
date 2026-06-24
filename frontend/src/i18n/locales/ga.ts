@@ -80,7 +80,8 @@ export const ga: Resources = {
 		noSkills: "Níl aon scil ar fáil",
 		noTools: "Níl aon uirlis ar fáil",
 		autoApprove: "Uathcheadú",
-		autoApproveHint: "Rith uirlisí go huathoibríoch gan fiafraí — sa chomhrá seo amháin",
+		autoApproveHint:
+			"Rith uirlisí go huathoibríoch gan fiafraí — sa chomhrá seo amháin",
 	},
 	tools: {
 		used: "Uirlis úsáidte",

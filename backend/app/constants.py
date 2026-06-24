@@ -20,12 +20,26 @@ MB = 1024 * 1024
 # Compiled-agent LRU cache bound (agent_common.cache_put evicts past this).
 AGENT_CACHE_MAX = 128
 
+# ---- timeouts (seconds) ----
 # Seconds to wait when probing one MCP server's tool list — one slow/dead server
 # must not hang the agent build or the MCP tab (mcp_runtime).
 MCP_PROBE_TIMEOUT_S = 10
+MODEL_PROBE_TIMEOUT_S = 45  # standard completion health probe (agent.test_model)
+REASONING_PROBE_TIMEOUT_S = 60  # reasoning/thinking capability probe (agent.test_model)
+OFFICE_TO_PDF_TIMEOUT_S = 90  # headless LibreOffice office→pdf conversion (media)
+SMTP_TIMEOUT_S = 20  # SMTP connect/send for the password-reset OTP email (users)
 
+# ---- list / read bounds ----
 # Max dynamic /memories/ files returned in one list call (memory_store).
 MEMORIES_LIST_LIMIT = 1000
+SESSIONS_LIST_LIMIT = 200  # max sessions returned by list_sessions (sessions)
+FILE_READ_DEFAULT_LIMIT = 2000  # default max lines per file read (dbfs / sandbox backends)
+
+# ---- model token budgets (agent.build_model_for) ----
+DEFAULT_MAX_TOKENS = 4096  # fallback completion budget when a model spec sets none
+REASONING_BUDGET_OVERHEAD = 1024  # headroom added above a model's thinking budget
+# Per-effort thinking-token budgets (anthropic extended thinking).
+REASONING_BUDGETS = {"minimal": 1024, "low": 2048, "medium": 4096, "high": 8192, "extra_high": 16384}
 
 # Password-reset OTP attempts allowed before the code is invalidated (users).
 OTP_MAX_ATTEMPTS = 5

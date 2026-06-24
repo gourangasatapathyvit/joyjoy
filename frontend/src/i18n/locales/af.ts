@@ -79,7 +79,8 @@ export const af: Resources = {
 		noSkills: "Geen vaardighede beskikbaar nie",
 		noTools: "Geen gereedskap beskikbaar nie",
 		autoApprove: "Outo-keur",
-		autoApproveHint: "Laat gereedskap outomaties loop sonder om te vra — net hierdie geselsie",
+		autoApproveHint:
+			"Laat gereedskap outomaties loop sonder om te vra — net hierdie geselsie",
 	},
 	tools: {
 		used: "Gereedskap gebruik",

@@ -10,6 +10,7 @@ import remarkGfm from "remark-gfm";
 import {
 	asPdf,
 	isAudioFile,
+	isDataUrl,
 	isImageFile,
 	isMarkdownFile,
 	isOfficeFile,
@@ -47,12 +48,12 @@ type MediaState = "loading" | "ok" | "error";
 // element (one fetch, no second network hit, no console 404 on failure). `data:`
 // URLs are inline and always available, so they pass straight through.
 function useMediaSrc(url: string): { state: MediaState; src: string } {
-	const isData = url.startsWith("data:");
+	const isData = isDataUrl(url);
 	const [state, setState] = useState<MediaState>(isData ? "ok" : "loading");
 	const [src, setSrc] = useState<string>(isData ? url : "");
 
 	useEffect(() => {
-		if (url.startsWith("data:")) {
+		if (isDataUrl(url)) {
 			setState("ok");
 			setSrc(url);
 			return;
@@ -269,7 +270,7 @@ function TextFileView({
 export function MediaFile({ data, mimeType, filename }: FilePart) {
 	const name = filename ? baseName(filename) : "file";
 	const mime = mimeType ?? "";
-	const isDataUrl = data.startsWith("data:");
+	const inlineData = isDataUrl(data);
 
 	if (mime.startsWith("image/") || isImageFile(name))
 		return <MediaImage image={data} filename={filename} />;
@@ -280,7 +281,7 @@ export function MediaFile({ data, mimeType, filename }: FilePart) {
 	if (isOfficeFile(name)) {
 		// Office → PDF conversion is server-side; a base64 data URL can't be
 		// converted on the client, so offer it as a download instead.
-		return isDataUrl ? (
+		return inlineData ? (
 			<FileChip data={data} name={name} />
 		) : (
 			<OfficeView data={data} name={name} />

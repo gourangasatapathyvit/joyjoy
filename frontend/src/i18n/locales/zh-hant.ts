@@ -131,7 +131,8 @@ export const zhHant: Resources = {
 		importFailed: "匯入失敗。",
 		readError: "無法讀取該檔案（應為 JSON 對話）。",
 		autoApproveDefault: "在新聊天中自動核准工具",
-		autoApproveDefaultHint: "新對話會以關閉工具核准的狀態開始。您仍可依各聊天個別切換。",
+		autoApproveDefaultHint:
+			"新對話會以關閉工具核准的狀態開始。您仍可依各聊天個別切換。",
 	},
 	profile: {
 		subtitle: "您的帳戶詳細資料與工作階段。",

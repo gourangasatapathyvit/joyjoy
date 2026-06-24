@@ -7,11 +7,10 @@ import type {
 	MemoryFile,
 	ModelsConfigResponse,
 	ModelTestResult,
+	Ok,
 	Skill,
 	SkillContent,
 } from "@/api/types";
-
-type Ok = { ok: boolean; error?: string };
 
 // Typed wrappers over the backend /v1 data endpoints. All are per-user (the dev
 // proxy injects X-User-Id); writes to global names are rejected server-side.

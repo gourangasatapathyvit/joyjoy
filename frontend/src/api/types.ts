@@ -5,6 +5,16 @@
 
 export type Role = "user" | "assistant" | "system" | "tool";
 
+// Standard mutation result shape returned by the backend's write endpoints.
+export interface Ok {
+	ok: boolean;
+	error?: string;
+}
+// Variant that also echoes the affected path (workspace writes/renames).
+export interface OkPath extends Ok {
+	path?: string;
+}
+
 // A media artifact surfaced by the agent (base64 read_file blocks → data URL).
 // Path-based media (MEDIA: markers, written workspace files) is resolved to URLs
 // on the client instead — see lib/media.ts.

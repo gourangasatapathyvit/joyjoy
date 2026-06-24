@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight, FileText, Folder, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { SKILL_MANIFEST } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 // A nested folder tree built from flat relative paths (e.g. "scripts/run.py").
@@ -40,7 +41,7 @@ export function buildTree(paths: string[]): TreeNode[] {
 	};
 	sort(roots);
 	roots.sort((a, b) =>
-		a.name === "SKILL.md" ? -1 : b.name === "SKILL.md" ? 1 : 0,
+		a.name === SKILL_MANIFEST ? -1 : b.name === SKILL_MANIFEST ? 1 : 0,
 	); // SKILL.md first
 	return roots;
 }
@@ -125,13 +126,13 @@ export function FileTreeNodes({
 								className={cn(
 									"truncate font-mono text-[12px]",
 									active ? "text-primary" : "text-foreground",
-									n.path === "SKILL.md" && "font-semibold",
+									n.path === SKILL_MANIFEST && "font-semibold",
 								)}
 							>
 								{n.name}
 							</span>
 						</button>
-						{editable && n.path !== "SKILL.md" && (
+						{editable && n.path !== SKILL_MANIFEST && (
 							<button
 								type="button"
 								onClick={() => onDelete(n.path)}

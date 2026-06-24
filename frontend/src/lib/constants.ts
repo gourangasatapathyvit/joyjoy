@@ -16,7 +16,12 @@ export const STORAGE_KEYS = {
 	skin: "joyjoy-skin",
 	activity: "joyjoy-activity",
 	autoFollow: "joyjoy-autofollow",
+	locale: "joyjoy-locale",
 } as const;
+
+// Manifest filenames the agent + UI special-case (skills bundle / long-term memory).
+export const SKILL_MANIFEST = "SKILL.md";
+export const AGENTS_MANIFEST = "AGENTS.md";
 
 // Resizable workspace dock bounds (px). The handle clamps drags to this range.
 export const WORKSPACE_DOCK = {

@@ -8,21 +8,33 @@ its own module so those modules can import it WITHOUT a circular dependency on
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 
 from .constants import AGENT_CACHE_MAX, DEFAULT_USER_ID
 
 logger = logging.getLogger("joyjoy.agent")
 
-# (kind, user_id, model_id, reasoning) -> compiled deep agent. Bounded so a
-# many-user / many-model process doesn't grow the cache without limit; the
-# oldest entry is evicted past the cap (agents are cheap to rebuild on demand).
-_AGENT_CACHE: dict[tuple, object] = {}
+# (kind, user_id, model_id, reasoning) -> compiled deep agent. A bounded LRU:
+# an OrderedDict ordered most-recently-used last. ``cache_get`` promotes on hit
+# and ``cache_put`` evicts the least-recently-used (front) past the cap — so a
+# hot agent (e.g. the default model) is NOT evicted just for being created first
+# (a plain insertion-order dict would do that). Agents are cheap to rebuild.
+_AGENT_CACHE: OrderedDict[tuple, object] = OrderedDict()
+
+
+def cache_get(key: tuple) -> object | None:
+    """Fetch + mark as most-recently-used (the LRU promotion). None if absent."""
+    agent = _AGENT_CACHE.get(key)
+    if agent is not None:
+        _AGENT_CACHE.move_to_end(key)
+    return agent
 
 
 def cache_put(key: tuple, agent: object) -> None:
-    if len(_AGENT_CACHE) >= AGENT_CACHE_MAX:  # evict oldest (insertion order)
-        _AGENT_CACHE.pop(next(iter(_AGENT_CACHE)), None)
     _AGENT_CACHE[key] = agent
+    _AGENT_CACHE.move_to_end(key)  # newest = most-recently-used (last)
+    while len(_AGENT_CACHE) > AGENT_CACHE_MAX:
+        _AGENT_CACHE.popitem(last=False)  # evict the least-recently-used (front)
 
 
 def invalidate_user_cache(user_id: str) -> None:

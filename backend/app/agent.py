@@ -35,7 +35,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 
 from .agent_common import (
-    _AGENT_CACHE,
+    cache_get,
     cache_put,
     invalidate_user_cache as _invalidate_user_cache,
     valid_name as _valid_name,
@@ -43,7 +43,14 @@ from .agent_common import (
 from . import sandbox
 from . import workspace_sandbox as _wsx
 from .config import Settings
-from .constants import DEFAULT_USER_ID
+from .constants import (
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_USER_ID,
+    MODEL_PROBE_TIMEOUT_S,
+    REASONING_BUDGET_OVERHEAD,
+    REASONING_BUDGETS,
+    REASONING_PROBE_TIMEOUT_S,
+)
 from .context import AgentContext
 from .db import SECRET_FIELDS, db_session, decrypt_secrets, encrypt
 from .enums import Provider
@@ -103,8 +110,7 @@ SKILL_SOURCES = ["/skills/global/", "/skills/user/"]
 # (imported above) so the extracted CRUD modules can share them without a cycle.
 
 # --- Reasoning / extended-thinking support --------------------------------
-# Effort level -> Anthropic extended-thinking token budget. Higher = more thinking.
-_REASONING_BUDGETS = {"minimal": 1024, "low": 2048, "medium": 4096, "high": 8192, "extra_high": 16384}
+# Effort -> Anthropic extended-thinking token budget lives in constants.REASONING_BUDGETS.
 
 
 def normalize_reasoning_effort(reasoning) -> str | None:
@@ -124,7 +130,7 @@ def normalize_reasoning_effort(reasoning) -> str | None:
     # UI aliases: the composer effort chip emits "xhigh" for "Extra High".
     s = {"xhigh": "extra_high", "x_high": "extra_high", "extrahigh": "extra_high",
          "extra": "extra_high", "min": "minimal"}.get(s, s)
-    if s in _REASONING_BUDGETS:
+    if s in REASONING_BUDGETS:
         return s
     return "medium"
 
@@ -177,7 +183,7 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
             model=spec["deployment"],
             api_key=spec["api_key"],
             base_url=spec["endpoint"] or None,
-            max_tokens=spec.get("max_tokens") or 4096,
+            max_tokens=spec.get("max_tokens") or DEFAULT_MAX_TOKENS,
             streaming=True,
         )
         if effort:
@@ -188,12 +194,12 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
                 # *signature*, not the thinking *text* — the model reasons but the text is
                 # redacted (so no visible thinking rows). Standard Anthropic / DeepSeek-R1 DO
                 # return reasoning text, which runs.py forwards as reasoning.available events.
-                anthropic_kwargs["max_tokens"] = max(int(spec.get("max_tokens") or 4096), 8192)
+                anthropic_kwargs["max_tokens"] = max(int(spec.get("max_tokens") or DEFAULT_MAX_TOKENS), 8192)
                 anthropic_kwargs["thinking"] = {"type": "adaptive"}
             else:
                 # Standard Anthropic API (api.anthropic.com): explicit thinking budget.
-                budget = _REASONING_BUDGETS.get(effort, 4096)
-                anthropic_kwargs["max_tokens"] = max(int(spec.get("max_tokens") or 4096), budget + 1024)
+                budget = REASONING_BUDGETS.get(effort, DEFAULT_MAX_TOKENS)
+                anthropic_kwargs["max_tokens"] = max(int(spec.get("max_tokens") or DEFAULT_MAX_TOKENS), budget + REASONING_BUDGET_OVERHEAD)
                 anthropic_kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
         return ChatAnthropic(**anthropic_kwargs)
 
@@ -615,7 +621,7 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
     spec = (await merged_model_specs(settings, uid)).get(mid) or {}
     effort = normalize_reasoning_effort(reasoning) if model_supports_reasoning(spec) else None
     key = ("run" if run_mode else "chat", uid, mid, effort)
-    agent = _AGENT_CACHE.get(key)
+    agent = cache_get(key)
     if agent is not None:
         return agent
     mcp_tools = await load_mcp_tools(settings, uid)
@@ -813,7 +819,7 @@ async def test_model(settings: Settings, user_id: str, model_id: str) -> dict:
     heuristic = model_supports_reasoning(spec)  # pre-probe guess, re-attached after the probe
     try:
         m = await build_model_for(settings, model_id, user_id, reasoning=None)
-        r = await asyncio.wait_for(m.ainvoke([HumanMessage("Reply with the single word: pong")]), timeout=45)
+        r = await asyncio.wait_for(m.ainvoke([HumanMessage("Reply with the single word: pong")]), timeout=MODEL_PROBE_TIMEOUT_S)
         out["standard"] = {"ok": True, "sample": _content_to_text(getattr(r, "content", ""))[:60]}
     except Exception as e:  # noqa: BLE001
         out["standard"] = {"ok": False, "error": str(e)[:300]}
@@ -831,7 +837,7 @@ async def test_model(settings: Settings, user_id: str, model_id: str) -> dict:
                     if reasoning_text_from_message(ch):
                         visible = True
 
-            await asyncio.wait_for(_probe(), timeout=60)
+            await asyncio.wait_for(_probe(), timeout=REASONING_PROBE_TIMEOUT_S)
             detected = True  # accepted the reasoning params and completed (text may be hidden)
             out["reasoning"] = {"supported": True, "ok": True, "visible_text": visible}
         except Exception as e:  # noqa: BLE001

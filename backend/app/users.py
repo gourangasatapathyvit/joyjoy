@@ -15,16 +15,17 @@ import re
 import secrets
 import smtplib
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from email.message import EmailMessage
 from typing import Any
 
 import bcrypt
 from sqlalchemy import delete, select
 
-from .constants import OTP_MAX_ATTEMPTS
+from .constants import OTP_MAX_ATTEMPTS, SMTP_TIMEOUT_S
 from .db import db_session
 from .db.models import PasswordReset, User, UserConfig
+from .timeutils import as_naive_utc, utcnow
 
 logger = logging.getLogger("joyjoy.users")
 
@@ -58,6 +59,9 @@ def valid_password(p: Any) -> bool:
 
 
 # ── bcrypt (≤72 bytes is bcrypt's input limit; slice avoids a ValueError) ──
+# bcrypt is deliberately CPU-heavy (~100ms). The async wrappers run it in a
+# thread so a login/signup never blocks the event loop — always prefer those
+# from the async request paths; the sync forms are for startup/seed only.
 def hash_pw(pw: str) -> str:
     return bcrypt.hashpw(pw.encode("utf-8")[:72], bcrypt.gensalt()).decode("ascii")
 
@@ -69,16 +73,12 @@ def verify_pw(pw: str, hashed: str) -> bool:
         return False
 
 
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
+async def hash_pw_async(pw: str) -> str:
+    return await asyncio.to_thread(hash_pw, pw)
 
 
-def _as_naive_utc(dt: datetime) -> datetime:
-    """SQLite returns naive datetimes; Postgres returns aware. Coerce to naive UTC
-    so comparisons never raise on a mixed offset."""
-    if dt.tzinfo is not None:
-        return dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt
+async def verify_pw_async(pw: str, hashed: str) -> bool:
+    return await asyncio.to_thread(verify_pw, pw, hashed)
 
 
 def _user_dict(u: User) -> dict:
@@ -119,12 +119,13 @@ async def create_user(username: str, email: str, password: str) -> dict:
     if not valid_password(password):
         return {"ok": False, "error": "Password must be at least 8 characters.", "field": "password"}
     uid_name, em = _nu(username), _ne(email)
+    pw_hash = await hash_pw_async(password)  # hash off-loop, before holding a connection
     async with db_session() as s:
         if await s.scalar(select(User.id).where(User.username == uid_name)):
             return {"ok": False, "error": "That username is already taken.", "field": "username"}
         if await s.scalar(select(User.id).where(User.email == em)):
             return {"ok": False, "error": "An account with that email already exists.", "field": "email"}
-        u = User(username=uid_name, email=em, password_hash=hash_pw(password))
+        u = User(username=uid_name, email=em, password_hash=pw_hash)
         s.add(u)
         await s.flush()  # populate u.id
         s.add(UserConfig(user_id=u.id, display_name=username.strip()))
@@ -135,17 +136,20 @@ async def create_user(username: str, email: str, password: str) -> dict:
 async def verify_credentials(username: str, password: str) -> dict | None:
     async with db_session() as s:
         u = await s.scalar(select(User).where(User.username == _nu(username)))
-        if not u or not verify_pw(password, u.password_hash):
+        if not u:
             return None
-        return _user_dict(u)
+        stored, info = u.password_hash, _user_dict(u)
+    # Verify AFTER releasing the connection — bcrypt off-loop, no pool hold.
+    return info if await verify_pw_async(password, stored) else None
 
 
 async def set_password(user_id: str, new_password: str) -> bool:
+    new_hash = await hash_pw_async(new_password)  # off-loop before the connection
     async with db_session() as s:
         u = await s.get(User, str(user_id or ""))
         if not u:
             return False
-        u.password_hash = hash_pw(new_password)
+        u.password_hash = new_hash
         return True
 
 
@@ -154,9 +158,15 @@ async def change_password(user_id: str, current: str, new: str) -> dict:
         return {"ok": False, "error": "New password must be at least 8 characters."}
     async with db_session() as s:
         u = await s.get(User, str(user_id or ""))
-        if not u or not verify_pw(current, u.password_hash):
+        stored = u.password_hash if u else None
+    if not stored or not await verify_pw_async(current, stored):
+        return {"ok": False, "error": "Current password is incorrect."}
+    new_hash = await hash_pw_async(new)  # both bcrypts off-loop, outside the session
+    async with db_session() as s:
+        u = await s.get(User, str(user_id or ""))
+        if not u:
             return {"ok": False, "error": "Current password is incorrect."}
-        u.password_hash = hash_pw(new)
+        u.password_hash = new_hash
     return {"ok": True}
 
 
@@ -170,11 +180,12 @@ async def create_reset_otp(settings, email: str) -> tuple[str, str] | None:
         if not u:
             return None
         otp = f"{secrets.randbelow(1_000_000):06d}"
+        otp_hash = await hash_pw_async(otp)  # bcrypt off the event loop
         await s.execute(delete(PasswordReset).where(PasswordReset.user_id == u.id))
         s.add(
             PasswordReset(
-                user_id=u.id, otp_hash=hash_pw(otp),
-                expires_at=_now() + timedelta(minutes=settings.otp_ttl_minutes), attempts=0,
+                user_id=u.id, otp_hash=otp_hash,
+                expires_at=utcnow() + timedelta(minutes=settings.otp_ttl_minutes), attempts=0,
             )
         )
         return otp, u.id
@@ -193,13 +204,13 @@ async def verify_and_consume_otp(email: str, otp: str) -> dict:
         )
         if not pr:
             return {"ok": False, "error": "No reset code requested — request a new one."}
-        if datetime.now(timezone.utc).replace(tzinfo=None) > _as_naive_utc(pr.expires_at):
+        if as_naive_utc(utcnow()) > as_naive_utc(pr.expires_at):
             await s.execute(delete(PasswordReset).where(PasswordReset.user_id == u.id))
             return {"ok": False, "error": "Reset code expired — request a new one."}
         if pr.attempts >= OTP_MAX_ATTEMPTS:
             await s.execute(delete(PasswordReset).where(PasswordReset.user_id == u.id))
             return {"ok": False, "error": "Too many attempts — request a new code."}
-        if not verify_pw(str(otp or ""), pr.otp_hash):
+        if not await verify_pw_async(str(otp or ""), pr.otp_hash):
             pr.attempts += 1
             return {"ok": False, "error": "Incorrect code."}
         await s.execute(delete(PasswordReset).where(PasswordReset.user_id == u.id))
@@ -231,7 +242,7 @@ def _send_email_sync(settings, to_addr: str, subject: str, body: str) -> None:
     msg["To"] = to_addr
     msg["Subject"] = subject
     msg.set_content(body)
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as s:
+    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=SMTP_TIMEOUT_S) as s:
         if settings.smtp_starttls:
             s.starttls()
         if settings.smtp_user:

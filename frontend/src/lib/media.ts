@@ -145,6 +145,9 @@ export const isMediaFile = (name: string): boolean =>
 export const mimeOf = (name: string): string =>
 	MIME[extOf(name)] ?? "application/octet-stream";
 
+// True for an inline `data:` URL (already-embedded bytes — no fetch needed).
+export const isDataUrl = (url: string): boolean => url.startsWith("data:");
+
 // thread_id lets the backend resolve the marker inside the session's sandbox
 // volume when SANDBOX_ENABLED (else it's ignored and a host path is used).
 export const mediaUrl = (threadId: string, path: string): string =>

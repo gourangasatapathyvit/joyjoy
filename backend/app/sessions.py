@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -20,8 +19,10 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 
 from . import media as media_mod
+from .constants import SESSIONS_LIST_LIMIT
 from .db import db_session
 from .db.models import Session
+from .timeutils import to_epoch, utcnow
 
 logger = logging.getLogger("joyjoy.sessions")
 
@@ -35,27 +36,13 @@ def _title_from_text(text: str) -> str:
     return first[:80].strip() or "New chat"
 
 
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _epoch(dt: datetime | None) -> float:
-    """Stored datetime -> epoch seconds (frontend Session uses numbers). Naive
-    values are treated as UTC (that's how we store them)."""
-    if dt is None:
-        return 0.0
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.timestamp()
-
-
 def _to_wire(s: Session) -> dict:
     """ORM row -> the wire dict the frontend `Session` type expects."""
     return {
         "thread_id": s.thread_id,
         "title": s.title,
-        "created_at": _epoch(s.created_at),
-        "updated_at": _epoch(s.updated_at),
+        "created_at": to_epoch(s.created_at),
+        "updated_at": to_epoch(s.updated_at),
         "model": s.default_model or "",
         "reasoning": s.reasoning or "off",
         "auto_approve": bool(s.auto_approve),
@@ -84,7 +71,7 @@ async def record_session(
         async with db_session() as s:
             row = await s.get(Session, thread_id)
             if row:
-                row.updated_at = _now()
+                row.updated_at = utcnow()
                 if model:
                     row.default_model = model
                 if reasoning:
@@ -146,7 +133,7 @@ async def fork_session(user_id: str, src_thread_id: str, *, title: str | None = 
         return _to_wire(new)
 
 
-async def list_sessions(user_id: str, limit: int = 200) -> list[dict]:
+async def list_sessions(user_id: str, limit: int = SESSIONS_LIST_LIMIT) -> list[dict]:
     try:
         async with db_session() as s:
             rows = (

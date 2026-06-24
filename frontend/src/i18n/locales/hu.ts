@@ -80,7 +80,8 @@ export const hu: Resources = {
 		noSkills: "Nincs elérhető képesség",
 		noTools: "Nincs elérhető eszköz",
 		autoApprove: "Automatikus jóváhagyás",
-		autoApproveHint: "Eszközök automatikus futtatása rákérdezés nélkül — csak ebben a csevegésben",
+		autoApproveHint:
+			"Eszközök automatikus futtatása rákérdezés nélkül — csak ebben a csevegésben",
 	},
 	tools: {
 		used: "Használt eszköz",

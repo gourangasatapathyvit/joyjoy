@@ -25,7 +25,7 @@ from opensandbox.models.filesystem import WriteEntry
 
 from . import sandbox as sandbox_mgr
 from .config import Settings
-from .constants import DEFAULT_USER_ID
+from .constants import DEFAULT_USER_ID, FILE_READ_DEFAULT_LIMIT
 
 logger = logging.getLogger("joyjoy.sandbox")
 
@@ -92,7 +92,7 @@ class OpenSandboxBackend(BaseSandbox):
     def ls(self, path: str):
         return super().ls(self._w(path))
 
-    def read(self, file_path: str, offset: int = 0, limit: int = 2000):
+    def read(self, file_path: str, offset: int = 0, limit: int = FILE_READ_DEFAULT_LIMIT):
         return super().read(self._w(file_path), offset, limit)
 
     def write(self, file_path: str, content: str):
