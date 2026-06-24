@@ -4,7 +4,8 @@
 # (:8788). Identity comes from the joyjoy_uid cookie the SPA sets on sign-in;
 # the gateway key is disabled (browser is same-origin, single tier).
 set -u
-ROOT=/home/gourangasatapathy/joyjoy
+# Repo root = parent of this script's dir (portable; no hardcoded /home/<user>).
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "[serve] building frontend…"
 cd "$ROOT/frontend" || exit 1
