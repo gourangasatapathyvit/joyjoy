@@ -17,7 +17,8 @@ Filesystem layout:
 # ``{mount}`` is filled with settings.sandbox_mount_path (e.g. /workspace).
 SANDBOX_PROMPT_SUFFIX = """
 
-Execution environment: your working directory is `{mount}` (a persistent sandbox volume). Create, read, and RUN files under `{mount}` (e.g. `{mount}/script.py`) and use the execute tool to run shell/Python there. Files outside `{mount}` are NOT saved."""
+Execution environment: your working directory is `{mount}` (a persistent sandbox volume). Create, read, and RUN files under `{mount}` (e.g. `{mount}/script.py`) and use the execute tool to run shell there. Files outside `{mount}` are NOT saved.
+Preinstalled runtimes/tools (use them directly — no need to check): Python 3 (pip, uv/uvx), Node.js 20 (npm/npx), Rust (cargo), Go, Java 17 (javac), C/C++ (gcc/make); CLI: git, jq, ripgrep, curl, unzip, ffmpeg, imagemagick, libreoffice (Office→PDF), poppler-utils; plus Playwright with headless browsers. You may install more at runtime (uv/pip/npm/apt), but ONLY files under `{mount}` persist across sessions — anything installed system-wide is ephemeral, so prefer installing into `{mount}` (e.g. `uv pip install --target {mount}/.pylibs …`, or a project venv/node_modules under `{mount}`) when you need it to last."""
 
 # Description for the sandbox-only `load_skill` tool (shown to the model).
 LOAD_SKILL_TOOL_DESCRIPTION = """Materialize a skill's files into your sandbox workspace so you can RUN its scripts. Pass the skill name (from the skills list). After loading, read /workspace/.skills/<name>/SKILL.md and execute its scripts."""
