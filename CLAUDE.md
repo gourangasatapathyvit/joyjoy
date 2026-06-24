@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-joyjoy is a single-process, multi-tenant **Deep Agents** app: a FastAPI + LangGraph backend (`backend/`) that **also serves the React SPA** (`frontend/`, built to `frontend/dist`, mounted via `app.frontend()`) — one process, one origin. One `create_deep_agent()` serves all users; per-user isolation is by the authenticated identity **`User.id` (uuid)** + `thread_id`. **All application data lives in one relational DB** (dev SQLite / prod Postgres, selected by `APP_ENV`); chat messages stay in the LangGraph checkpointer; provider secrets are Fernet-encrypted at rest. Optionally, the agent's file CRUD + code execution runs inside a per-`(user, thread)` **OpenSandbox** container (gated by `SANDBOX_ENABLED`). The legacy hermes-webui has been **removed**. See `README.md`, `PLAN.md`, `docs/RUNNING.md`.
+joyjoy is a single-process, multi-tenant **Deep Agents** app: a FastAPI + LangGraph backend (`backend/`) that **also serves the React SPA** (`frontend/`, built to `frontend/dist`, mounted via `app.frontend()`) — one process, one origin. One `create_deep_agent()` serves all users; per-user isolation is by the authenticated identity **`User.id` (uuid)** + `thread_id`. **All application data lives in one relational DB** (dev SQLite / prod Postgres, selected by `APP_ENV`); chat messages stay in the LangGraph checkpointer; provider secrets are Fernet-encrypted at rest. Optionally, the agent's file CRUD + code execution runs inside a per-`(user, thread)` **OpenSandbox** container (gated by `SANDBOX_ENABLED`). The legacy hermes-webui has been **removed**. See `README.md` and `ARCHITECTURE.md`.
 
 ## Environment: this project lives in WSL
 

@@ -28,9 +28,9 @@ joyjoy/
 ├── sandbox-image/Dockerfile     # multi-language joyjoy/sandbox-fat:<N> execution image
 ├── scripts/                     # start_all.sh (full stack), serve.sh, restart_backend.sh, validate_models.py
 ├── data/                        # dev SQLite DBs + host workspaces (gitignored)
-├── docs/                        # branding kit, RUNNING.md, etc.
+├── docs/                        # branding kit, etc.
 ├── sandbox.toml docker-compose.yml .env(.example)
-└── README.md  CLAUDE.md  ARCHITECTURE.md  PLAN.md
+└── README.md  CLAUDE.md  ARCHITECTURE.md
 ```
 
 ## 2. High-Level System Diagram

@@ -14,7 +14,7 @@ Multi-tenant **Deep Agents** assistant: a **single FastAPI process** that serves
 - **Capabilities = global ∪ per-user** — skills, MCP servers, models, and memory each ship as read-only global catalogs merged with each user's own (full CRUD).
 - **Human-in-the-loop tools** — MCP tools and code `execute` are gated for approval in chat, with an opt-in per-chat auto-approve.
 
-See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the system overview, **[CLAUDE.md](./CLAUDE.md)** for the contributor/agent guide, and **[docs/RUNNING.md](./docs/RUNNING.md)** + **[PLAN.md](./PLAN.md)** for run modes and the build checklist.
+See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the system overview and **[CLAUDE.md](./CLAUDE.md)** for the contributor/agent guide.
 
 ## Layout
 
@@ -57,7 +57,7 @@ On first boot the backend creates the tables and seeds the shipped catalogs (ski
 
 ## Prod (Postgres)
 
-Set `APP_ENV=prod` + `DATABASE_URL=postgresql://…` (and `CREDENTIAL_ENCRYPTION_KEY`, `JWT_SECRET` — generate-once, keep stable). The app DB and the LangGraph checkpointer share one Postgres database via disjoint tables. Details in [docs/RUNNING.md](./docs/RUNNING.md).
+Set `APP_ENV=prod` + `DATABASE_URL=postgresql://…` (and `CREDENTIAL_ENCRYPTION_KEY`, `JWT_SECRET` — generate-once, keep stable). The app DB and the LangGraph checkpointer share one Postgres database via disjoint tables.
 
 **Containerized (Postgres + app, no sandbox):** the repo ships a `docker-compose.yml`. Set `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY`, and `AZURE_OPENAI_API_KEY` in `.env`, then:
 
