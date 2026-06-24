@@ -19,7 +19,13 @@ import json
 import logging
 import uuid
 
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    RemoveMessage,
+    ToolMessage,
+)
 from langgraph.types import Command
 
 from . import media as media_mod
@@ -30,7 +36,8 @@ logger = logging.getLogger("joyjoy.runs")
 
 
 class _Run:
-    def __init__(self, run_id: str, agent, ctx: AgentContext, text: str, auto_approve: bool = False):
+    def __init__(self, run_id: str, agent, ctx: AgentContext, text: str, auto_approve: bool = False,
+                 replace_turns: int = 0):
         self.run_id = run_id
         self.agent = agent
         self.ctx = ctx
@@ -38,6 +45,9 @@ class _Run:
         # Per-thread HITL policy captured at run start: when true, gated tools are
         # approved server-side (no approval.request emitted, no client round-trip).
         self.auto_approve = auto_approve
+        # Edit/regenerate: drop this many trailing USER turns from the thread
+        # checkpoint before appending this run's message (0 = plain append).
+        self.replace_turns = replace_turns
         self.queue: asyncio.Queue = asyncio.Queue()
         self.pending: dict[str, asyncio.Future] = {}  # approval_id -> future(decision)
         self.final_text = ""
@@ -50,6 +60,33 @@ _RUNS: dict[str, _Run] = {}
 
 def _config(ctx: AgentContext) -> dict:
     return {"configurable": {"thread_id": ctx.thread_id or "default", "user_id": ctx.user_id}}
+
+
+async def _truncate_trailing_turns(run: _Run, turns: int) -> None:
+    """Drop the last ``turns`` USER turns (each HumanMessage + everything after it)
+    from the thread checkpoint, so an edited/regenerated message replaces its turn
+    instead of accumulating. Uses the framework-supported edit path — RemoveMessage
+    tombstones via deepagents' messages reducer + LangGraph ``aupdate_state`` — not
+    a manual checkpoint rewrite; message ids are stamped by ``ensure_message_ids``."""
+    cfg = _config(run.ctx)
+    try:
+        snap = await run.agent.aget_state(cfg)
+    except Exception:
+        logger.warning("truncate: aget_state failed", exc_info=True)
+        return
+    values = getattr(snap, "values", None) or {}
+    msgs = values.get("messages") if isinstance(values, dict) else None
+    if not msgs:
+        return
+    human_idx = [i for i, m in enumerate(msgs) if isinstance(m, HumanMessage)]
+    if not human_idx:
+        return
+    # Cut at the (turns-th from end) HumanMessage; clamp to the first if asked to
+    # drop more turns than exist (editing the first message → reset the thread).
+    cut = human_idx[-turns] if turns <= len(human_idx) else human_idx[0]
+    to_remove = [m for m in msgs[cut:] if getattr(m, "id", None)]
+    if to_remove:
+        await run.agent.aupdate_state(cfg, {"messages": [RemoveMessage(id=m.id) for m in to_remove]})
 
 
 async def _emit(run: _Run, event: str, **fields) -> None:
@@ -121,6 +158,10 @@ async def _stream_segment(run: _Run, agent_input):
 
 
 async def _drive(run: _Run) -> None:
+    # Edit/regenerate: prune the superseded turn(s) from the checkpoint BEFORE the
+    # new message is appended, so history reflects only the edited turn.
+    if run.replace_turns > 0:
+        await _truncate_trailing_turns(run, run.replace_turns)
     agent_input = {"messages": [HumanMessage(run.text)]}
     try:
         while True:
@@ -163,9 +204,10 @@ async def _drive(run: _Run) -> None:
         await run.queue.put({"event": "__end__"})
 
 
-async def start_run(agent, ctx: AgentContext, text: str, *, auto_approve: bool = False) -> str:
+async def start_run(agent, ctx: AgentContext, text: str, *, auto_approve: bool = False,
+                    replace_turns: int = 0) -> str:
     run_id = "run-" + uuid.uuid4().hex
-    run = _Run(run_id, agent, ctx, text, auto_approve=auto_approve)
+    run = _Run(run_id, agent, ctx, text, auto_approve=auto_approve, replace_turns=replace_turns)
     _RUNS[run_id] = run
     run.task = asyncio.create_task(_drive(run))
     return run_id

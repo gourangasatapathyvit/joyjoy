@@ -53,10 +53,16 @@ async def create_run(request: Request):
     # default. Drives server-side gate resolution AND is persisted on the session.
     auto_approve = body.get("auto_approve")
     auto_approve = bool(auto_approve) if auto_approve is not None else await usersettings.auto_approve_default(user_id)
+    # Edit/regenerate: number of trailing user turns this message replaces in the
+    # thread history (0 = plain append). Clamped to a sane bound.
+    try:
+        replace_turns = max(0, min(int(body.get("replace_turns") or 0), 1000))
+    except (TypeError, ValueError):
+        replace_turns = 0
     ws_id = await sessions_mod.workspace_id_for(user_id, thread_id)
     ctx = AgentContext(user_id=user_id, thread_id=thread_id, workspace_id=ws_id)
     agent = await get_run_agent(settings, request.app.state.checkpointer, request.app.state.store, model, user_id, reasoning=reasoning)
-    run_id = await runs_mod.start_run(agent, ctx, text, auto_approve=auto_approve)
+    run_id = await runs_mod.start_run(agent, ctx, text, auto_approve=auto_approve, replace_turns=replace_turns)
     logger.info("run start id=%s user=%s thread=%s ws=%s model=%s reasoning=%s auto_approve=%s", run_id, user_id, thread_id, ws_id, model, reasoning, auto_approve)
     try:
         await sessions_mod.record_session(

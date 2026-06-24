@@ -264,7 +264,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 	// Returns a promise that resolves when the stream ends (per the ExternalStore
 	// contract — onNew/onReload await it; isRunning is managed manually around it).
 	const runTurn = useCallback(
-		(assistantId: string, text: string): Promise<void> => {
+		(assistantId: string, text: string, replaceTurns = 0): Promise<void> => {
 			// Supersede any still-active run (e.g. editing/reloading while one is in
 			// flight, or a Stop that raced the POST) so its answer can't also arrive.
 			teardownRun(activeRunRef.current);
@@ -420,6 +420,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 						reasoningEffort === "off" ? undefined : reasoningEffort,
 					thread_id: activeThreadId,
 					auto_approve: autoApprove,
+					replace_turns: replaceTurns,
 				})
 					.then(({ run_id }) => {
 						handle.runId = run_id;
@@ -527,8 +528,8 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 	);
 
 	// Regenerate the latest turn: drop the last assistant response and re-run the
-	// last user message. (Older-message regenerate + true checkpoint replace need
-	// backend support — deferred; this covers the common "redo the last answer".)
+	// last user message. replace_turns=1 prunes that turn from the backend
+	// checkpoint first, so the thread holds one (regenerated) turn — no duplicate.
 	const onReload = useCallback(async () => {
 		const msgs = messagesRef.current;
 		let userIdx = -1;
@@ -562,14 +563,14 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 				},
 			];
 		});
-		await runTurn(assistantId, buildSendText(text, quote));
+		await runTurn(assistantId, buildSendText(text, quote), 1);
 	}, [runTurn]);
 
-	// Edit a previous user message: replace it (and drop everything after its
-	// parent) with the new text, then re-run. Wires the edit pencil on user
-	// bubbles. Like onReload, the backend thread keeps the prior turns (true
-	// checkpoint replace needs backend support — deferred); the agent answers the
-	// edited message with the full thread context.
+	// Edit a previous user message: replace it (and everything after its parent)
+	// with the new text, then re-run. replace_turns tells the backend how many
+	// trailing user turns to prune from the checkpoint first (the edited message +
+	// any later ones), so the thread truly reflects the edited history — not just
+	// the client view. Wires the edit pencil on user bubbles.
 	const onEdit = useCallback(
 		async (message: AppendMessage) => {
 			const text = message.content
@@ -582,6 +583,14 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 			)?.quote;
 			const parentId = message.parentId;
 			const assistantId = newId("a");
+			// User turns from the edited message to the end (inclusive) = how many
+			// trailing turns the backend must drop. Editing the first message (no
+			// parent) → all turns → thread reset.
+			const before = messagesRef.current;
+			const cutIdx = parentId ? before.findIndex((m) => m.id === parentId) : -1;
+			const replaceTurns = before
+				.slice(cutIdx + 1)
+				.filter((m) => m.role === "user").length;
 			setMessages((prev) => {
 				// Keep up to and including the edited message's parent; the edited
 				// user message + a fresh assistant placeholder replace the rest.
@@ -604,7 +613,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 					},
 				];
 			});
-			await runTurn(assistantId, buildSendText(text, quote));
+			await runTurn(assistantId, buildSendText(text, quote), replaceTurns);
 		},
 		[runTurn],
 	);

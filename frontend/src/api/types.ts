@@ -79,6 +79,10 @@ export interface CreateRunRequest {
 	reasoning_effort?: string;
 	thread_id?: string;
 	auto_approve?: boolean;
+	// Edit/regenerate: number of trailing user turns this run replaces in the
+	// thread history (0 = plain append). The backend prunes them from the
+	// checkpoint before appending this message.
+	replace_turns?: number;
 }
 
 export interface CreateRunResponse {
