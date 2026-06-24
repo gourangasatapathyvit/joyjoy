@@ -10,6 +10,8 @@ import logging
 import mimetypes
 import posixpath
 
+from opensandbox.models.filesystem import DirectoryListEntry, MoveEntry, WriteEntry
+
 from . import sandbox as sbx
 from .config import Settings
 from .constants import MAX_WORKSPACE_PREVIEW_BYTES
@@ -51,8 +53,6 @@ def _is_dir(entry) -> bool:
 
 
 async def _tree_impl(settings: Settings, workspace_id: str) -> list[dict]:
-    from opensandbox.models.filesystem import DirectoryListEntry
-
     sb, _ = await sbx._acquire(settings, workspace_id)
     mount = _mount(settings)
     entries = await sb.files.list_directory(DirectoryListEntry(path=mount, depth=_TREE_DEPTH))
@@ -128,8 +128,6 @@ async def _raw_impl(settings: Settings, workspace_id: str, rel: str) -> tuple[by
 
 
 async def _write_impl(settings: Settings, workspace_id: str, rel: str, content: str) -> dict:
-    from opensandbox.models.filesystem import WriteEntry
-
     full = _abs(settings, rel)
     if not full or full == _mount(settings):
         return {"ok": False, "error": "invalid path"}
@@ -142,8 +140,6 @@ async def _write_impl(settings: Settings, workspace_id: str, rel: str, content: 
 
 
 async def _mkdir_impl(settings: Settings, workspace_id: str, rel: str) -> dict:
-    from opensandbox.models.filesystem import WriteEntry
-
     full = _abs(settings, rel)
     if not full or full == _mount(settings):
         return {"ok": False, "error": "invalid path"}
@@ -171,8 +167,6 @@ async def _delete_impl(settings: Settings, workspace_id: str, rel: str) -> dict:
 
 
 async def _rename_impl(settings: Settings, workspace_id: str, src: str, dst: str) -> dict:
-    from opensandbox.models.filesystem import MoveEntry
-
     s, d = _abs(settings, src), _abs(settings, dst)
     mount = _mount(settings)
     if not s or not d or s == mount or d == mount:
@@ -186,8 +180,6 @@ async def _rename_impl(settings: Settings, workspace_id: str, src: str, dst: str
 
 
 async def _upload_impl(settings: Settings, workspace_id: str, dir_rel: str, filename: str, data: bytes) -> dict:
-    from opensandbox.models.filesystem import WriteEntry
-
     safe_name = posixpath.basename((filename or "").strip())
     if not safe_name:
         return {"ok": False, "error": "no filename"}
@@ -236,13 +228,12 @@ async def save_upload(settings, workspace_id, dir_rel, filename, data):
 
 
 async def _materialize_impl(settings: Settings, workspace_id: str, dest_base: str, files: list[tuple[str, bytes]]) -> int:
-    from opensandbox.models.filesystem import WriteEntry
-
     sb, _ = await sbx._acquire(settings, workspace_id)
     base = dest_base.rstrip("/")
     entries = [WriteEntry(path=f"{base}/{rel.lstrip('/')}", data=data) for rel, data in files]
     await sb.files.write_files(entries)
     return len(entries)
+
 
 async def materialize(settings, workspace_id, dest_base: str, files: list[tuple[str, bytes]]) -> int:
     """Write a set of ``(relpath, bytes)`` files into the session sandbox under

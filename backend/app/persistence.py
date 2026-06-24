@@ -15,6 +15,13 @@ import logging
 from pathlib import Path
 from typing import AsyncIterator
 
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.store.postgres.aio import AsyncPostgresStore
+from langgraph.store.sqlite.aio import AsyncSqliteStore
+from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
+
 from .config import Settings
 
 logger = logging.getLogger("joyjoy.persistence")
@@ -25,11 +32,6 @@ async def open_persistence(settings: Settings) -> AsyncIterator[tuple[object, ob
     """Yield ``(checkpointer, store)`` for the active environment."""
     async with contextlib.AsyncExitStack() as stack:
         if settings.is_prod:
-            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-            from langgraph.store.postgres.aio import AsyncPostgresStore
-            from psycopg.rows import dict_row
-            from psycopg_pool import AsyncConnectionPool
-
             dsn = settings.pg_dsn
             logger.info("persistence=postgres db=%s host=%s", dsn.rsplit("/", 1)[-1].split("?")[0], settings.db_host)
             # A connection POOL (not from_conn_string's single connection) so many
@@ -45,9 +47,6 @@ async def open_persistence(settings: Settings) -> AsyncIterator[tuple[object, ob
             checkpointer = AsyncPostgresSaver(pool)
             store = AsyncPostgresStore(pool)
         else:
-            from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-            from langgraph.store.sqlite.aio import AsyncSqliteStore
-
             cp_path = Path(settings.sqlite_checkpoint_path)
             cp_path.parent.mkdir(parents=True, exist_ok=True)
             store_path = cp_path.with_name("dev_store.sqlite")

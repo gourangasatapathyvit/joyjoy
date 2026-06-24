@@ -158,7 +158,6 @@ async def delete_user_skill(user_id, name) -> dict:
         _invalidate_user_cache(user_id)
     return {"ok": deleted > 0, "name": name, "deleted": deleted}
 
-
 async def toggle_user_skill(user_id, name, enabled) -> dict:
     """Enable/disable a user skill (is_active flag; disabled skills aren't loaded)."""
     name = (name or "").strip()

@@ -15,9 +15,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 
+from . import media as media_mod
 from .db import db_session
 from .db.models import Session
 
@@ -238,7 +240,6 @@ async def owns_session(user_id: str, thread_id: str) -> bool:
 def _serialize_message(m: Any) -> dict | None:
     """Convert a stored LangChain BaseMessage (or raw dict) to a wire dict the
     frontend can rebuild: {role, content, tool_calls?, tool_call_id?, name?, media?}."""
-    from app import media as media_mod
     from app.agent import _content_to_text  # local import avoids any import cycle
 
     role_map = {"human": "user", "ai": "assistant", "tool": "tool", "system": "system"}
@@ -286,8 +287,6 @@ def _deserialize_message(d: dict):
     export shape (``tool_calls: [{id, name, args}]``) and the OpenAI / hermes shape
     (``tool_calls: [{id, call_id, function: {name, arguments}}]`` where ``arguments``
     is a JSON string)."""
-    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-
     role = (d or {}).get("role")
     content = (d or {}).get("content") or ""
     if role == "user":

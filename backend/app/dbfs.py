@@ -36,6 +36,7 @@ from deepagents.backends.utils import (
 from langgraph.config import get_store
 from sqlalchemy import select
 
+from .agent_common import invalidate_user_cache
 from .constants import DEFAULT_USER_ID
 from .db import db_session, get_or_create_user_config
 from .db.models import GlobalSkill, SkillFile, UserConfig, UserSkill
@@ -78,8 +79,6 @@ class MemoryBackend(BackendProtocol):
     def _invalidate(self) -> None:
         # memory edits feed the system prompt — drop cached agents on change.
         try:
-            from .agent_common import invalidate_user_cache
-
             invalidate_user_cache(self.user_id)
         except Exception:  # noqa: BLE001
             logger.debug("memory invalidate failed", exc_info=True)

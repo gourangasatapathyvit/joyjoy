@@ -21,6 +21,7 @@ from deepagents.backends.protocol import (
     FileDownloadResponse,
     FileUploadResponse,
 )
+from opensandbox.models.filesystem import WriteEntry
 
 from . import sandbox as sandbox_mgr
 from .config import Settings
@@ -118,8 +119,6 @@ class OpenSandboxBackend(BaseSandbox):
         )
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        from opensandbox.models.filesystem import WriteEntry
-
         sb = self._sb()
         entries = [WriteEntry(path=path, data=content) for path, content in files]
         try:

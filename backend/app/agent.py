@@ -38,6 +38,7 @@ from .agent_common import (
     valid_name as _valid_name,
 )
 from . import sandbox
+from . import workspace_sandbox as _wsx
 from .config import Settings
 from .constants import DEFAULT_USER_ID
 from .context import AgentContext
@@ -59,6 +60,7 @@ from .dbfs import (
     MemoriesBackend,
     MemoryBackend,
 )
+from .sandbox_backend import OpenSandboxBackend
 # Extracted concern modules — re-exported here so `from .agent import X` (used by
 # main.py / runs.py / sessions.py) keeps working while the code lives in focused
 # modules. load_mcp_tools is also consumed by the agent factory below.
@@ -308,10 +310,6 @@ def _make_load_skill_tool(settings: Settings, uid: str):
     into the session sandbox so the agent can run its scripts. Skills are stored in
     the DB and mounted read-only at /skills; this drops a runnable copy into the
     sandbox workspace under ``/workspace/.skills/<name>/``."""
-    from langchain_core.tools import StructuredTool
-
-    from . import workspace_sandbox as _wsx
-
     async def _load(name: str) -> str:
         seg = _session_workspace_seg() or DEFAULT_USER_ID
         tree = await read_skill_tree(settings, uid, name)
@@ -387,8 +385,6 @@ def build_backend(settings: Settings, user_id: str = DEFAULT_USER_ID):
     # sandbox when enabled (CRUD + code run inside the container, on a durable
     # per-session volume), else the host per-session FilesystemBackend.
     if sandbox.is_enabled(settings):
-        from .sandbox_backend import OpenSandboxBackend
-
         default = OpenSandboxBackend(settings, uid, seg_fn=_session_workspace_seg)
     else:
         host_root = os.path.join(settings.workspace_root_dir, uid, "workspace")

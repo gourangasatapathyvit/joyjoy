@@ -9,6 +9,7 @@ import asyncio
 import logging
 import os
 
+from langchain_mcp_adapters.client import MultiServerMCPClient
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 
@@ -130,7 +131,6 @@ async def load_mcp_tools(settings: Settings, user_id: str) -> list:
     )
     if not conns:
         return []
-    from langchain_mcp_adapters.client import MultiServerMCPClient
 
     tools: list = []
     for name, conn in conns.items():
@@ -204,8 +204,6 @@ async def describe_mcp(settings: Settings, user_id: str) -> tuple[list[dict], li
             servers_out.append(entry)
             continue
         try:
-            from langchain_mcp_adapters.client import MultiServerMCPClient
-
             tls = await asyncio.wait_for(MultiServerMCPClient(conn).get_tools(), timeout=MCP_PROBE_TIMEOUT_S)
             entry["tool_count"] = len(tls)
             entry["status"] = McpStatus.ACTIVE

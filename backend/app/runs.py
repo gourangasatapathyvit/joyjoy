@@ -1,4 +1,4 @@
-"""Runs API: tool-progress streaming + HITL approvals over the hermes gateway contract.
+"""Runs API: tool-progress streaming + HITL approvals over the gateway contract.
 
 Flow:
   POST /v1/runs                 -> {run_id}; spawns a background task driving the agent.

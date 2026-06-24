@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     gateway_api_key: str = ""
     user_id_header: str = "X-User-Id"
     thread_id_header: str = "X-Thread-Id"
-    dev_default_user: str = "dev-user"
+    dev_username: str = "dev-user"  # username for the no-auth dev fallback user (see users.ensure_dev_user)
 
     # ---- Per-user JWT (direct clients / prod) ----
     jwt_secret: str = ""

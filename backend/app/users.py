@@ -28,8 +28,9 @@ from .db.models import PasswordReset, User, UserConfig
 
 logger = logging.getLogger("joyjoy.users")
 
-# Deterministic identity for the no-auth dev fallback (seeded by ensure_dev_user).
-DEV_USERNAME = "dev-user"
+# Deterministic id for the no-auth dev fallback (seeded by ensure_dev_user). The
+# username is configurable via Settings.dev_username; the id seed stays fixed so the
+# dev identity is stable even if the username is changed.
 DEV_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, "joyjoy:dev-user").hex
 
 _USERNAME_RE = re.compile(r"^[a-zA-Z0-9._-]{3,32}$")
@@ -215,7 +216,7 @@ async def ensure_dev_user(settings) -> None:
         if not await s.get(User, DEV_USER_ID):
             s.add(
                 User(
-                    id=DEV_USER_ID, username=DEV_USERNAME, email="dev@dev.local",
+                    id=DEV_USER_ID, username=settings.dev_username, email="dev@dev.local",
                     password_hash=hash_pw(secrets.token_urlsafe(24)),
                 )
             )
