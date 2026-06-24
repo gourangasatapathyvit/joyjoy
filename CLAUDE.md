@@ -61,7 +61,7 @@ Skills, MCP servers, the model catalog, and memory share one shape:
 
 ### Sandboxed execution (OpenSandbox) — gated by `SANDBOX_ENABLED`
 
-When off, the agent uses the host `SessionFilesystemBackend` (files under `data/<uid>/workspace/<seg>`). When on, per-`(user, thread)` execution runs in an **OpenSandbox** container:
+When off, the agent uses the host `SessionFilesystemBackend` — files live under `WORKSPACE_ROOT/<uid>/workspace/<workspace_id>` (`.env` sets `WORKSPACE_ROOT=…/data/workspaces`; `config.workspace_root_dir` falls back to `user_data_root` if unset). When on, per-`(user, thread)` execution runs in an **OpenSandbox** container:
 
 - `sandbox.py` — lifecycle manager. Owns ONE dedicated background event loop (the async OpenSandbox SDK + the pool/lock must all live on it): `run_sync` (sync callers via `to_thread`) / `run_async` (main-loop callers). Pool keyed by `workspace_id`; **durability = a Docker named volume per workspace** mounted at `/workspace` (outlives the ephemeral sandbox); reaper pauses idle, `_enforce_cap` LRU-pauses beyond `max_live`.
 - `sandbox_backend.py` — `OpenSandboxBackend(deepagents BaseSandbox)`: sync `execute`/`upload`/`download` bridged via `sandbox.run_sync` over the SDK; `_w()` remaps agent paths into the `/workspace` mount (the sandbox prompt sets cwd there, so write_file args are absolute `/workspace/...`).
