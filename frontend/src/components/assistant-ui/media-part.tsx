@@ -7,6 +7,7 @@ import {
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useMediaReady } from "@/api/workspace";
 import {
 	asPdf,
 	isAudioFile,
@@ -49,6 +50,10 @@ type MediaState = "loading" | "ok" | "error";
 // URLs are inline and always available, so they pass straight through.
 function useMediaSrc(url: string): { state: MediaState; src: string } {
 	const isData = isDataUrl(url);
+	// Readiness gate: for a sandbox workspace file, wait until the workspace tree
+	// lists it before fetching — avoids the read-after-write 404 entirely. "na"
+	// (data:/external/host) and "ready" fetch; "pending" stays loading; "absent" errors.
+	const ready = useMediaReady(url);
 	const [state, setState] = useState<MediaState>(isData ? "ok" : "loading");
 	const [src, setSrc] = useState<string>(isData ? url : "");
 
@@ -56,6 +61,16 @@ function useMediaSrc(url: string): { state: MediaState; src: string } {
 		if (isDataUrl(url)) {
 			setState("ok");
 			setSrc(url);
+			return;
+		}
+		if (ready === "pending") {
+			setState("loading"); // file not in the workspace tree yet — keep waiting
+			setSrc("");
+			return;
+		}
+		if (ready === "absent") {
+			setState("error"); // tree settled without it — genuinely not there
+			setSrc("");
 			return;
 		}
 		let cancelled = false;
@@ -77,7 +92,7 @@ function useMediaSrc(url: string): { state: MediaState; src: string } {
 			cancelled = true;
 			if (obj) URL.revokeObjectURL(obj);
 		};
-	}, [url]);
+	}, [url, ready]);
 
 	return { state, src };
 }
@@ -184,9 +199,15 @@ function FileChip({ data, name }: { data: string; name: string }) {
 // Office docs: fetch the server-converted PDF as a blob and preview it in an
 // iframe. Shows "Media inaccessible" if the doc can't be fetched/converted.
 function OfficeView({ data, name }: { data: string; name: string }) {
+	const ready = useMediaReady(data);
 	const [src, setSrc] = useState<string | null>(null);
 	const [failed, setFailed] = useState(false);
 	useEffect(() => {
+		if (ready === "pending") return; // not in the tree yet — stay loading
+		if (ready === "absent") {
+			setFailed(true);
+			return;
+		}
 		let url: string | null = null;
 		let cancelled = false;
 		fetch(asPdf(data))
@@ -201,7 +222,7 @@ function OfficeView({ data, name }: { data: string; name: string }) {
 			cancelled = true;
 			if (url) URL.revokeObjectURL(url);
 		};
-	}, [data]);
+	}, [data, ready]);
 
 	if (failed) return <MediaInaccessible name={name} />;
 	if (!src) return <MediaLoading name={name} />;
@@ -233,9 +254,15 @@ function TextFileView({
 	name: string;
 	markdown: boolean;
 }) {
+	const ready = useMediaReady(data);
 	const [text, setText] = useState<string | null>(null);
 	const [failed, setFailed] = useState(false);
 	useEffect(() => {
+		if (ready === "pending") return; // not in the tree yet — stay loading
+		if (ready === "absent") {
+			setFailed(true);
+			return;
+		}
 		let cancelled = false;
 		fetch(data)
 			.then((r) => (r.ok ? r.text() : Promise.reject(new Error("fetch"))))
@@ -244,7 +271,7 @@ function TextFileView({
 		return () => {
 			cancelled = true;
 		};
-	}, [data]);
+	}, [data, ready]);
 
 	if (failed) return <MediaInaccessible name={name} />;
 	if (text == null) return <MediaLoading name={name} />;

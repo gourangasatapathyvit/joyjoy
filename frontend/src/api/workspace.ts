@@ -1,10 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCapabilities } from "@/api/capabilities";
 import { http } from "@/api/client";
 import type {
 	OkPath as Ok,
 	WorkspaceFileContent,
 	WorkspaceNode,
 } from "@/api/types";
+import {
+	flattenWorkspaceFilePaths,
+	parseWorkspaceMediaUrl,
+	relWorkspacePath,
+} from "@/lib/media";
 
 // Every call is scoped to a chat's workspace via thread_id; the backend maps it
 // to the session's workspace_id (forks share one). The dock passes the active
@@ -55,6 +61,30 @@ export function useWorkspaceTree(threadId: string) {
 		queryFn: () => workspaceApi.tree(threadId),
 		enabled: !!threadId,
 	});
+}
+
+// Readiness of a workspace-served media URL, used to GATE inline rendering so we
+// never fetch a file the sandbox hasn't written yet (the transient read-after-write
+// 404). Driven by the workspace tree — which is refetched after each run's
+// tool.completed — so a preview flips from "pending" to "ready" reactively once
+// the file appears. "na" = not gated (data:/external URL, host mode, or an
+// absolute path outside the mount → fall back to optimistic fetch).
+export type MediaReadiness = "na" | "pending" | "ready" | "absent";
+
+export function useMediaReady(url: string): MediaReadiness {
+	const parsed = parseWorkspaceMediaUrl(url);
+	const caps = useCapabilities();
+	const tree = useWorkspaceTree(parsed?.threadId ?? "");
+	if (!parsed) return "na";
+	// Only the sandbox has the write-visibility lag; in host mode files may also
+	// live outside the workspace tree, so don't gate there.
+	if (caps.data?.sandbox && !caps.data.sandbox.enabled) return "na";
+	const mount = caps.data?.sandbox?.mount_path ?? "/workspace";
+	const rel = relWorkspacePath(parsed.path, mount);
+	if (rel == null) return "na"; // absolute path outside the mount — can't gate
+	if (flattenWorkspaceFilePaths(tree.data?.tree ?? []).has(rel)) return "ready";
+	if (tree.isLoading || tree.isFetching || !tree.data) return "pending";
+	return "absent";
 }
 
 export function useWorkspaceFile(

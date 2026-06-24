@@ -148,6 +148,64 @@ export const mimeOf = (name: string): string =>
 // True for an inline `data:` URL (already-embedded bytes — no fetch needed).
 export const isDataUrl = (url: string): boolean => url.startsWith("data:");
 
+// ── Workspace-readiness helpers (gate inline media on the file existing) ──────
+// Parse a workspace-served media URL (/v1/media or /v1/workspace/raw) back into
+// its {threadId, path} so the renderer can check the file against the workspace
+// tree before fetching. Returns null for data:/external URLs (nothing to gate).
+export function parseWorkspaceMediaUrl(
+	url: string,
+): { threadId: string; path: string } | null {
+	if (!url || isDataUrl(url)) return null;
+	const q = url.indexOf("?");
+	if (q < 0) return null;
+	const base = url.slice(0, q);
+	if (!base.endsWith("/v1/media") && !base.endsWith("/v1/workspace/raw"))
+		return null;
+	const params = new URLSearchParams(url.slice(q + 1));
+	const threadId = params.get("thread_id") || "";
+	const path = params.get("path") || "";
+	return path ? { threadId, path } : null;
+}
+
+// Map a (possibly mount-prefixed/absolute) media path to its workspace-relative
+// form so it can be matched against the tree's relative node paths. Returns null
+// when the path is absolute but NOT under the mount (a host/external path that
+// can't live in the workspace tree — caller should not gate it).
+export function relWorkspacePath(path: string, mount: string): string | null {
+	const m = (mount || "/workspace").replace(/\/+$/, "");
+	const raw = (path ?? "").trim();
+	if (raw === m) return "";
+	let p = raw;
+	if (p.startsWith(`${m}/`)) p = p.slice(m.length + 1);
+	else if (raw.startsWith("/")) return null; // absolute, outside the mount
+	return p.replace(/^\/+/, "");
+}
+
+// Flatten a workspace tree (nested {path,type,children}) to the set of FILE paths,
+// each workspace-relative (matching relWorkspacePath output).
+export function flattenWorkspaceFilePaths(
+	nodes: ReadonlyArray<{
+		path: string;
+		type: "dir" | "file";
+		children?: ReadonlyArray<{
+			path: string;
+			type: "dir" | "file";
+			children?: unknown;
+		}>;
+	}>,
+): Set<string> {
+	const out = new Set<string>();
+	// biome-ignore lint/suspicious/noExplicitAny: recursive tree, shape guarded above
+	const walk = (ns: ReadonlyArray<any>) => {
+		for (const n of ns) {
+			if (n.type === "file") out.add(String(n.path).replace(/^\/+/, ""));
+			if (n.children?.length) walk(n.children);
+		}
+	};
+	walk(nodes);
+	return out;
+}
+
 // thread_id lets the backend resolve the marker inside the session's sandbox
 // volume when SANDBOX_ENABLED (else it's ignored and a host path is used).
 export const mediaUrl = (threadId: string, path: string): string =>

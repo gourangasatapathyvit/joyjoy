@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from .. import runs as runs_mod
+from .. import sandbox as sandbox_mod
 from .. import sessions as sessions_mod
 from .. import usersettings
 from ..agent import get_run_agent, resolve_model
@@ -25,9 +26,15 @@ router = APIRouter()
 @router.get("/v1/capabilities")
 async def capabilities():
     # Advertised so hermes-webui's gateway_supports_approval() enables the runs API.
+    # ``sandbox`` lets the client map mount-prefixed media paths (e.g. /workspace/x)
+    # to workspace-relative tree paths and gate inline media on tree readiness.
     return {
         "name": "joyjoy",
         "features": {"approval_events": True, "run_approval_response": True, "tool_progress": True},
+        "sandbox": {
+            "enabled": sandbox_mod.is_enabled(settings),
+            "mount_path": settings.sandbox_mount_path,
+        },
     }
 
 

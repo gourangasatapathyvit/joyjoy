@@ -331,6 +331,11 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 							: p,
 					),
 				}));
+				// A tool may have created/changed workspace files (write_file, edit_file,
+				// or any execute/shell command). Refresh the tree so the dock AND the
+				// media-readiness gate (useMediaReady) see new files — otherwise a freshly
+				// written artifact stays "Media inaccessible" against a stale tree.
+				queryClient.invalidateQueries({ queryKey: ["workspace"] });
 			};
 
 			const requestApproval = (
@@ -430,6 +435,9 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 									requestApproval(ev);
 									break;
 								case "run.completed":
+									// Backstop: ensure the tree (and the media-readiness gate)
+									// reflect every file the run produced.
+									queryClient.invalidateQueries({ queryKey: ["workspace"] });
 									es.close();
 									finish();
 									break;
