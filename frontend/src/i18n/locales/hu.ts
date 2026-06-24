@@ -79,6 +79,8 @@ export const hu: Resources = {
 		slashInsert: 'Használja a(z) "{{name}}" képességet. ',
 		noSkills: "Nincs elérhető képesség",
 		noTools: "Nincs elérhető eszköz",
+		autoApprove: "Automatikus jóváhagyás",
+		autoApproveHint: "Eszközök automatikus futtatása rákérdezés nélkül — csak ebben a csevegésben",
 	},
 	tools: {
 		used: "Használt eszköz",
@@ -90,6 +92,7 @@ export const hu: Resources = {
 		deny: "Elutasítás",
 		denyAlways: "Mindig elutasítva",
 		allowOnce: "Egyszeri engedélyezés",
+		allowSession: "Engedélyezés a csevegés hátralévő részére",
 	},
 	settings: {
 		title: "Beállítások",

@@ -80,6 +80,8 @@ export const uk: Resources = {
 		slashInsert: "Використати навичку «{{name}}». ",
 		noSkills: "Немає доступних навичок",
 		noTools: "Немає доступних інструментів",
+		autoApprove: "Автосхвалення",
+		autoApproveHint: "Запускати інструменти автоматично без запиту — лише в цьому чаті",
 	},
 	tools: {
 		used: "Використано інструмент",
@@ -91,6 +93,7 @@ export const uk: Resources = {
 		deny: "Відхилити",
 		denyAlways: "Відхиляти завжди",
 		allowOnce: "Дозволити один раз",
+		allowSession: "Дозволити до кінця чату",
 	},
 	settings: {
 		title: "Налаштування",

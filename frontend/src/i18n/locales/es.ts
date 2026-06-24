@@ -173,6 +173,9 @@ export const es: Resources = {
 		slashInsert: 'Usa la habilidad "{{name}}". ',
 		noSkills: "No hay habilidades disponibles",
 		noTools: "No hay herramientas disponibles",
+		autoApprove: "Aprobar automáticamente",
+		autoApproveHint:
+			"Ejecuta las herramientas automáticamente sin preguntar: solo en este chat",
 	},
 	tools: {
 		used: "Herramienta usada",
@@ -184,6 +187,7 @@ export const es: Resources = {
 		deny: "Denegar",
 		denyAlways: "Denegar siempre",
 		allowOnce: "Permitir una vez",
+		allowSession: "Permitir durante el resto del chat",
 	},
 	mcp: {
 		title: "MCP",

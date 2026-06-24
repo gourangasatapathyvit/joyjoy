@@ -80,6 +80,9 @@ export const pt: Resources = {
 		slashInsert: 'Use a habilidade "{{name}}". ',
 		noSkills: "Nenhuma habilidade disponível",
 		noTools: "Nenhuma ferramenta disponível",
+		autoApprove: "Aprovar automaticamente",
+		autoApproveHint:
+			"Executar as ferramentas automaticamente sem perguntar — somente neste chat",
 	},
 	tools: {
 		used: "Ferramenta usada",
@@ -91,6 +94,7 @@ export const pt: Resources = {
 		deny: "Negar",
 		denyAlways: "Negar sempre",
 		allowOnce: "Permitir uma vez",
+		allowSession: "Permitir pelo resto do chat",
 	},
 	settings: {
 		title: "Configurações",

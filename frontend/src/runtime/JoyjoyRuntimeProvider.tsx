@@ -236,6 +236,14 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 		[],
 	);
 
+	// When auto-approve flips on (composer toggle or the in-card button) while
+	// approvals are already waiting, clear them too so the user never has to tap.
+	const autoApprove = useChatStore((s) => s.autoApprove);
+	useEffect(() => {
+		if (!autoApprove) return;
+		for (const tcid of Object.keys(pending)) respond(tcid, "approve");
+	}, [autoApprove, pending, respond]);
+
 	// Drive one assistant turn: stream the run into the placeholder `assistantId`.
 	// Returns a promise that resolves when the stream ends (per the ExternalStore
 	// contract — onNew/onReload await it; isRunning is managed manually around it).
@@ -327,6 +335,13 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 				ev: Extract<RunEvent, { event: "approval.request" }>,
 			) => {
 				const name = ev.tool ?? ev.name ?? "tool";
+				// Auto-approve mode (per-chat): resolve the gate immediately without
+				// ever surfacing a card. The tool still streams its started/completed
+				// events, so the call remains visible in the transcript.
+				if (useChatStore.getState().autoApprove) {
+					respondApproval(ev.run_id, ev.approval_id, "approve").catch(() => {});
+					return;
+				}
 				let toolCallId = toolByNameRef.current[name];
 				if (!toolCallId) {
 					toolCallId = newId("tc");

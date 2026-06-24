@@ -78,6 +78,8 @@ export const ko: Resources = {
 		slashInsert: '"{{name}}" 스킬을 사용하세요. ',
 		noSkills: "사용 가능한 스킬이 없습니다",
 		noTools: "사용 가능한 도구가 없습니다",
+		autoApprove: "자동 승인",
+		autoApproveHint: "묻지 않고 도구를 자동으로 실행합니다 — 이 채팅에만 적용",
 	},
 	tools: {
 		used: "사용한 도구",
@@ -89,6 +91,7 @@ export const ko: Resources = {
 		deny: "거부",
 		denyAlways: "항상 거부",
 		allowOnce: "한 번 허용",
+		allowSession: "남은 대화 동안 허용",
 	},
 	settings: {
 		title: "설정",

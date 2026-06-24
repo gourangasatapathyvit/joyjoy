@@ -48,8 +48,13 @@ interface ChatState {
 	reasoningEffort: ReasoningEffort;
 	threadId: string;
 	workspaceOpen: boolean;
+	// When on, gated tool calls in the ACTIVE chat are approved automatically (no
+	// HITL card). Deliberately in-memory only and per-conversation: it resets on a
+	// full reload and whenever you switch/start a chat (see selectThread/newChat).
+	autoApprove: boolean;
 	setModel: (model: string) => void;
 	setReasoningEffort: (effort: ReasoningEffort) => void;
+	setAutoApprove: (on: boolean) => void;
 	selectThread: (threadId: string) => void;
 	newChat: () => void;
 	toggleWorkspace: () => void;
@@ -60,6 +65,7 @@ export const useChatStore = create<ChatState>((set) => ({
 	reasoningEffort: "off",
 	threadId: readThreadId(),
 	workspaceOpen: readWorkspaceOpen(),
+	autoApprove: false,
 	// The picker's choice is remembered as the user's default (server-persisted).
 	setModel: (model) => {
 		set({ model });
@@ -69,14 +75,17 @@ export const useChatStore = create<ChatState>((set) => ({
 		set({ reasoningEffort });
 		persistPref({ default_reasoning: reasoningEffort });
 	},
+	setAutoApprove: (autoApprove) => set({ autoApprove }),
+	// Switching or starting a conversation always returns to the safe default of
+	// asking for approval (auto-approve is scoped to a single chat).
 	selectThread: (threadId) => {
 		persistThreadId(threadId);
-		set({ threadId });
+		set({ threadId, autoApprove: false });
 	},
 	newChat: () => {
 		const threadId = newThreadId();
 		persistThreadId(threadId);
-		set({ threadId });
+		set({ threadId, autoApprove: false });
 	},
 	toggleWorkspace: () =>
 		set((s) => {

@@ -78,6 +78,8 @@ export const af: Resources = {
 		slashInsert: 'Gebruik die "{{name}}"-vaardigheid. ',
 		noSkills: "Geen vaardighede beskikbaar nie",
 		noTools: "Geen gereedskap beskikbaar nie",
+		autoApprove: "Outo-keur",
+		autoApproveHint: "Laat gereedskap outomaties loop sonder om te vra — net hierdie geselsie",
 	},
 	tools: {
 		used: "Gereedskap gebruik",
@@ -89,6 +91,7 @@ export const af: Resources = {
 		deny: "Weier",
 		denyAlways: "Weier altyd",
 		allowOnce: "Laat een keer toe",
+		allowSession: "Laat toe vir die res van die geselsie",
 	},
 	settings: {
 		title: "Instellings",

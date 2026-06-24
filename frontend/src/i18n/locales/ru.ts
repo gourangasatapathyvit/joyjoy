@@ -79,6 +79,8 @@ export const ru: Resources = {
 		slashInsert: "Использовать навык «{{name}}». ",
 		noSkills: "Нет доступных навыков",
 		noTools: "Нет доступных инструментов",
+		autoApprove: "Автоодобрение",
+		autoApproveHint: "Запускать инструменты автоматически без запроса — только в этом чате",
 	},
 	tools: {
 		used: "Использован инструмент",
@@ -90,6 +92,7 @@ export const ru: Resources = {
 		deny: "Отклонить",
 		denyAlways: "Отклонять всегда",
 		allowOnce: "Разрешить один раз",
+		allowSession: "Разрешить до конца чата",
 	},
 	settings: {
 		title: "Настройки",

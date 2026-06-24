@@ -78,6 +78,8 @@ export const tr: Resources = {
 		slashInsert: '"{{name}}" yeteneğini kullan. ',
 		noSkills: "Kullanılabilir yetenek yok",
 		noTools: "Kullanılabilir araç yok",
+		autoApprove: "Otomatik onayla",
+		autoApproveHint: "Araçları sormadan otomatik çalıştır — yalnızca bu sohbette",
 	},
 	tools: {
 		used: "Araç kullanıldı",
@@ -89,6 +91,7 @@ export const tr: Resources = {
 		deny: "Reddet",
 		denyAlways: "Her zaman reddet",
 		allowOnce: "Bir kez izin ver",
+		allowSession: "Sohbetin geri kalanı için izin ver",
 	},
 	settings: {
 		title: "Ayarlar",

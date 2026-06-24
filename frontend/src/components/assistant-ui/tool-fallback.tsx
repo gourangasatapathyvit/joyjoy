@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { useApprovals } from "@/runtime/JoyjoyRuntimeProvider";
+import { useChatStore } from "@/store/chat";
 
 const ANIMATION_DURATION = 200;
 
@@ -533,6 +534,7 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 	// joyjoy HITL: the backend gates MCP/plugin tools; the pending approval is
 	// surfaced via context (keyed by toolCallId) and rendered inline below.
 	const { pending, respond } = useApprovals();
+	const setAutoApprove = useChatStore((s) => s.setAutoApprove);
 	const joyApproval = toolCallId ? pending[toolCallId] : undefined;
 
 	const isCancelled =
@@ -566,9 +568,20 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 					/>
 				)}
 				{joyApproval && toolCallId && (
-					<div className="aui-tool-fallback-approval flex items-center gap-2 pt-1">
+					<div className="aui-tool-fallback-approval flex flex-wrap items-center gap-2 pt-1">
 						<Button size="sm" onClick={() => respond(toolCallId, "approve")}>
 							{t("tools.allowOnce")}
+						</Button>
+						<Button
+							size="sm"
+							variant="outline"
+							onClick={() => {
+								// Approve this call and stop asking for the rest of the chat.
+								setAutoApprove(true);
+								respond(toolCallId, "approve");
+							}}
+						>
+							{t("tools.allowSession")}
 						</Button>
 						<Button
 							size="sm"

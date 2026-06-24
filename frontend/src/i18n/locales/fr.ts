@@ -171,6 +171,9 @@ export const fr: Resources = {
 		slashInsert: "Utilise la compétence « {{name}} ». ",
 		noSkills: "Aucune compétence disponible",
 		noTools: "Aucun outil disponible",
+		autoApprove: "Approbation automatique",
+		autoApproveHint:
+			"Exécuter les outils automatiquement sans demander — ce chat uniquement",
 	},
 	tools: {
 		used: "Outil utilisé",
@@ -182,6 +185,7 @@ export const fr: Resources = {
 		deny: "Refuser",
 		denyAlways: "Toujours refuser",
 		allowOnce: "Autoriser une fois",
+		allowSession: "Autoriser pour le reste du chat",
 	},
 	mcp: {
 		title: "MCP",

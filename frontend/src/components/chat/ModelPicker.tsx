@@ -10,6 +10,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { useChatStore } from "@/store/chat";
 
 // Reasoning-effort values → i18n key suffix (under `model.*`).
@@ -35,6 +36,8 @@ export function ModelPicker() {
 	const setModel = useChatStore((s) => s.setModel);
 	const effort = useChatStore((s) => s.reasoningEffort);
 	const setEffort = useChatStore((s) => s.setReasoningEffort);
+	const autoApprove = useChatStore((s) => s.autoApprove);
+	const setAutoApprove = useChatStore((s) => s.setAutoApprove);
 
 	const supportsReasoning =
 		models.find((m) => m.id === model)?.supports_reasoning ?? true;
@@ -92,6 +95,19 @@ export function ModelPicker() {
 					))}
 				</SelectContent>
 			</Select>
+			<label
+				htmlFor="auto-approve-switch"
+				className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"
+				title={t("composer.autoApproveHint")}
+			>
+				<Switch
+					id="auto-approve-switch"
+					size="sm"
+					checked={autoApprove}
+					onCheckedChange={setAutoApprove}
+				/>
+				{t("composer.autoApprove")}
+			</label>
 		</div>
 	);
 }

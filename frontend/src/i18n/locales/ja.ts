@@ -79,6 +79,8 @@ export const ja: Resources = {
 		slashInsert: "「{{name}}」スキルを使用します。 ",
 		noSkills: "利用可能なスキルがありません",
 		noTools: "利用可能なツールがありません",
+		autoApprove: "自動承認",
+		autoApproveHint: "確認せずにツールを自動実行します — このチャットのみ",
 	},
 	tools: {
 		used: "使用したツール",
@@ -90,6 +92,7 @@ export const ja: Resources = {
 		deny: "拒否",
 		denyAlways: "常に拒否",
 		allowOnce: "今回のみ許可",
+		allowSession: "このチャットの残りを許可",
 	},
 	settings: {
 		title: "設定",

@@ -79,6 +79,8 @@ export const ga: Resources = {
 		slashInsert: 'Úsáid an scil "{{name}}". ',
 		noSkills: "Níl aon scil ar fáil",
 		noTools: "Níl aon uirlis ar fáil",
+		autoApprove: "Uathcheadú",
+		autoApproveHint: "Rith uirlisí go huathoibríoch gan fiafraí — sa chomhrá seo amháin",
 	},
 	tools: {
 		used: "Uirlis úsáidte",
@@ -90,6 +92,7 @@ export const ga: Resources = {
 		deny: "Diúltaigh",
 		denyAlways: "Diúltaigh i gcónaí",
 		allowOnce: "Ceadaigh uair amháin",
+		allowSession: "Ceadaigh don chuid eile den chomhrá",
 	},
 	settings: {
 		title: "Socruithe",

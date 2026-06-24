@@ -78,6 +78,8 @@ export const zh: Resources = {
 		slashInsert: '使用 "{{name}}" 技能。 ',
 		noSkills: "没有可用的技能",
 		noTools: "没有可用的工具",
+		autoApprove: "自动批准",
+		autoApproveHint: "自动运行工具而不询问 —— 仅限本次聊天",
 	},
 	tools: {
 		used: "已使用工具",
@@ -89,6 +91,7 @@ export const zh: Resources = {
 		deny: "拒绝",
 		denyAlways: "始终拒绝",
 		allowOnce: "允许一次",
+		allowSession: "本次聊天剩余时间内允许",
 	},
 	settings: {
 		title: "设置",

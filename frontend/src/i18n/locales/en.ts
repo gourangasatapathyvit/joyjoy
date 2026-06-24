@@ -78,6 +78,8 @@ export const en = {
 		slashInsert: 'Use the "{{name}}" skill. ',
 		noSkills: "No skills available",
 		noTools: "No tools available",
+		autoApprove: "Auto-approve",
+		autoApproveHint: "Run tools automatically without asking — this chat only",
 	},
 	tools: {
 		used: "Used tool",
@@ -89,6 +91,7 @@ export const en = {
 		deny: "Deny",
 		denyAlways: "Always deny",
 		allowOnce: "Allow once",
+		allowSession: "Allow for rest of chat",
 	},
 	settings: {
 		title: "Settings",
