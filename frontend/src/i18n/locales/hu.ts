@@ -277,6 +277,8 @@ export const hu: Resources = {
 		recent: "Legutóbbi",
 		pin: "Rögzítés",
 		unpin: "Rögzítés feloldása",
+		collapse: "Összecsukás",
+		expand: "Beszélgetések megjelenítése",
 	},
 	workspace: {
 		title: "Munkaterület",

@@ -270,6 +270,8 @@ export const en = {
 		recent: "Recent",
 		pin: "Pin",
 		unpin: "Unpin",
+		collapse: "Collapse",
+		expand: "Show conversations",
 	},
 	workspace: {
 		title: "Workspace",

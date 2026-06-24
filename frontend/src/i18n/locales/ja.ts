@@ -274,6 +274,8 @@ export const ja: Resources = {
 		recent: "最近",
 		pin: "ピン留め",
 		unpin: "ピン留めを解除",
+		collapse: "折りたたむ",
+		expand: "会話を表示",
 	},
 	workspace: {
 		title: "ワークスペース",

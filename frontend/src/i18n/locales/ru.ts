@@ -276,6 +276,8 @@ export const ru: Resources = {
 		recent: "Недавние",
 		pin: "Закрепить",
 		unpin: "Открепить",
+		collapse: "Свернуть",
+		expand: "Показать беседы",
 	},
 	workspace: {
 		title: "Рабочая область",

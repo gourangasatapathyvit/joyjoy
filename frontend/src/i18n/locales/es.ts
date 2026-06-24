@@ -277,6 +277,8 @@ export const es: Resources = {
 		recent: "Recientes",
 		pin: "Fijar",
 		unpin: "Dejar de fijar",
+		collapse: "Contraer",
+		expand: "Mostrar conversaciones",
 	},
 	workspace: {
 		title: "Espacio de trabajo",

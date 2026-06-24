@@ -12,6 +12,7 @@ export const AGENTS_DOC = "__agents__";
 export const STORAGE_KEYS = {
 	workspaceOpen: "joyjoy-workspace-open",
 	workspaceWidth: "joyjoy-workspace-width",
+	conversationsOpen: "joyjoy-conversations-open",
 	activeThread: "joyjoy-active-thread",
 	skin: "joyjoy-skin",
 	activity: "joyjoy-activity",

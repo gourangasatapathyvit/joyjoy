@@ -266,6 +266,8 @@ export const zh: Resources = {
 		recent: "最近",
 		pin: "置顶",
 		unpin: "取消置顶",
+		collapse: "收起",
+		expand: "显示对话",
 	},
 	workspace: {
 		title: "工作区",

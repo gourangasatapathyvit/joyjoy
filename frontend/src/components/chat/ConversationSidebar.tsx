@@ -1,5 +1,6 @@
 import {
 	Check,
+	PanelLeftClose,
 	Pencil,
 	Pin,
 	PinOff,
@@ -26,6 +27,7 @@ export function ConversationSidebar() {
 	const threadId = useChatStore((s) => s.threadId);
 	const selectThread = useChatStore((s) => s.selectThread);
 	const newChat = useChatStore((s) => s.newChat);
+	const toggleConversations = useChatStore((s) => s.toggleConversations);
 
 	const [query, setQuery] = useState("");
 	const [editing, setEditing] = useState<string | null>(null);
@@ -158,14 +160,24 @@ export function ConversationSidebar() {
 				<span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
 					{t("conversations.heading")}
 				</span>
-				<button
-					type="button"
-					onClick={() => newChat()}
-					title={t("conversations.newChat")}
-					className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
-				>
-					<Plus className="size-4" />
-				</button>
+				<div className="flex items-center gap-1">
+					<button
+						type="button"
+						onClick={() => newChat()}
+						title={t("conversations.newChat")}
+						className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+					>
+						<Plus className="size-4" />
+					</button>
+					<button
+						type="button"
+						onClick={() => toggleConversations()}
+						title={t("conversations.collapse")}
+						className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+					>
+						<PanelLeftClose className="size-4" />
+					</button>
+				</div>
 			</div>
 
 			<div className="relative px-3 pb-2">

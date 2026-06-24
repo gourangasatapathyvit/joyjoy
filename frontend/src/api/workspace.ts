@@ -26,6 +26,10 @@ export const workspaceApi = {
 		),
 	rawUrl: (threadId: string, path: string) =>
 		`/v1/workspace/raw?thread_id=${encodeURIComponent(threadId)}&path=${encodeURIComponent(path)}`,
+	// Attachment download (folder → zip, file → as-is). Auth-gated server-side: a
+	// signed-out request gets 401, so the download won't happen.
+	downloadUrl: (threadId: string, path: string) =>
+		`/v1/workspace/download?thread_id=${encodeURIComponent(threadId)}&path=${encodeURIComponent(path)}`,
 	save: (threadId: string, path: string, content: string) =>
 		http<Ok>("/v1/workspace/save", {
 			method: "POST",

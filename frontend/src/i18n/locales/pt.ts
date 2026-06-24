@@ -275,6 +275,8 @@ export const pt: Resources = {
 		recent: "Recentes",
 		pin: "Fixar",
 		unpin: "Desafixar",
+		collapse: "Recolher",
+		expand: "Mostrar conversas",
 	},
 	workspace: {
 		title: "Espaço de trabalho",

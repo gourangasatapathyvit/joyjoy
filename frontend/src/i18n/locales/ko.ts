@@ -268,6 +268,8 @@ export const ko: Resources = {
 		recent: "최근",
 		pin: "고정",
 		unpin: "고정 해제",
+		collapse: "접기",
+		expand: "대화 표시",
 	},
 	workspace: {
 		title: "작업 공간",

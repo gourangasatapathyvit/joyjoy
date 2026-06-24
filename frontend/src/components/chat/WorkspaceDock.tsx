@@ -1,6 +1,7 @@
 import {
 	ChevronLeft,
 	ChevronRight,
+	Download,
 	File,
 	FilePlus,
 	Folder,
@@ -78,6 +79,7 @@ function ResizeHandle() {
 }
 
 interface TreeCtx {
+	threadId: string;
 	selected: string | null;
 	onSelect: (p: string) => void;
 	renaming: string | null;
@@ -157,6 +159,19 @@ function TreeNode({
 						)}
 						<span className="truncate">{node.name}</span>
 					</button>
+					<a
+						href={workspaceApi.downloadUrl(ctx.threadId, node.path)}
+						download
+						onClick={(e) => e.stopPropagation()}
+						title={
+							node.type === "dir"
+								? `${t("common.download")} (.zip)`
+								: t("common.download")
+						}
+						className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-primary group-hover:opacity-100"
+					>
+						<Download className="size-3" />
+					</a>
 					<button
 						type="button"
 						onClick={() => ctx.onStartRename(node.path)}
@@ -301,8 +316,12 @@ function FileView({
 				) : data?.binary ? (
 					<p className="p-3 text-xs text-muted-foreground">
 						Binary file ({formatSize(data.size)}) —{" "}
-						<a href={raw} download className="text-primary hover:underline">
+						<a
+							href={workspaceApi.downloadUrl(threadId, path)}
 							download
+							className="text-primary hover:underline"
+						>
+							{t("common.download")}
 						</a>
 						.
 					</p>
@@ -392,6 +411,7 @@ export function WorkspaceDock() {
 		);
 	};
 	const ctx: TreeCtx = {
+		threadId,
 		selected,
 		onSelect: setSelected,
 		renaming,

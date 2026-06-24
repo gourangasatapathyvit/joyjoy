@@ -9,12 +9,14 @@ from __future__ import annotations
 import logging
 import mimetypes
 import posixpath
+import shlex
+import uuid
 
 from opensandbox.models.filesystem import DirectoryListEntry, MoveEntry, WriteEntry
 
 from . import sandbox as sbx
 from .config import Settings
-from .constants import MAX_WORKSPACE_PREVIEW_BYTES
+from .constants import MAX_DOWNLOAD_BYTES, MAX_WORKSPACE_PREVIEW_BYTES
 
 logger = logging.getLogger("joyjoy.workspace")
 
@@ -205,6 +207,79 @@ async def read_file(settings, workspace_id, rel):
 
 async def raw_file(settings, workspace_id, rel):
     return await sbx.run_async(_raw_impl(settings, workspace_id, rel))
+
+
+def _find_node(nodes: list[dict], rel: str) -> dict | None:
+    for n in nodes:
+        if n["path"] == rel:
+            return n
+        if n["type"] == "dir" and n.get("children"):
+            hit = _find_node(n["children"], rel)
+            if hit:
+                return hit
+    return None
+
+
+async def _download_impl(settings: Settings, workspace_id: str, rel: str) -> tuple[bytes, str, str] | None:
+    """Download from INSIDE the sandbox — the bytes never leave it except as the
+    final payload. A single file is read directly; a directory (rel="" = whole
+    workspace) is zipped *in the sandbox* (``shutil.make_archive`` via the shell)
+    into an ephemeral ``/tmp`` archive, read out once, then deleted. We do NOT pull
+    every file to the host to re-zip. Capped at MAX_DOWNLOAD_BYTES."""
+    mount = _mount(settings).rstrip("/")
+    # File-vs-dir + existence come from the tree listing (reliable across the SDK).
+    is_dir = not rel
+    if rel:
+        node = _find_node(await _tree_impl(settings, workspace_id), rel)
+        if node is None:
+            return None
+        is_dir = node["type"] == "dir"
+    sb, _ = await sbx._acquire(settings, workspace_id)
+    if not is_dir:
+        # Single file → raw bytes, standard download.
+        full = _abs(settings, rel)
+        if full is None:
+            return None
+        try:
+            data = await sb.files.read_bytes(full)
+        except Exception:  # noqa: BLE001
+            return None
+        mime = mimetypes.guess_type(full)[0] or "application/octet-stream"
+        return bytes(data), mime, posixpath.basename(rel)
+    # Directory (or whole workspace) → zip it INSIDE the sandbox. Archive lives in
+    # /tmp (outside the zipped tree → no self-inclusion), read once, then removed.
+    label = posixpath.basename(rel) or "workspace"
+    arch = f"/tmp/joyjoy-dl-{uuid.uuid4().hex}.zip"
+    target = rel or "."  # base_dir relative to the mount (cwd)
+    # argv-passed paths (shlex.quote) → no shell injection from the request path.
+    script = "import shutil,sys; shutil.make_archive(sys.argv[1], 'zip', '.', sys.argv[2])"
+    cmd = (
+        f"cd {shlex.quote(mount)} && python3 -c {shlex.quote(script)} "
+        f"{shlex.quote(arch[:-4])} {shlex.quote(target)}"
+    )
+    try:
+        execution = await sb.commands.run(cmd)
+    except Exception:  # noqa: BLE001
+        return None
+    if getattr(execution, "exit_code", 0) not in (0, None):
+        logger.warning("workspace zip failed (exit=%s)", getattr(execution, "exit_code", None))
+        return None
+    try:
+        data = await sb.files.read_bytes(arch)
+    except Exception:  # noqa: BLE001
+        return None
+    finally:
+        try:
+            await sb.commands.run(f"rm -f {shlex.quote(arch)}")
+        except Exception:  # noqa: BLE001
+            pass
+    if data is None or len(data) > MAX_DOWNLOAD_BYTES:
+        return None
+    return bytes(data), "application/zip", f"{label}.zip"
+
+
+async def download(settings, workspace_id, rel):
+    return await sbx.run_async(_download_impl(settings, workspace_id, rel))
 
 
 async def save_file(settings, workspace_id, rel, content):

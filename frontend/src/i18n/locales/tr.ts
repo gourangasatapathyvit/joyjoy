@@ -272,6 +272,8 @@ export const tr: Resources = {
 		recent: "Son",
 		pin: "Sabitle",
 		unpin: "Sabitlemeyi kaldır",
+		collapse: "Daralt",
+		expand: "Sohbetleri göster",
 	},
 	workspace: {
 		title: "Çalışma alanı",

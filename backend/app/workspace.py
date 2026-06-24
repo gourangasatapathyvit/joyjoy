@@ -10,12 +10,14 @@ Every op is confined to the per-session root (``..``/absolute escapes refused).
 
 from __future__ import annotations
 
+import io
 import logging
 import mimetypes
 import os
 import shutil
+import zipfile
 
-from .constants import DEFAULT_USER_ID, MAX_WORKSPACE_PREVIEW_BYTES
+from .constants import DEFAULT_USER_ID, MAX_DOWNLOAD_BYTES, MAX_WORKSPACE_PREVIEW_BYTES
 from .textutils import safe_segment
 
 logger = logging.getLogger("joyjoy.workspace")
@@ -111,6 +113,41 @@ def raw_file(settings, user_id: str, workspace_id: str, rel: str) -> tuple[str, 
         return None
     mime = mimetypes.guess_type(full)[0] or "application/octet-stream"
     return full, mime
+
+
+def download(settings, user_id: str, workspace_id: str, rel: str) -> tuple[bytes, str, str] | None:
+    """(bytes, mime, filename) for a download: a single file as-is, or a directory
+    (including the workspace root when ``rel`` is empty) zipped on the fly. Capped at
+    ``MAX_DOWNLOAD_BYTES``; returns None if missing or over the cap."""
+    root = workspace_root(settings, user_id, workspace_id)
+    full = _safe(root, rel)
+    if not full or not os.path.exists(full):
+        return None
+    if os.path.isfile(full):
+        if os.path.getsize(full) > MAX_DOWNLOAD_BYTES:
+            return None
+        with open(full, "rb") as f:
+            data = f.read()
+        mime = mimetypes.guess_type(full)[0] or "application/octet-stream"
+        return data, mime, os.path.basename(full)
+    # Directory → zip. arcnames are relative to the dir's PARENT so the folder is the
+    # top-level entry (for the root, relative to the root itself).
+    arc_base = os.path.dirname(full) if not _is_root(root, full) else full
+    buf = io.BytesIO()
+    total = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for dirpath, _dirs, files in os.walk(full):
+            for name in files:
+                fp = os.path.join(dirpath, name)
+                try:
+                    total += os.path.getsize(fp)
+                except OSError:
+                    continue
+                if total > MAX_DOWNLOAD_BYTES:
+                    return None
+                zf.write(fp, os.path.relpath(fp, arc_base))
+    label = os.path.basename(full) or _seg(workspace_id) or "workspace"
+    return buf.getvalue(), "application/zip", f"{label}.zip"
 
 
 # ── Writes (all confined to the per-session root; the root itself is protected) ──

@@ -266,6 +266,8 @@ export const zhHant: Resources = {
 		recent: "最近",
 		pin: "置頂",
 		unpin: "取消置頂",
+		collapse: "收合",
+		expand: "顯示對話",
 	},
 	workspace: {
 		title: "工作區",

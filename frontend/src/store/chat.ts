@@ -12,6 +12,7 @@ const newThreadId = () => prefixedId("t");
 // workspace) is restored across screen navigation and full reloads.
 const WS_KEY = STORAGE_KEYS.workspaceOpen;
 const WS_WIDTH_KEY = STORAGE_KEYS.workspaceWidth;
+const CONV_KEY = STORAGE_KEYS.conversationsOpen;
 const TID_KEY = STORAGE_KEYS.activeThread;
 
 const readWorkspaceOpen = (): boolean => {
@@ -19,6 +20,15 @@ const readWorkspaceOpen = (): boolean => {
 		return localStorage.getItem(WS_KEY) === "1";
 	} catch {
 		return false;
+	}
+};
+
+// The conversation sidebar defaults to OPEN; only an explicit "0" collapses it.
+const readConversationsOpen = (): boolean => {
+	try {
+		return localStorage.getItem(CONV_KEY) !== "0";
+	} catch {
+		return true;
 	}
 };
 
@@ -64,6 +74,9 @@ interface ChatState {
 	reasoningEffort: ReasoningEffort;
 	threadId: string;
 	workspaceOpen: boolean;
+	// Left conversation sidebar open/collapsed (persisted). Collapsing lets the
+	// chat reflow to full width.
+	conversationsOpen: boolean;
 	// Width of the right-hand workspace dock (px), drag-resizable + persisted.
 	workspaceWidth: number;
 	// When on, gated tool calls in the ACTIVE chat are approved automatically (no
@@ -85,6 +98,7 @@ interface ChatState {
 	selectThread: (threadId: string) => void;
 	newChat: () => void;
 	toggleWorkspace: () => void;
+	toggleConversations: () => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -92,6 +106,7 @@ export const useChatStore = create<ChatState>((set) => ({
 	reasoningEffort: "off",
 	threadId: readThreadId(),
 	workspaceOpen: readWorkspaceOpen(),
+	conversationsOpen: readConversationsOpen(),
 	workspaceWidth: readWorkspaceWidth(),
 	autoApprove: false,
 	autoApproveDefault: false,
@@ -148,5 +163,15 @@ export const useChatStore = create<ChatState>((set) => ({
 				// localStorage unavailable — keep in-memory only
 			}
 			return { workspaceOpen };
+		}),
+	toggleConversations: () =>
+		set((s) => {
+			const conversationsOpen = !s.conversationsOpen;
+			try {
+				localStorage.setItem(CONV_KEY, conversationsOpen ? "1" : "0");
+			} catch {
+				// localStorage unavailable — keep in-memory only
+			}
+			return { conversationsOpen };
 		}),
 }));

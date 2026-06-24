@@ -277,6 +277,8 @@ export const fr: Resources = {
 		recent: "Récents",
 		pin: "Épingler",
 		unpin: "Désépingler",
+		collapse: "Réduire",
+		expand: "Afficher les conversations",
 	},
 	workspace: {
 		title: "Espace de travail",

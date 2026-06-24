@@ -19,7 +19,7 @@ from .. import sandbox as sandbox_mgr
 from .. import sessions as sessions_mod
 from .. import workspace as workspace_mod
 from .. import workspace_sandbox as ws_sbx
-from ..auth import resolve_user_id, verify_gateway_key
+from ..auth import current_user_id, resolve_user_id, verify_gateway_key
 from ..constants import MAX_UPLOAD_BYTES
 from .deps import json_body, settings
 
@@ -136,6 +136,34 @@ async def workspace_raw(request: Request):
             return JSONResponse({"error": "conversion unavailable"}, status_code=502)
         return FileResponse(pdf, media_type="application/pdf")
     return FileResponse(full, media_type=mime)
+
+
+@router.get("/v1/workspace/download")
+async def workspace_download(request: Request):
+    """Download a workspace entry as an attachment: a single file as-is, or a folder
+    (or the whole workspace) zipped. Requires a SIGNED-IN user — unlike the other
+    workspace routes there is NO dev fallback identity, so a signed-out client (no
+    session) gets 401 and cannot download."""
+    verify_gateway_key(request, settings)
+    uid = current_user_id(request, settings)
+    if not uid:
+        return JSONResponse({"error": "sign in required"}, status_code=401)
+    ws = await _ws_id(uid, request.query_params.get("thread_id"))
+    path = _norm_path(request.query_params.get("path"))
+    res = (
+        await ws_sbx.download(settings, ws, path)
+        if _sbx()
+        else await asyncio.to_thread(workspace_mod.download, settings, uid, ws, path)
+    )
+    if res is None:
+        return JSONResponse({"error": "not found or too large"}, status_code=404)
+    data, mime, filename = res
+    safe_name = filename.replace('"', "")
+    return Response(
+        content=data,
+        media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
 
 
 @router.post("/v1/workspace/save")

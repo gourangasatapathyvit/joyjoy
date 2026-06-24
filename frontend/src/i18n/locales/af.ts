@@ -274,6 +274,8 @@ export const af: Resources = {
 		recent: "Onlangs",
 		pin: "Speld vas",
 		unpin: "Ontspeld",
+		collapse: "Vou in",
+		expand: "Wys gesprekke",
 	},
 	workspace: {
 		title: "Werkruimte",

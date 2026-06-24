@@ -276,6 +276,8 @@ export const uk: Resources = {
 		recent: "Нещодавні",
 		pin: "Закріпити",
 		unpin: "Відкріпити",
+		collapse: "Згорнути",
+		expand: "Показати бесіди",
 	},
 	workspace: {
 		title: "Робочий простір",

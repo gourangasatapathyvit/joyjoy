@@ -276,6 +276,8 @@ export const de: Resources = {
 		recent: "Zuletzt",
 		pin: "Anheften",
 		unpin: "Lösen",
+		collapse: "Einklappen",
+		expand: "Unterhaltungen anzeigen",
 	},
 	workspace: {
 		title: "Arbeitsbereich",

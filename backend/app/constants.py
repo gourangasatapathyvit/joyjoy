@@ -46,6 +46,7 @@ OTP_MAX_ATTEMPTS = 5
 
 # ---- byte caps ----
 MAX_UPLOAD_BYTES = 25 * MB  # a single workspace upload (main)
+MAX_DOWNLOAD_BYTES = 200 * MB  # cap for a workspace file/folder-zip download (workspace)
 MAX_MEDIA_BYTES = 25_000_000  # largest file /v1/media will serve (media)
 MAX_MEDIA_B64_BYTES = 8_000_000  # skip embedding a base64 block bigger than this inline (media)
 MAX_WORKSPACE_PREVIEW_BYTES = 1_000_000  # text-preview cap for the workspace file viewer (workspace)

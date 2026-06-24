@@ -277,6 +277,8 @@ export const ga: Resources = {
 		recent: "Le déanaí",
 		pin: "Pinneáil",
 		unpin: "Díphinneáil",
+		collapse: "Laghdaigh",
+		expand: "Taispeáin comhráite",
 	},
 	workspace: {
 		title: "Spás oibre",
