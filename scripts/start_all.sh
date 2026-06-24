@@ -39,7 +39,7 @@ fi
 
 # 0.6) Ensure the multi-language sandbox image exists (first run = several-minute
 #      build). Tag must match config.py sandbox_image; override via SANDBOX_IMAGE.
-SANDBOX_IMAGE="${SANDBOX_IMAGE:-joyjoy/sandbox-fat:3}"
+SANDBOX_IMAGE="${SANDBOX_IMAGE:-joyjoy/sandbox-fat:4}"
 if docker image inspect "$SANDBOX_IMAGE" >/dev/null 2>&1; then
   log "sandbox image $SANDBOX_IMAGE present"
 else

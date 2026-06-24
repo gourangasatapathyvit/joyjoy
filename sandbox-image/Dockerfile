@@ -1,12 +1,13 @@
-# joyjoy "fat" sandbox image v3: multi-language code-interpreter + headless
+# joyjoy "fat" sandbox image v4: multi-language code-interpreter + headless
 # browser + common CLI / data / media / document tooling in one.
 #
 # OpenSandbox runs ARBITRARY shell via execd (`POST /command`), so the IMAGE —
 # not the platform — decides which languages/tools the agent's `execute` tool can
 # use. v1 was Python-only (Playwright base + a few pip libs); v2 added Node.js,
-# Java, Go, C/C++ build tools, media/doc CLIs; v3 adds Rust (rustc/cargo).
+# Java, Go, C/C++ build tools, media/doc CLIs; v3 adds Rust (rustc/cargo);
+# v4 adds uv/uvx (fast Python package/venv manager).
 #
-# Rebuild:  docker build -t joyjoy/sandbox-fat:3 sandbox-image/
+# Rebuild:  docker build -t joyjoy/sandbox-fat:4 sandbox-image/
 FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy
 
 ENV PIP_NO_CACHE_DIR=1 \
@@ -39,8 +40,10 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
         | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable \
     && chmod -R a+w "$RUSTUP_HOME" "$CARGO_HOME"
 
-# Python libs: playwright client + data / document analysis.
+# Python libs: playwright client + data / document analysis; uv/uvx (fast
+# package + venv manager, usable by the agent inside the sandbox).
 RUN pip install --no-cache-dir \
+    uv \
     "playwright==1.49.0" \
     pandas numpy matplotlib openpyxl python-pptx pillow requests
 
@@ -50,8 +53,9 @@ RUN python -c "import playwright, pandas, numpy, matplotlib; print('py deps OK')
     && java -version \
     && go version \
     && rustc --version && cargo --version \
+    && uv --version && uvx --version \
     && gcc --version | head -1 \
     && jq --version && rg --version | head -1 \
     && ffmpeg -version | head -1 \
     && libreoffice --version \
-    && echo "fat image v3 OK"
+    && echo "fat image v4 OK"

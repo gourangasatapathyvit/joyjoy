@@ -115,8 +115,8 @@ class Settings(BaseSettings):
     # multi-language runtimes (Node.js 20, JDK 17, Go, Rust, build-essential) + CLI/
     # media/doc tooling (jq/rg/git, ffmpeg/imagemagick, libreoffice/poppler).
     # OpenSandbox runs arbitrary shell, so the image decides language support.
-    # Rebuild: docker build -t joyjoy/sandbox-fat:3 sandbox-image/
-    sandbox_image: str = "joyjoy/sandbox-fat:3"
+    # Rebuild: docker build -t joyjoy/sandbox-fat:4 sandbox-image/
+    sandbox_image: str = "joyjoy/sandbox-fat:4"
     sandbox_cpu: str = "1"
     sandbox_memory: str = "2Gi"
     sandbox_timeout_minutes: int = 30  # sandbox TTL (renewed on use)
