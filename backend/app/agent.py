@@ -22,10 +22,13 @@ from pathlib import Path
 
 from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend, FilesystemBackend
+from langchain_anthropic import ChatAnthropic
+from langchain_aws import ChatBedrockConverse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.tools import StructuredTool
-from langchain_openai import AzureChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import AzureChatOpenAI, ChatOpenAI
 from langgraph.runtime import get_runtime
 
 from sqlalchemy import delete as sa_delete
@@ -159,9 +162,6 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
       * ``openai`` — ``ChatOpenAI`` against any OpenAI-compatible endpoint
         (OpenAI / OpenRouter / DeepSeek / Groq / local) via optional ``endpoint``.
       * ``gemini`` — ``ChatGoogleGenerativeAI`` (Google AI Studio API key).
-
-    Provider SDKs are imported lazily so a missing optional package (e.g.
-    langchain-aws / langchain-google-genai) never breaks the installed providers.
     """
     specs = await merged_model_specs(settings, uid)
     spec = specs.get(model_id) or specs.get(settings.default_model) or next(iter(specs.values()))
@@ -169,8 +169,6 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
     effort = normalize_reasoning_effort(reasoning) if model_supports_reasoning(spec) else None
 
     if provider == Provider.ANTHROPIC:
-        from langchain_anthropic import ChatAnthropic
-
         anthropic_kwargs = dict(
             model=spec["deployment"],
             api_key=spec["api_key"],
@@ -196,8 +194,6 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
         return ChatAnthropic(**anthropic_kwargs)
 
     if provider == Provider.BEDROCK:
-        from langchain_aws import ChatBedrockConverse
-
         kwargs: dict = {"model": spec["deployment"]}
         if spec.get("region"):
             kwargs["region_name"] = spec["region"]
@@ -218,8 +214,6 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
     if provider == Provider.OPENAI:
         # Any OpenAI-compatible endpoint: OpenAI, OpenRouter, DeepSeek, Groq,
         # Together, vLLM/Ollama, etc. Omit endpoint => api.openai.com.
-        from langchain_openai import ChatOpenAI
-
         kwargs = {"model": spec["deployment"], "api_key": spec["api_key"], "streaming": True}
         if spec.get("endpoint"):
             kwargs["base_url"] = spec["endpoint"]
@@ -230,8 +224,6 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
         return ChatOpenAI(**kwargs)
 
     if provider == Provider.GEMINI:
-        from langchain_google_genai import ChatGoogleGenerativeAI
-
         kwargs = {"model": spec["deployment"], "google_api_key": spec["api_key"]}
         if spec.get("max_tokens"):
             kwargs["max_output_tokens"] = spec["max_tokens"]

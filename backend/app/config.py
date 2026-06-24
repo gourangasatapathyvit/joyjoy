@@ -96,6 +96,10 @@ class Settings(BaseSettings):
     # workspace/<thread>. session.workspace_path stores the relative key; point this
     # at a shared volume / mount for multi-node. Defaults to user_data_root.
     workspace_root: str = ""
+    # DEV-ONLY extra allow-list roots for serving absolute MEDIA: paths outside the
+    # workspace (e.g. imported-conversation media on the host). Comma-separated;
+    # empty by default. Ignored in prod (workspace is the only allowed root there).
+    media_dev_extra_roots: str = ""
 
     # ---- Skills / MCP ----
     # Global skills + MCP live in the DB, bootstrapped on first boot from the
@@ -177,6 +181,16 @@ class Settings(BaseSettings):
     @property
     def workspace_root_dir(self) -> str:
         return self.workspace_root or self.user_data_root
+
+    @property
+    def media_dev_extra_root_list(self) -> list[str]:
+        """Parsed MEDIA_DEV_EXTRA_ROOTS — extra dev-only media allow-list roots.
+        ``~`` is expanded; entries are returned as-is for the caller to realpath."""
+        return [
+            os.path.expanduser(p.strip())
+            for p in (self.media_dev_extra_roots or "").split(",")
+            if p.strip()
+        ]
 
     def normalize_model(self, m: dict) -> dict | None:
         """Normalize one raw model entry into a full spec.

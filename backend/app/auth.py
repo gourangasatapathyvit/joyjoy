@@ -26,14 +26,12 @@ def _bearer(request: Request) -> str:
     h = request.headers.get("authorization", "")
     return h[7:].strip() if h[:7].lower() == "bearer " else ""
 
-
 def verify_gateway_key(request: Request, settings: Settings) -> None:
     if not settings.gateway_api_key:
         return  # open when no key is configured (single-server default)
     provided = request.headers.get("x-api-key") or _bearer(request)
     if provided != settings.gateway_api_key:
         raise HTTPException(status_code=401, detail="invalid gateway api key")
-
 
 # ── Session cookie (signed JWT; sub = User.id) ───────────────────────────────
 def make_session_token(settings: Settings, user_id: str) -> str:

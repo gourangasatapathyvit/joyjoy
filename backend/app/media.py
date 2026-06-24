@@ -14,7 +14,6 @@ extracts base64 blocks into stream-friendly media descriptors (2).
 """
 
 from __future__ import annotations
-
 import asyncio
 import hashlib
 import logging
@@ -122,18 +121,18 @@ def _win_to_wsl(p: str) -> str:
 def _safe_roots(settings, user_id: str) -> list[str]:
     """Dirs an absolute media path is allowed to live under (realpath'd).
 
-    Prod is locked to the per-user workspace only. The broad host roots (the WSL
-    home + Windows ``/mnt/c/Users``) are DEV-only — they're a convenience for
-    testing imported-conversation media that references absolute host paths, but
-    in prod they'd let a crafted ``MEDIA:`` marker surface arbitrary host/home
-    files to the chat client, so they're excluded there.
+    Prod is locked to the per-user workspace only. Extra host roots (configured via
+    ``MEDIA_DEV_EXTRA_ROOTS``, e.g. the WSL home or Windows ``/mnt/c/Users``) are
+    DEV-only — a convenience for testing imported-conversation media that references
+    absolute host paths. In prod they'd let a crafted ``MEDIA:`` marker surface
+    arbitrary host/home files to the chat client, so they're ignored there.
     """
     # Use the SAME root as the workspace dock/agent (WORKSPACE_ROOT, falling back to
     # user_data_root) so host-mode MEDIA: markers resolve where files actually live.
     ws = os.path.join(settings.workspace_root_dir, str(user_id or DEFAULT_USER_ID), "workspace")
     cands = [ws]
     if not settings.is_prod:
-        cands += [os.path.expanduser("~"), "/mnt/c/Users"]
+        cands += settings.media_dev_extra_root_list
     roots: list[str] = []
     for cand in cands:
         try:
