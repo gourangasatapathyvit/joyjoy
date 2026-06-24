@@ -46,6 +46,7 @@ def _to_wire(s: Session) -> dict:
         "model": s.default_model or "",
         "reasoning": s.reasoning or "off",
         "auto_approve": bool(s.auto_approve),
+        "pinned": bool(s.pinned),
         "workspace_id": s.workspace_path or s.thread_id,
         "forked_from": s.forked_from,
     }
@@ -140,7 +141,7 @@ async def list_sessions(user_id: str, limit: int = SESSIONS_LIST_LIMIT) -> list[
                 await s.scalars(
                     select(Session)
                     .where(Session.user_id == str(user_id))
-                    .order_by(Session.updated_at.desc())
+                    .order_by(Session.pinned.desc(), Session.updated_at.desc())
                     .limit(limit)
                 )
             ).all()
@@ -176,8 +177,9 @@ async def update_session(
     *,
     title: str | None = None,
     auto_approve: bool | None = None,
+    pinned: bool | None = None,
 ) -> dict:
-    """Patch mutable per-thread session fields (title and/or auto-approve)."""
+    """Patch mutable per-thread session fields (title, auto-approve, pinned)."""
     async with db_session() as s:
         row = await s.get(Session, thread_id)
         if not row or row.user_id != str(user_id):
@@ -186,7 +188,15 @@ async def update_session(
             row.title = (title or "").strip()[:120] or row.title or "New chat"
         if auto_approve is not None:
             row.auto_approve = bool(auto_approve)
-        return {"ok": True, "thread_id": thread_id, "title": row.title, "auto_approve": bool(row.auto_approve)}
+        if pinned is not None:
+            row.pinned = bool(pinned)
+        return {
+            "ok": True,
+            "thread_id": thread_id,
+            "title": row.title,
+            "auto_approve": bool(row.auto_approve),
+            "pinned": bool(row.pinned),
+        }
 
 
 async def delete_session(checkpointer, user_id: str, thread_id: str) -> dict:

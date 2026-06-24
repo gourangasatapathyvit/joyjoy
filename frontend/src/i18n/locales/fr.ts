@@ -273,6 +273,10 @@ export const fr: Resources = {
 		empty:
 			"Pas encore de conversations. Commencez à discuter pour en créer une.",
 		untitled: "Sans titre",
+		pinned: "Épinglés",
+		recent: "Récents",
+		pin: "Épingler",
+		unpin: "Désépingler",
 	},
 	workspace: {
 		title: "Espace de travail",

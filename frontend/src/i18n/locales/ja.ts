@@ -270,6 +270,10 @@ export const ja: Resources = {
 		loading: "読み込み中…",
 		empty: "まだ会話がありません。チャットを開始して作成してください。",
 		untitled: "無題",
+		pinned: "ピン留め済み",
+		recent: "最近",
+		pin: "ピン留め",
+		unpin: "ピン留めを解除",
 	},
 	workspace: {
 		title: "ワークスペース",

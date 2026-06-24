@@ -79,12 +79,37 @@ async def db_session():
             raise
 
 
+# Columns added to a table AFTER its initial create. ``create_all`` bootstraps
+# fresh DBs but never ALTERs existing ones, so this list backfills them on boot
+# (dev convenience; prod still uses Alembic for anything non-trivial). ADD-only —
+# never drop/retype. DDL is written to work on both SQLite (>=3.23) and Postgres.
+_ADDED_COLUMNS: list[tuple[str, str, str]] = [
+    ("sessions", "pinned", "BOOLEAN NOT NULL DEFAULT FALSE"),
+]
+
+
+def _ensure_added_columns(conn) -> None:
+    from sqlalchemy import inspect as sa_inspect
+    from sqlalchemy import text
+
+    insp = sa_inspect(conn)
+    tables = set(insp.get_table_names())
+    for table, col, ddl in _ADDED_COLUMNS:
+        if table not in tables:
+            continue
+        if col not in {c["name"] for c in insp.get_columns(table)}:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
+            logger.info("DB: added missing column %s.%s", table, col)
+
+
 async def init_db() -> None:
-    """Create all tables if missing (idempotent). Alembic owns schema *changes*;
-    this just bootstraps a fresh DB so dev needs no migration step."""
+    """Create all tables if missing (idempotent), then backfill any additively-added
+    columns on pre-existing tables. Alembic owns non-trivial schema *changes*; this
+    keeps dev (and simple column adds) migration-free."""
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_ensure_added_columns)
     logger.info("App DB schema ensured (%d tables)", len(Base.metadata.tables))
 
 

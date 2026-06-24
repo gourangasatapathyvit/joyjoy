@@ -23,6 +23,11 @@ export const sessionApi = {
 			method: "PATCH",
 			body: JSON.stringify({ auto_approve }),
 		}),
+	setPinned: (tid: string, pinned: boolean) =>
+		http<Ok>(`/v1/sessions/${encodeURIComponent(tid)}`, {
+			method: "PATCH",
+			body: JSON.stringify({ pinned }),
+		}),
 	remove: (tid: string) =>
 		http<Ok>(`/v1/sessions/${encodeURIComponent(tid)}`, { method: "DELETE" }),
 	importConversation: (messages: unknown[], title?: string) =>
@@ -47,6 +52,11 @@ export function useSessionMutations() {
 		}),
 		remove: useMutation({
 			mutationFn: (tid: string) => sessionApi.remove(tid),
+			onSuccess,
+		}),
+		setPinned: useMutation({
+			mutationFn: ({ tid, pinned }: { tid: string; pinned: boolean }) =>
+				sessionApi.setPinned(tid, pinned),
 			onSuccess,
 		}),
 	};

@@ -196,6 +196,9 @@ class Session(Base):
     # approved automatically (no approval card). Seeded from the user's account
     # default on creation; overridable per chat. See runs._drive enforcement.
     auto_approve: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Pinned conversations sort to the top of the per-user sidebar (user-scoped via
+    # the row's user_id). See sessions.list_sessions ordering + update_session.
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     workspace_path: Mapped[str] = mapped_column(String(255), default="")  # relative to workspace_root
     forked_from: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

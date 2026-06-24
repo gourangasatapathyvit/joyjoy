@@ -266,6 +266,10 @@ export const en = {
 		loading: "Loading…",
 		empty: "No conversations yet. Start chatting to create one.",
 		untitled: "Untitled",
+		pinned: "Pinned",
+		recent: "Recent",
+		pin: "Pin",
+		unpin: "Unpin",
 	},
 	workspace: {
 		title: "Workspace",

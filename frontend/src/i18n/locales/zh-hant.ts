@@ -262,6 +262,10 @@ export const zhHant: Resources = {
 		loading: "正在載入…",
 		empty: "尚無對話。開始聊天以建立一個。",
 		untitled: "無標題",
+		pinned: "已置頂",
+		recent: "最近",
+		pin: "置頂",
+		unpin: "取消置頂",
 	},
 	workspace: {
 		title: "工作區",

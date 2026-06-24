@@ -270,6 +270,10 @@ export const af: Resources = {
 		loading: "Laai tans…",
 		empty: "Nog geen gesprekke nie. Begin klets om een te skep.",
 		untitled: "Sonder titel",
+		pinned: "Vasgespeld",
+		recent: "Onlangs",
+		pin: "Speld vas",
+		unpin: "Ontspeld",
 	},
 	workspace: {
 		title: "Werkruimte",

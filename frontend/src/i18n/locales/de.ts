@@ -272,6 +272,10 @@ export const de: Resources = {
 		empty:
 			"Noch keine Unterhaltungen. Beginne zu chatten, um eine zu erstellen.",
 		untitled: "Ohne Titel",
+		pinned: "Angeheftet",
+		recent: "Zuletzt",
+		pin: "Anheften",
+		unpin: "Lösen",
 	},
 	workspace: {
 		title: "Arbeitsbereich",

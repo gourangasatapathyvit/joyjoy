@@ -74,6 +74,7 @@ async def sessions_update(thread_id: str, request: Request):
             thread_id,
             title=body.get("title") if "title" in body else None,
             auto_approve=body.get("auto_approve") if "auto_approve" in body else None,
+            pinned=body.get("pinned") if "pinned" in body else None,
         )
     )
 

@@ -273,6 +273,10 @@ export const hu: Resources = {
 		empty:
 			"Még nincsenek beszélgetések. Kezdjen el csevegni egy létrehozásához.",
 		untitled: "Névtelen",
+		pinned: "Rögzítve",
+		recent: "Legutóbbi",
+		pin: "Rögzítés",
+		unpin: "Rögzítés feloldása",
 	},
 	workspace: {
 		title: "Munkaterület",

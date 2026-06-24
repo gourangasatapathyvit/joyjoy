@@ -273,6 +273,10 @@ export const es: Resources = {
 		loading: "Cargando…",
 		empty: "Aún no hay conversaciones. Empieza a chatear para crear una.",
 		untitled: "Sin título",
+		pinned: "Fijados",
+		recent: "Recientes",
+		pin: "Fijar",
+		unpin: "Dejar de fijar",
 	},
 	workspace: {
 		title: "Espacio de trabajo",

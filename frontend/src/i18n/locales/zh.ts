@@ -262,6 +262,10 @@ export const zh: Resources = {
 		loading: "正在加载…",
 		empty: "还没有对话。开始聊天来创建一个。",
 		untitled: "无标题",
+		pinned: "已置顶",
+		recent: "最近",
+		pin: "置顶",
+		unpin: "取消置顶",
 	},
 	workspace: {
 		title: "工作区",

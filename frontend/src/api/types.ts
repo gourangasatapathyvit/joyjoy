@@ -199,6 +199,7 @@ export interface Session {
 	updated_at: number;
 	model?: string;
 	auto_approve?: boolean;
+	pinned?: boolean;
 }
 
 // A persisted message as returned by GET /v1/sessions/{tid}/messages.

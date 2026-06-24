@@ -264,6 +264,10 @@ export const ko: Resources = {
 		loading: "불러오는 중…",
 		empty: "아직 대화가 없습니다. 채팅을 시작하여 만드세요.",
 		untitled: "제목 없음",
+		pinned: "고정됨",
+		recent: "최근",
+		pin: "고정",
+		unpin: "고정 해제",
 	},
 	workspace: {
 		title: "작업 공간",

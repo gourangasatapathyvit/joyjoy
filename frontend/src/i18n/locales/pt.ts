@@ -271,6 +271,10 @@ export const pt: Resources = {
 		loading: "Carregando…",
 		empty: "Ainda não há conversas. Comece a conversar para criar uma.",
 		untitled: "Sem título",
+		pinned: "Fixados",
+		recent: "Recentes",
+		pin: "Fixar",
+		unpin: "Desafixar",
 	},
 	workspace: {
 		title: "Espaço de trabalho",

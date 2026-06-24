@@ -268,6 +268,10 @@ export const tr: Resources = {
 		loading: "Yükleniyor…",
 		empty: "Henüz konuşma yok. Bir tane oluşturmak için sohbete başlayın.",
 		untitled: "Başlıksız",
+		pinned: "Sabitlenenler",
+		recent: "Son",
+		pin: "Sabitle",
+		unpin: "Sabitlemeyi kaldır",
 	},
 	workspace: {
 		title: "Çalışma alanı",

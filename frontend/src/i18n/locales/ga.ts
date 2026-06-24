@@ -273,6 +273,10 @@ export const ga: Resources = {
 		loading: "Á luchtú…",
 		empty: "Níl aon chomhrá ann fós. Tosaigh ag comhrá chun ceann a chruthú.",
 		untitled: "Gan teideal",
+		pinned: "Pinneáilte",
+		recent: "Le déanaí",
+		pin: "Pinneáil",
+		unpin: "Díphinneáil",
 	},
 	workspace: {
 		title: "Spás oibre",
