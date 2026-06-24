@@ -150,7 +150,7 @@ def model_supports_reasoning(spec: dict) -> bool:
     return False
 
 
-async def build_model_for(settings: Settings, model_id: str, uid: str | None = None, reasoning=None) -> BaseChatModel:
+async def build_model_for(settings: Settings, model_id: str, uid: str | None = None, reasoning=None, *, force_reasoning: bool = False) -> BaseChatModel:
     """Chat model for a registry model id, dispatched by ``spec['provider']``.
 
     Supported providers:
@@ -162,11 +162,15 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
       * ``openai`` — ``ChatOpenAI`` against any OpenAI-compatible endpoint
         (OpenAI / OpenRouter / DeepSeek / Groq / local) via optional ``endpoint``.
       * ``gemini`` — ``ChatGoogleGenerativeAI`` (Google AI Studio API key).
+
+    ``force_reasoning`` applies the requested effort even when the support heuristic
+    says no — only used by ``test_model``'s capability probe so it can DETECT support
+    the heuristic missed (a model that rejects the params errors → not supported).
     """
     specs = await merged_model_specs(settings, uid)
     spec = specs.get(model_id) or specs.get(settings.default_model) or next(iter(specs.values()))
     provider = Provider.coerce(spec.get("provider"))
-    effort = normalize_reasoning_effort(reasoning) if model_supports_reasoning(spec) else None
+    effort = normalize_reasoning_effort(reasoning) if (force_reasoning or model_supports_reasoning(spec)) else None
 
     if provider == Provider.ANTHROPIC:
         anthropic_kwargs = dict(
@@ -763,10 +767,40 @@ def reasoning_text_from_message(msg) -> str:
     return "".join(out)
 
 
+async def _persist_reasoning_flag(user_id: str, model_id: str, supported: bool) -> bool:
+    """Cache a PROBED reasoning capability into the model's row ``settings`` JSON so
+    ``model_supports_reasoning`` (tier ①) reads the measured truth on later builds
+    instead of guessing. This is an objective capability fact, not user config — it's
+    written to the user row if the model is user-owned, else the global row (safe: the
+    seed only runs on an empty DB, so it never clobbers this). Reassigns ``settings``
+    (not in-place mutate) so SQLAlchemy flags the JSON column dirty. Returns True if a
+    write happened; no-ops when the value already matches."""
+    async with db_session() as s:
+        row = await s.scalar(
+            select(UserModel).where(UserModel.user_id == str(user_id), UserModel.model_id == model_id)
+        )
+        if row is None:
+            row = await s.scalar(select(GlobalModel).where(GlobalModel.model_id == model_id))
+        if row is None:
+            return False
+        cur = dict(row.settings or {})
+        if cur.get("reasoning") == bool(supported):
+            return False
+        cur["reasoning"] = bool(supported)  # plain bool alongside the (still-encrypted) secrets
+        row.settings = cur
+    _invalidate_user_cache(user_id)
+    return True
+
+
 async def test_model(settings: Settings, user_id: str, model_id: str) -> dict:
-    """Live health probe for the Providers-tab status lights. Two tiny real requests:
-    ``standard`` (a normal completion works) and ``reasoning`` (the model produces
-    reasoning, and whether the reasoning *text* is actually visible in the stream)."""
+    """Live health + capability probe for the Providers-tab status lights. Two tiny
+    real requests: ``standard`` (a normal completion works) and ``reasoning`` (does the
+    model actually accept reasoning/thinking, and is the reasoning *text* visible).
+
+    The reasoning probe runs whenever ``standard`` succeeds — independent of the name
+    heuristic (``force_reasoning``) — so it DETECTS support rather than assuming it. The
+    measured result is persisted back to the model row (``_persist_reasoning_flag``), so
+    subsequent agent builds use the probed truth and skip the heuristic."""
     out = {
         "id": model_id,
         "standard": {"ok": False},
@@ -776,17 +810,19 @@ async def test_model(settings: Settings, user_id: str, model_id: str) -> dict:
     if not spec:
         out["error"] = "unknown model"
         return out
-    supported = model_supports_reasoning(spec)
-    out["reasoning"]["supported"] = supported
+    heuristic = model_supports_reasoning(spec)  # pre-probe guess, re-attached after the probe
     try:
         m = await build_model_for(settings, model_id, user_id, reasoning=None)
         r = await asyncio.wait_for(m.ainvoke([HumanMessage("Reply with the single word: pong")]), timeout=45)
         out["standard"] = {"ok": True, "sample": _content_to_text(getattr(r, "content", ""))[:60]}
     except Exception as e:  # noqa: BLE001
         out["standard"] = {"ok": False, "error": str(e)[:300]}
-    if supported:
+    # Only probe reasoning when the model is otherwise reachable — else an error is
+    # inconclusive (bad creds/endpoint, not a reasoning verdict) and must not persist.
+    detected: bool | None = None
+    if out["standard"]["ok"]:
         try:
-            mr = await build_model_for(settings, model_id, user_id, reasoning="high")
+            mr = await build_model_for(settings, model_id, user_id, reasoning="high", force_reasoning=True)
             visible = False
 
             async def _probe():
@@ -796,7 +832,12 @@ async def test_model(settings: Settings, user_id: str, model_id: str) -> dict:
                         visible = True
 
             await asyncio.wait_for(_probe(), timeout=60)
+            detected = True  # accepted the reasoning params and completed (text may be hidden)
             out["reasoning"] = {"supported": True, "ok": True, "visible_text": visible}
         except Exception as e:  # noqa: BLE001
-            out["reasoning"] = {"supported": True, "ok": False, "visible_text": False, "error": str(e)[:300]}
+            detected = False  # standard worked but reasoning errored → params rejected
+            out["reasoning"] = {"supported": False, "ok": False, "visible_text": False, "error": str(e)[:300]}
+    if detected is not None:
+        out["reasoning"]["persisted"] = await _persist_reasoning_flag(user_id, model_id, detected)
+    out["reasoning"]["heuristic"] = heuristic  # pre-probe guess (survives the dict reassign above)
     return out
