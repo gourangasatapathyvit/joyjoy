@@ -26,7 +26,7 @@ from datetime import datetime
 
 from sqlalchemy import select
 
-from app.config import get_settings
+from app.core.config import get_settings
 from app.db import db_session, ensure_encryption_key, init_db, seed_all
 from app.db.models import GlobalMcp, GlobalModel, GlobalProvider, GlobalSkill, SkillFile, Skin
 
