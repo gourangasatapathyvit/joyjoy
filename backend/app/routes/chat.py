@@ -11,9 +11,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
-from ..agent import chunk_text, get_agent, invoke_once, resolve_model, stream_messages
-from ..auth import resolve_user_id, verify_gateway_key
-from ..context import AgentContext
+from app.agent.agent import chunk_text, get_agent, invoke_once, resolve_model, stream_messages
+from app.core.auth import resolve_user_id, verify_gateway_key
+from app.core.context import AgentContext
 from .deps import last_user_text, settings, thread_id_from
 
 logger = logging.getLogger("joyjoy")

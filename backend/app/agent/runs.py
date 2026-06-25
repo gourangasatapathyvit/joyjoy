@@ -28,9 +28,9 @@ from langchain_core.messages import (
 )
 from langgraph.types import Command
 
-from . import media as media_mod
-from .agent import _content_to_text, reasoning_text_from_message
-from .context import AgentContext
+from app.workspace import media as media_mod
+from app.agent.agent import _content_to_text, reasoning_text_from_message
+from app.core.context import AgentContext
 
 logger = logging.getLogger("joyjoy.runs")
 

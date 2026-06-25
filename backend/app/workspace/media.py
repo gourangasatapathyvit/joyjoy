@@ -24,7 +24,7 @@ import shutil
 import subprocess
 import tempfile
 
-from .constants import DEFAULT_USER_ID, MAX_MEDIA_B64_BYTES, MAX_MEDIA_BYTES, OFFICE_TO_PDF_TIMEOUT_S
+from app.core.constants import DEFAULT_USER_ID, MAX_MEDIA_B64_BYTES, MAX_MEDIA_BYTES, OFFICE_TO_PDF_TIMEOUT_S
 
 logger = logging.getLogger("joyjoy.media")
 

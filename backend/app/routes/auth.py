@@ -5,8 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from .. import users as users_mod
-from ..auth import current_user_id, make_session_token
+from app.stores import users as users_mod
+from app.core.auth import current_user_id, make_session_token
 from .deps import json_body, settings
 
 router = APIRouter(prefix="/v1/auth")

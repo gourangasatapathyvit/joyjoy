@@ -10,9 +10,9 @@ contract at both the constant and the assembled-prompt level.
 
 from __future__ import annotations
 
-from app.agent import _system_prompt_for
-from app.config import Settings
-from app.prompts import DEFAULT_SYSTEM_PROMPT, SANDBOX_PROMPT_SUFFIX
+from app.agent.agent import _system_prompt_for
+from app.core.config import Settings
+from app.agent.prompts import DEFAULT_SYSTEM_PROMPT, SANDBOX_PROMPT_SUFFIX
 
 
 def test_core_prompt_declares_media_contract():

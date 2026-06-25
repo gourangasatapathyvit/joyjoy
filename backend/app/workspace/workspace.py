@@ -17,8 +17,8 @@ import os
 import shutil
 import zipfile
 
-from .constants import DEFAULT_USER_ID, MAX_DOWNLOAD_BYTES, MAX_WORKSPACE_PREVIEW_BYTES
-from .textutils import safe_segment
+from app.core.constants import DEFAULT_USER_ID, MAX_DOWNLOAD_BYTES, MAX_WORKSPACE_PREVIEW_BYTES
+from app.core.textutils import safe_segment
 
 logger = logging.getLogger("joyjoy.workspace")
 

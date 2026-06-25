@@ -19,7 +19,7 @@ import time
 import jwt
 from fastapi import HTTPException, Request
 
-from .config import Settings
+from app.core.config import Settings
 
 
 def _bearer(request: Request) -> str:
@@ -94,7 +94,7 @@ def resolve_user_id(request: Request, settings: Settings) -> str:
     if u:
         return u
     if not settings.is_prod:
-        from .users import DEV_USER_ID  # lazy: avoids import cycle
+        from app.stores.users import DEV_USER_ID  # lazy: avoids import cycle
 
         return DEV_USER_ID
     raise HTTPException(status_code=401, detail="missing user identity (session or JWT)")

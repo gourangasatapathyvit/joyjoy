@@ -18,11 +18,11 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from .agent_common import invalidate_user_cache as _invalidate_user_cache
-from .constants import MEMORIES_LIST_LIMIT
-from .db import db_session, get_or_create_user_config
-from .db.models import UserConfig
-from .dbfs import memories_namespace
+from app.agent.agent_common import invalidate_user_cache as _invalidate_user_cache
+from app.core.constants import MEMORIES_LIST_LIMIT
+from app.db import db_session, get_or_create_user_config
+from app.db.models import UserConfig
+from app.stores.dbfs import memories_namespace
 
 logger = logging.getLogger("joyjoy.memory")
 

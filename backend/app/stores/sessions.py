@@ -18,11 +18,11 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 
-from . import media as media_mod
-from .constants import SESSIONS_LIST_LIMIT
-from .db import db_session
-from .db.models import Session
-from .timeutils import to_epoch, utcnow
+from app.workspace import media as media_mod
+from app.core.constants import SESSIONS_LIST_LIMIT
+from app.db import db_session
+from app.db.models import Session
+from app.core.timeutils import to_epoch, utcnow
 
 logger = logging.getLogger("joyjoy.sessions")
 
@@ -237,7 +237,7 @@ async def owns_session(user_id: str, thread_id: str) -> bool:
 def _serialize_message(m: Any) -> dict | None:
     """Convert a stored LangChain BaseMessage (or raw dict) to a wire dict the
     frontend can rebuild: {role, content, tool_calls?, tool_call_id?, name?, media?}."""
-    from app.agent import _content_to_text  # local import avoids any import cycle
+    from app.agent.agent import _content_to_text  # local import avoids any import cycle
 
     role_map = {"human": "user", "ai": "assistant", "tool": "tool", "system": "system"}
     mtype = getattr(m, "type", None)

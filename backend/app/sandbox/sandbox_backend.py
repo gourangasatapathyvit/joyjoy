@@ -23,9 +23,9 @@ from deepagents.backends.protocol import (
 )
 from opensandbox.models.filesystem import WriteEntry
 
-from . import sandbox as sandbox_mgr
-from .config import Settings
-from .constants import DEFAULT_USER_ID, FILE_READ_DEFAULT_LIMIT
+from app.sandbox import sandbox as sandbox_mgr
+from app.core.config import Settings
+from app.core.constants import DEFAULT_USER_ID, FILE_READ_DEFAULT_LIMIT
 
 logger = logging.getLogger("joyjoy.sandbox")
 

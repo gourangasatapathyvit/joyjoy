@@ -13,14 +13,14 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 
-from .agent_common import invalidate_user_cache as _invalidate_user_cache
-from .agent_common import valid_name as _valid_name
-from .config import Settings
-from .constants import DEFAULT_USER_ID, MCP_PROBE_TIMEOUT_S
-from .db import db_session
-from .db.models import GlobalMcp, UserMcp
-from .enums import McpStatus
-from .textutils import parse_kv, split_lines
+from app.agent.agent_common import invalidate_user_cache as _invalidate_user_cache
+from app.agent.agent_common import valid_name as _valid_name
+from app.core.config import Settings
+from app.core.constants import DEFAULT_USER_ID, MCP_PROBE_TIMEOUT_S
+from app.db import db_session
+from app.db.models import GlobalMcp, UserMcp
+from app.core.enums import McpStatus
+from app.core.textutils import parse_kv, split_lines
 
 logger = logging.getLogger("joyjoy.agent")
 

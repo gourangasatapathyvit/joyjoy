@@ -8,7 +8,7 @@ import uuid
 
 from fastapi import Request
 
-from ..config import get_settings
+from app.core.config import get_settings
 
 # One Settings instance for all routers (get_settings is lru_cached anyway).
 settings = get_settings()

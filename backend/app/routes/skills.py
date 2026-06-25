@@ -6,7 +6,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from ..agent import (
+from app.agent.agent import (
     delete_user_skill,
     delete_user_skill_file,
     import_user_skill,
@@ -16,7 +16,7 @@ from ..agent import (
     save_user_skill_file,
     toggle_user_skill,
 )
-from ..auth import resolve_user_id, verify_gateway_key
+from app.core.auth import resolve_user_id, verify_gateway_key
 from .deps import json_body, settings
 
 router = APIRouter()

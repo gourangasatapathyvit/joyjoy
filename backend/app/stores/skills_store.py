@@ -13,13 +13,13 @@ import zipfile
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 
-from .agent_common import invalidate_user_cache as _invalidate_user_cache
-from .agent_common import valid_name as _valid_name
-from .config import Settings
-from .constants import MAX_SKILL_FILE_BYTES, MAX_SKILL_FILES, MAX_SKILL_TOTAL_BYTES
-from .db import db_session
-from .db.models import GlobalSkill, SkillFile, UserSkill
-from .dbfs import _file_bytes, _file_text
+from app.agent.agent_common import invalidate_user_cache as _invalidate_user_cache
+from app.agent.agent_common import valid_name as _valid_name
+from app.core.config import Settings
+from app.core.constants import MAX_SKILL_FILE_BYTES, MAX_SKILL_FILES, MAX_SKILL_TOTAL_BYTES
+from app.db import db_session
+from app.db.models import GlobalSkill, SkillFile, UserSkill
+from app.stores.dbfs import _file_bytes, _file_text
 
 logger = logging.getLogger("joyjoy.agent")
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from collections import OrderedDict
 
-from .constants import AGENT_CACHE_MAX, DEFAULT_USER_ID
+from app.core.constants import AGENT_CACHE_MAX, DEFAULT_USER_ID
 
 logger = logging.getLogger("joyjoy.agent")
 

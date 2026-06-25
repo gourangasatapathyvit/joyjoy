@@ -6,10 +6,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from .. import sandbox as sandbox_mgr
-from .. import sessions as sessions_mod
-from ..agent import get_run_agent, resolve_model
-from ..auth import resolve_user_id, verify_gateway_key
+from app.sandbox import sandbox as sandbox_mgr
+from app.stores import sessions as sessions_mod
+from app.agent.agent import get_run_agent, resolve_model
+from app.core.auth import resolve_user_id, verify_gateway_key
 from .deps import json_body, settings
 
 router = APIRouter()

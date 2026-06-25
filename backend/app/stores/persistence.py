@@ -22,7 +22,7 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
-from .config import Settings
+from app.core.config import Settings
 
 logger = logging.getLogger("joyjoy.persistence")
 

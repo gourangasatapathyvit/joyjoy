@@ -14,13 +14,13 @@ import asyncio
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
-from .. import media as media_mod
-from .. import sandbox as sandbox_mgr
-from .. import sessions as sessions_mod
-from .. import workspace as workspace_mod
-from .. import workspace_sandbox as ws_sbx
-from ..auth import current_user_id, resolve_user_id, verify_gateway_key
-from ..constants import MAX_UPLOAD_BYTES
+from app.workspace import media as media_mod
+from app.sandbox import sandbox as sandbox_mgr
+from app.stores import sessions as sessions_mod
+from app.workspace import workspace as workspace_mod
+from app.sandbox import workspace_sandbox as ws_sbx
+from app.core.auth import current_user_id, resolve_user_id, verify_gateway_key
+from app.core.constants import MAX_UPLOAD_BYTES
 from .deps import json_body, settings
 
 router = APIRouter()

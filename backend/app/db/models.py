@@ -25,7 +25,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from ..timeutils import utcnow
+from app.core.timeutils import utcnow
 
 
 def _uuid() -> str:

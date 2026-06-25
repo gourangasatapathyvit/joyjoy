@@ -35,8 +35,8 @@ from opensandbox import Sandbox, SandboxManager
 from opensandbox.config import ConnectionConfig
 from opensandbox.models.sandboxes import PVC, SandboxFilter, Volume
 
-from .config import Settings
-from .textutils import safe_segment
+from app.core.config import Settings
+from app.core.textutils import safe_segment
 
 logger = logging.getLogger("joyjoy.sandbox")
 

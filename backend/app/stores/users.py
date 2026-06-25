@@ -22,10 +22,10 @@ from typing import Any
 import bcrypt
 from sqlalchemy import delete, select
 
-from .constants import OTP_MAX_ATTEMPTS, SMTP_TIMEOUT_S
-from .db import db_session
-from .db.models import PasswordReset, User, UserConfig
-from .timeutils import as_naive_utc, utcnow
+from app.core.constants import OTP_MAX_ATTEMPTS, SMTP_TIMEOUT_S
+from app.db import db_session
+from app.db.models import PasswordReset, User, UserConfig
+from app.core.timeutils import as_naive_utc, utcnow
 
 logger = logging.getLogger("joyjoy.users")
 

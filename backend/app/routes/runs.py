@@ -10,13 +10,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
-from .. import runs as runs_mod
-from .. import sandbox as sandbox_mod
-from .. import sessions as sessions_mod
-from .. import usersettings
-from ..agent import get_run_agent, resolve_model
-from ..auth import resolve_user_id, verify_gateway_key
-from ..context import AgentContext
+from app.agent import runs as runs_mod
+from app.sandbox import sandbox as sandbox_mod
+from app.stores import sessions as sessions_mod
+from app.stores import usersettings
+from app.agent.agent import get_run_agent, resolve_model
+from app.core.auth import resolve_user_id, verify_gateway_key
+from app.core.context import AgentContext
 from .deps import run_input_text, settings, thread_id_from
 
 logger = logging.getLogger("joyjoy")

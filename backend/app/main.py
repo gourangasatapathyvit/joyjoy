@@ -22,14 +22,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import sandbox
-from . import users as users_mod
-from .agent import get_agent
-from .config import get_settings
-from .constants import DEFAULT_USER_ID
-from .db import ensure_encryption_key, init_db, seed_all
-from .persistence import open_persistence
-from .routes import (
+from app.sandbox import sandbox
+from app.stores import users as users_mod
+from app.agent.agent import get_agent
+from app.core.config import get_settings
+from app.core.constants import DEFAULT_USER_ID
+from app.db import ensure_encryption_key, init_db, seed_all
+from app.stores.persistence import open_persistence
+from app.routes import (
     auth,
     chat,
     health,

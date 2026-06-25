@@ -15,7 +15,7 @@ from urllib.parse import quote
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .enums import Provider
+from app.core.enums import Provider
 
 
 def _read_models_file(path: str) -> list | None:

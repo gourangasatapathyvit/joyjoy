@@ -14,7 +14,6 @@ Capabilities loaded on demand by the agent — all DB-backed (served via ``dbfs`
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import re
@@ -34,16 +33,16 @@ from langgraph.runtime import get_runtime
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 
-from .agent_common import (
+from app.agent.agent_common import (
     cache_get,
     cache_put,
     invalidate_user_cache as _invalidate_user_cache,
     valid_name as _valid_name,
 )
-from . import sandbox
-from . import workspace_sandbox as _wsx
-from .config import Settings
-from .constants import (
+from app.sandbox import sandbox
+from app.sandbox import workspace_sandbox as _wsx
+from app.core.config import Settings
+from app.core.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_USER_ID,
     MODEL_PROBE_TIMEOUT_S,
@@ -51,37 +50,37 @@ from .constants import (
     REASONING_BUDGETS,
     REASONING_PROBE_TIMEOUT_S,
 )
-from .context import AgentContext
-from .db import SECRET_FIELDS, db_session, decrypt_secrets, encrypt
-from .enums import Provider
-from .prompts import (
+from app.core.context import AgentContext
+from app.db import SECRET_FIELDS, db_session, decrypt_secrets, encrypt
+from app.core.enums import Provider
+from app.agent.prompts import (
     DEFAULT_SYSTEM_PROMPT,
     LOAD_SKILL_TOOL_DESCRIPTION,
     SANDBOX_PROMPT_SUFFIX,
 )
-from .textutils import safe_segment
-from .db.models import (
+from app.core.textutils import safe_segment
+from app.db.models import (
     GlobalModel,
     GlobalProvider,
     UserModel,
 )
-from .dbfs import (
+from app.stores.dbfs import (
     DbSkillsBackend,
     MemoriesBackend,
     MemoryBackend,
 )
-from .sandbox_backend import OpenSandboxBackend
-# Extracted concern modules — re-exported here so `from .agent import X` (used by
+from app.sandbox.sandbox_backend import OpenSandboxBackend
+# Extracted concern modules — re-exported here so `from app.agent.agent import X` (used by
 # main.py / runs.py / sessions.py) keeps working while the code lives in focused
 # modules. load_mcp_tools is also consumed by the agent factory below.
-from .mcp_runtime import (  # noqa: F401 (re-exported for callers)
+from app.stores.mcp_runtime import (  # noqa: F401 (re-exported for callers)
     delete_user_mcp,
     describe_mcp,
     load_mcp_tools,
     save_user_mcp,
     toggle_user_mcp,
 )
-from .memory_store import (  # noqa: F401 (re-exported for callers)
+from app.stores.memory_store import (  # noqa: F401 (re-exported for callers)
     delete_memory_file,
     list_memory_files,
     read_memory,
@@ -90,7 +89,7 @@ from .memory_store import (  # noqa: F401 (re-exported for callers)
     write_memory,
     write_memory_file,
 )
-from .skills_store import (  # noqa: F401 (re-exported for callers)
+from app.stores.skills_store import (  # noqa: F401 (re-exported for callers)
     delete_user_skill,
     delete_user_skill_file,
     import_user_skill,

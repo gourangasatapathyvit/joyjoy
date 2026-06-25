@@ -14,9 +14,9 @@ import uuid
 
 from opensandbox.models.filesystem import DirectoryListEntry, MoveEntry, WriteEntry
 
-from . import sandbox as sbx
-from .config import Settings
-from .constants import MAX_DOWNLOAD_BYTES, MAX_WORKSPACE_PREVIEW_BYTES
+from app.sandbox import sandbox as sbx
+from app.core.config import Settings
+from app.core.constants import MAX_DOWNLOAD_BYTES, MAX_WORKSPACE_PREVIEW_BYTES
 
 logger = logging.getLogger("joyjoy.workspace")
 

@@ -12,8 +12,8 @@ import logging
 
 from sqlalchemy import select
 
-from .db import db_session, get_or_create_user_config
-from .db.models import Skin, User, UserConfig
+from app.db import db_session, get_or_create_user_config
+from app.db.models import Skin, User, UserConfig
 
 logger = logging.getLogger("joyjoy.usersettings")
 

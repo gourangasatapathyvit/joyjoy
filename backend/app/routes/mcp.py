@@ -6,8 +6,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from ..agent import delete_user_mcp, describe_mcp, save_user_mcp, toggle_user_mcp
-from ..auth import resolve_user_id, verify_gateway_key
+from app.agent.agent import delete_user_mcp, describe_mcp, save_user_mcp, toggle_user_mcp
+from app.core.auth import resolve_user_id, verify_gateway_key
 from .deps import json_body, settings
 
 router = APIRouter()
