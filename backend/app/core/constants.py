@@ -29,6 +29,23 @@ REASONING_PROBE_TIMEOUT_S = 60  # reasoning/thinking capability probe (agent.tes
 OFFICE_TO_PDF_TIMEOUT_S = 90  # headless LibreOffice office→pdf conversion (media)
 SMTP_TIMEOUT_S = 20  # SMTP connect/send for the password-reset OTP email (users)
 
+# ---- Postgres connection resilience (persistence pool + SQLAlchemy engine) ----
+# libpq connect params for a REMOTE Postgres behind a firewall/NAT: turn a silently
+# dropped connection into a fast, detectable error instead of a ~13-min kernel-
+# retransmit hang (tcp_retries2). psycopg accepts these as connect kwargs, so both
+# the langgraph pool and the SQLAlchemy engine share this one dict. Seconds, except
+# tcp_user_timeout (milliseconds).
+PG_KEEPALIVE_ARGS = {
+    "keepalives": 1,
+    "keepalives_idle": 30,
+    "keepalives_interval": 10,
+    "keepalives_count": 3,
+    "tcp_user_timeout": 15000,  # fail a stuck send after ~15s, not ~13 min
+    "connect_timeout": 10,
+}
+PG_POOL_MAX_IDLE_S = 120.0  # recycle a pooled conn idle longer than this (before a NAT reaps it)
+PG_POOL_MAX_LIFETIME_S = 1800.0  # hard cap on any pooled conn's age (also the engine pool_recycle)
+
 # ---- list / read bounds ----
 # Max dynamic /memories/ files returned in one list call (memory_store).
 MEMORIES_LIST_LIMIT = 1000

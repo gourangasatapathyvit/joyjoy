@@ -16,6 +16,7 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
+from app.core.constants import PG_KEEPALIVE_ARGS, PG_POOL_MAX_LIFETIME_S
 from .models import Base
 
 logger = logging.getLogger("joyjoy.db")
@@ -43,6 +44,12 @@ def get_engine():
         if url.startswith("postgresql"):
             kwargs["pool_size"] = settings.pg_pool_max
             kwargs["max_overflow"] = 0
+            # Recycle before a firewall/NAT reaps an idle connection, and set TCP
+            # keepalives + tcp_user_timeout so a silently-dropped REMOTE connection
+            # fails fast (even pool_pre_ping would hang on a black-holed socket
+            # without these). Shares PG_KEEPALIVE_ARGS with the langgraph pool.
+            kwargs["pool_recycle"] = int(PG_POOL_MAX_LIFETIME_S)
+            kwargs["connect_args"] = dict(PG_KEEPALIVE_ARGS)
         else:
             _ensure_sqlite_dir(url)
         _engine = create_async_engine(url, **kwargs)
