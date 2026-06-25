@@ -135,6 +135,17 @@
 	#root {
 		height: 100%;
 	}
+	/* Native <button>s default to an arrow cursor (Tailwind preflight doesn't set
+	   pointer). Give every enabled button/role=button the hand on hover app-wide;
+	   disabled ones show not-allowed. */
+	button:not(:disabled),
+	[role="button"]:not([aria-disabled="true"]) {
+		cursor: pointer;
+	}
+	button:disabled,
+	[role="button"][aria-disabled="true"] {
+		cursor: not-allowed;
+	}
 }
 
 /* assistant-ui sets content-visibility:auto on messages (long-thread perf), but

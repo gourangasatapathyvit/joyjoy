@@ -79,7 +79,7 @@ export function ConversationSidebar() {
 							type="button"
 							onClick={() => commitEdit(s.thread_id)}
 							title={t("common.save")}
-							className="cursor-pointer text-muted-foreground hover:text-foreground"
+							className="text-muted-foreground hover:text-foreground"
 						>
 							<Check className="size-4" />
 						</button>
@@ -87,7 +87,7 @@ export function ConversationSidebar() {
 							type="button"
 							onClick={() => setEditing(null)}
 							title={t("common.cancel")}
-							className="cursor-pointer text-muted-foreground hover:text-foreground"
+							className="text-muted-foreground hover:text-foreground"
 						>
 							<X className="size-4" />
 						</button>
@@ -108,7 +108,7 @@ export function ConversationSidebar() {
 					<button
 						type="button"
 						onClick={() => selectThread(s.thread_id)}
-						className="min-w-0 flex-1 cursor-pointer truncate text-left"
+						className="min-w-0 flex-1 truncate text-left"
 						title={s.title}
 					>
 						{s.title || t("conversations.untitled")}
@@ -118,7 +118,7 @@ export function ConversationSidebar() {
 						onClick={() => togglePin(s)}
 						title={s.pinned ? t("conversations.unpin") : t("conversations.pin")}
 						className={cn(
-							"shrink-0 cursor-pointer transition-opacity hover:text-primary",
+							"shrink-0 transition-opacity hover:text-primary",
 							s.pinned
 								? "text-primary opacity-100"
 								: "opacity-0 group-hover:opacity-100",
@@ -134,7 +134,7 @@ export function ConversationSidebar() {
 						type="button"
 						onClick={() => startEdit(s.thread_id, s.title)}
 						title={t("common.rename")}
-						className="shrink-0 cursor-pointer opacity-0 transition-opacity hover:text-primary group-hover:opacity-100"
+						className="shrink-0 opacity-0 transition-opacity hover:text-primary group-hover:opacity-100"
 					>
 						<Pencil className="size-3.5" />
 					</button>
@@ -142,7 +142,7 @@ export function ConversationSidebar() {
 						type="button"
 						onClick={() => onDelete(s.thread_id)}
 						title={t("common.delete")}
-						className="shrink-0 cursor-pointer opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+						className="shrink-0 opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
 					>
 						<Trash2 className="size-3.5" />
 					</button>
@@ -165,7 +165,7 @@ export function ConversationSidebar() {
 						type="button"
 						onClick={() => newChat()}
 						title={t("conversations.newChat")}
-						className="inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+						className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
 					>
 						<Plus className="size-4" />
 					</button>
@@ -173,7 +173,7 @@ export function ConversationSidebar() {
 						type="button"
 						onClick={() => toggleConversations()}
 						title={t("conversations.collapse")}
-						className="inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+						className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
 					>
 						<PanelLeftClose className="size-4" />
 					</button>
@@ -193,7 +193,7 @@ export function ConversationSidebar() {
 						type="button"
 						onClick={() => setQuery("")}
 						title={t("conversation.clear")}
-						className="-translate-y-1/2 absolute top-1/2 right-[18px] inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
+						className="-translate-y-1/2 absolute top-1/2 right-[18px] inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
 					>
 						<X className="size-3.5" />
 					</button>
