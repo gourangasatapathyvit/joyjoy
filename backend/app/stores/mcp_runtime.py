@@ -199,6 +199,14 @@ async def describe_mcp(settings: Settings, user_id: str) -> tuple[list[dict], li
             entry["status"] = McpStatus.INVALID_CONFIG
             servers_out.append(entry)
             continue
+        # Mirror load_mcp_tools: in sandbox mode the agent does file CRUD via the
+        # sandbox shell, so the host-targeting workspace-fs server is retired. Report
+        # it as disabled here rather than probing a server the agent never gets.
+        if settings.sandbox_enabled and name == "workspace-fs":
+            entry["enabled"] = False
+            entry["status"] = McpStatus.DISABLED
+            servers_out.append(entry)
+            continue
         if not enabled:
             entry["status"] = McpStatus.DISABLED
             servers_out.append(entry)

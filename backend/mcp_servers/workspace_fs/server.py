@@ -21,8 +21,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 
-from app import workspace as ws  # noqa: E402
-from app.config import get_settings  # noqa: E402
+from app.workspace import workspace as ws  # noqa: E402
+from app.core.config import get_settings  # noqa: E402
 
 mcp = FastMCP("workspace-fs")
 # Settings picks up WORKSPACE_ROOT (absolute, injected by the loader) from the env;
