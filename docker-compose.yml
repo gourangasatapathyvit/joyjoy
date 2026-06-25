@@ -12,7 +12,14 @@
 # SQL — model keys are ${AZURE_OPENAI_API_KEY} env-refs resolved at runtime.
 
 services:
+  # ---- Optional bundled Postgres for LOCAL dev (DB_HOSTER=0) ----
+  # Gated behind the `localdb` profile: it ONLY starts when COMPOSE_PROFILES includes
+  # `localdb`. For server-hosted Postgres (DB_HOSTER=1 / prod) leave that profile unset
+  # and point DATABASE_URL at your server. There is intentionally NO `depends_on` from
+  # backend → db (a depends_on would force this to start even in server mode); in local
+  # mode the backend just retries via `restart: unless-stopped` until Postgres is ready.
   db:
+    profiles: ["localdb"]
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -32,14 +39,9 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
     environment:
       APP_ENV: prod
-      # Bundled Postgres above. To use an EXTERNAL DB instead, set DATABASE_URL here
-      # (url-encode special chars in the password, e.g. @ -> %40) and drop the `db` service.
-      DATABASE_URL: postgresql://${POSTGRES_USER:-joyjoy}:${POSTGRES_PASSWORD:-joyjoy}@db:5432/${POSTGRES_DB:-joyjoy_db}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
       # Generate-once secrets — MUST be set and STABLE in prod (rotating
       # CREDENTIAL_ENCRYPTION_KEY orphans every stored encrypted secret).
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
@@ -131,11 +133,12 @@ services:
     environment:
       # Non-interactive ack if you run with an empty api_key (prefer a real key instead).
       OPENSANDBOX_INSECURE_SERVER: ${OPENSANDBOX_INSECURE_SERVER:-}
-    command: >
-      sh -c "pip install --no-cache-dir uv
-             && uvx --from opensandbox-server opensandbox-server --config /app/sandbox.toml"
+    # exec-array form, NOT `command: >`. A folded block scalar keeps the newline before a
+    # more-indented continuation line, so `&&` lands at the start of its own line →
+    # "sh: Syntax error: && unexpected" and the server never starts. One line, no folding.
+    command: ["sh", "-c", "pip install --no-cache-dir uv && uvx --from opensandbox-server opensandbox-server --config /app/sandbox.toml"]
 
 volumes:
-  pgdata:
+  pgdata:            # used only by the `db` service (localdb profile / DB_HOSTER=0)
   workspaces:
   opensandbox-state:

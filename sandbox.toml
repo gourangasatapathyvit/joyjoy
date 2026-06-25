@@ -17,7 +17,9 @@
 # Full configuration reference: https://github.com/alibaba/OpenSandbox/blob/main/server/configuration.md
 
 [server]
-host = "127.0.0.1"
+# 0.0.0.0 (not 127.0.0.1) so the backend CONTAINER can reach opensandbox:8090
+# across the compose network. 127.0.0.1 only works when server+backend share a host (dev).
+host = "0.0.0.0"
 port = 8090
 max_sandbox_timeout_seconds = 86400
 
