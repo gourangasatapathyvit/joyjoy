@@ -66,6 +66,11 @@ services:
       SANDBOX_ENABLED: ${SANDBOX_ENABLED:-false}
       SANDBOX_SERVER_DOMAIN: ${SANDBOX_SERVER_DOMAIN:-opensandbox:8090}
       SANDBOX_SERVER_PROTOCOL: ${SANDBOX_SERVER_PROTOCOL:-http}
+      # MUST be true in compose: sandboxes are spawned as host-bridge siblings the
+      # backend container can't reach directly — proxy their traffic through the
+      # server (opensandbox:8090). Direct mode here = 30s health-check timeouts +
+      # endless retries ("workspace spinning up only" + slow). Host/dev keeps false.
+      SANDBOX_USE_SERVER_PROXY: ${SANDBOX_USE_SERVER_PROXY:-true}
       OPENSANDBOX_API_KEY: ${OPENSANDBOX_API_KEY:-}
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-joyjoy/sandbox-fat:4}
     ports:

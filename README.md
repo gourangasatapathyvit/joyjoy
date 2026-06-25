@@ -62,7 +62,7 @@ Set `APP_ENV=prod` + `DATABASE_URL=postgresql://…` (and `CREDENTIAL_ENCRYPTION
 **Containerized (Postgres + app, no sandbox):** the repo ships a `docker-compose.yml`. Set `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY`, and `AZURE_OPENAI_API_KEY` in `.env`, then:
 
 ```bash
-docker compose up --build      # → http://localhost:8080
+docker compose up -d --build      # → http://localhost:8080
 ```
 
 This brings up Postgres + the app (schema + seed auto-load on first boot). It does **not** include the OpenSandbox execution layer — use `scripts/start_all.sh` for that.

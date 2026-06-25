@@ -114,6 +114,13 @@ class Settings(BaseSettings):
     sandbox_server_domain: str = "127.0.0.1:8090"  # host:port of the OpenSandbox server
     sandbox_server_protocol: str = "http"
     opensandbox_api_key: str = Field(default="", alias="OPENSANDBOX_API_KEY")
+    # Route ALL sandbox traffic (health-check + file/exec) through the server instead
+    # of connecting directly to each sandbox's endpoints. Required when the backend
+    # CANNOT reach the per-sandbox container network directly — e.g. docker-compose,
+    # where sandboxes are spawned as host-bridge siblings the backend container can't
+    # see (direct mode then 30s-timeouts + retries forever). False (direct) is faster
+    # and correct only when backend+server+sandboxes share a host (dev/start_all.sh).
+    sandbox_use_server_proxy: bool = Field(default=False, alias="SANDBOX_USE_SERVER_PROXY")
     # Fat image (built from backend/../sandbox-image/Dockerfile). v2 = Playwright +
     # browsers + Python data libs (pandas/numpy/matplotlib/openpyxl/python-pptx) AND
     # multi-language runtimes (Node.js 20, JDK 17, Go, Rust, build-essential) + CLI/

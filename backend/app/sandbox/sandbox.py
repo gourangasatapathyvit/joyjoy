@@ -93,6 +93,9 @@ def _conn(settings: Settings):
         domain=settings.sandbox_server_domain,
         protocol=settings.sandbox_server_protocol,
         api_key=settings.opensandbox_api_key or None,
+        # In container deployments the backend can't reach per-sandbox endpoints
+        # directly; proxy through the server (the only host:port it can reach).
+        use_server_proxy=settings.sandbox_use_server_proxy,
     )
 
 
