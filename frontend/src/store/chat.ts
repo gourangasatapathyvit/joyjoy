@@ -53,6 +53,11 @@ const persistThreadId = (id: string) => {
 	}
 };
 
+// Set true only when we had to MINT a brand-new thread id (no persisted one) —
+// i.e. a first-ever/empty chat with nothing to load. A restored id (refresh,
+// settings→chat) is treated as an existing thread so its load shows the spinner.
+let initialThreadFresh = false;
+
 const readThreadId = (): string => {
 	try {
 		const v = localStorage.getItem(TID_KEY);
@@ -62,6 +67,7 @@ const readThreadId = (): string => {
 	}
 	const id = newThreadId();
 	persistThreadId(id);
+	initialThreadFresh = true;
 	return id;
 };
 
@@ -73,6 +79,10 @@ interface ChatState {
 	model: string;
 	reasoningEffort: ReasoningEffort;
 	threadId: string;
+	// True for a brand-new, never-sent chat (nothing to fetch → show the Welcome,
+	// not a loading spinner). False for any thread that may have saved messages
+	// (selected from the sidebar, restored on refresh, or returned-to from Settings).
+	freshThread: boolean;
 	workspaceOpen: boolean;
 	// Left conversation sidebar open/collapsed (persisted). Collapsing lets the
 	// chat reflow to full width.
@@ -105,6 +115,7 @@ export const useChatStore = create<ChatState>((set) => ({
 	model: "gpt-5",
 	reasoningEffort: "off",
 	threadId: readThreadId(),
+	freshThread: initialThreadFresh,
 	workspaceOpen: readWorkspaceOpen(),
 	conversationsOpen: readConversationsOpen(),
 	workspaceWidth: readWorkspaceWidth(),
@@ -137,13 +148,17 @@ export const useChatStore = create<ChatState>((set) => ({
 	// starting a chat just switches the active thread id.
 	selectThread: (threadId) => {
 		persistThreadId(threadId);
-		set({ threadId });
+		set({ threadId, freshThread: false });
 	},
 	newChat: () => {
 		const threadId = newThreadId();
 		persistThreadId(threadId);
 		// A brand-new chat starts from the account default until a run persists it.
-		set({ threadId, autoApprove: useChatStore.getState().autoApproveDefault });
+		set({
+			threadId,
+			freshThread: true,
+			autoApprove: useChatStore.getState().autoApproveDefault,
+		});
 	},
 	setWorkspaceWidth: (px) => {
 		const workspaceWidth = clampWidth(px);

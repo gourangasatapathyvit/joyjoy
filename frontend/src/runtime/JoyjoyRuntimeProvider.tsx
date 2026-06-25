@@ -503,6 +503,9 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 				.join("")
 				.trim();
 			if (!text) return;
+			// Once a chat has a sent message it's no longer "fresh" — a later remount
+			// (settings→chat) must reload its messages with a spinner, not skip them.
+			useChatStore.setState({ freshThread: false });
 			// The composer attaches a "Quote" selection at metadata.custom.quote
 			// (see assistant-ui's base composer send()).
 			const quote = (
@@ -629,33 +632,33 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 	// Load a saved conversation when the active thread changes (sidebar select or
 	// "new chat"). A brand-new thread isn't persisted yet → 404 → render empty.
 	// loadSeqRef guards against an older fetch resolving after a newer switch.
-	const loadThread = useCallback(
-		async (tid: string) => {
-			const seq = ++loadSeqRef.current;
-			teardownRun(activeRunRef.current); // switching threads cancels the in-flight run
-			setPending({});
-			toolByNameRef.current = {};
-			// Clear stale content immediately so the previous thread doesn't linger.
-			setMessages([]);
-			// Only a persisted thread (present in the sidebar list) has messages to
-			// fetch → show the loading spinner. A brand-new chat isn't in the list, so
-			// skip it and let the Welcome view render instead (no spinner flash).
-			const cached = queryClient.getQueryData<{ sessions: { thread_id: string }[] }>(
-				["sessions"],
-			);
-			const isExisting = !!cached?.sessions?.some((s) => s.thread_id === tid);
-			if (isExisting) setThreadLoading(true);
-			try {
-				const { messages: wire } = await sessionApi.messages(tid);
-				if (seq === loadSeqRef.current) setMessages(wireToUI(wire));
-			} catch {
-				if (seq === loadSeqRef.current) setMessages([]);
-			} finally {
-				if (seq === loadSeqRef.current) setThreadLoading(false);
-			}
-		},
-		[queryClient],
-	);
+	const loadThread = useCallback(async (tid: string) => {
+		const seq = ++loadSeqRef.current;
+		teardownRun(activeRunRef.current); // switching threads cancels the in-flight run
+		setPending({});
+		toolByNameRef.current = {};
+		// Clear stale content immediately so the previous thread doesn't linger.
+		setMessages([]);
+		// A brand-new, never-sent chat has nothing to fetch → show the Welcome, not a
+		// spinner. Any other thread (sidebar tap, refresh-restore, settings→chat) may
+		// have saved messages, so show the loading spinner while they load. This does
+		// NOT depend on the sessions cache (cold on a full refresh), so it works on
+		// reload and remount too.
+		const fresh = useChatStore.getState().freshThread;
+		if (fresh) {
+			setThreadLoading(false);
+			return;
+		}
+		setThreadLoading(true);
+		try {
+			const { messages: wire } = await sessionApi.messages(tid);
+			if (seq === loadSeqRef.current) setMessages(wireToUI(wire));
+		} catch {
+			if (seq === loadSeqRef.current) setMessages([]);
+		} finally {
+			if (seq === loadSeqRef.current) setThreadLoading(false);
+		}
+	}, []);
 
 	useEffect(() => {
 		loadThread(threadId);
