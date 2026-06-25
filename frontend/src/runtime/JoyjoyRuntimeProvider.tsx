@@ -221,6 +221,9 @@ function wireToUI(wire: SessionMessageWire[]): UIMessage[] {
 export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 	const [messages, setMessages] = useState<UIMessage[]>([]);
 	const [isRunning, setIsRunning] = useState(false);
+	// True while an EXISTING thread's messages are being fetched (sidebar tap) →
+	// surfaced as the runtime's `isLoading` so the Thread shows a loading spinner.
+	const [threadLoading, setThreadLoading] = useState(false);
 	const [pending, setPending] = useState<Record<string, ApprovalInfo>>({});
 	const threadId = useChatStore((s) => s.threadId);
 	const queryClient = useQueryClient();
@@ -626,18 +629,33 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 	// Load a saved conversation when the active thread changes (sidebar select or
 	// "new chat"). A brand-new thread isn't persisted yet → 404 → render empty.
 	// loadSeqRef guards against an older fetch resolving after a newer switch.
-	const loadThread = useCallback(async (tid: string) => {
-		const seq = ++loadSeqRef.current;
-		teardownRun(activeRunRef.current); // switching threads cancels the in-flight run
-		setPending({});
-		toolByNameRef.current = {};
-		try {
-			const { messages: wire } = await sessionApi.messages(tid);
-			if (seq === loadSeqRef.current) setMessages(wireToUI(wire));
-		} catch {
-			if (seq === loadSeqRef.current) setMessages([]);
-		}
-	}, []);
+	const loadThread = useCallback(
+		async (tid: string) => {
+			const seq = ++loadSeqRef.current;
+			teardownRun(activeRunRef.current); // switching threads cancels the in-flight run
+			setPending({});
+			toolByNameRef.current = {};
+			// Clear stale content immediately so the previous thread doesn't linger.
+			setMessages([]);
+			// Only a persisted thread (present in the sidebar list) has messages to
+			// fetch → show the loading spinner. A brand-new chat isn't in the list, so
+			// skip it and let the Welcome view render instead (no spinner flash).
+			const cached = queryClient.getQueryData<{ sessions: { thread_id: string }[] }>(
+				["sessions"],
+			);
+			const isExisting = !!cached?.sessions?.some((s) => s.thread_id === tid);
+			if (isExisting) setThreadLoading(true);
+			try {
+				const { messages: wire } = await sessionApi.messages(tid);
+				if (seq === loadSeqRef.current) setMessages(wireToUI(wire));
+			} catch {
+				if (seq === loadSeqRef.current) setMessages([]);
+			} finally {
+				if (seq === loadSeqRef.current) setThreadLoading(false);
+			}
+		},
+		[queryClient],
+	);
 
 	useEffect(() => {
 		loadThread(threadId);
@@ -707,6 +725,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 	const runtime = useExternalStoreRuntime({
 		messages,
 		isRunning,
+		isLoading: threadLoading,
 		convertMessage,
 		onNew,
 		onEdit,

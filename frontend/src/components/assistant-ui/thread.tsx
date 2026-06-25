@@ -21,6 +21,7 @@ import {
 	ChevronRightIcon,
 	CopyIcon,
 	DownloadIcon,
+	Loader2Icon,
 	MicIcon,
 	MoreHorizontalIcon,
 	PencilIcon,
@@ -147,6 +148,7 @@ export const Thread: FC<ThreadProps> = ({ components = EMPTY_COMPONENTS }) => {
 };
 
 const ThreadRoot: FC<{ isEmpty: boolean }> = ({ isEmpty }) => {
+	const { t } = useTranslation();
 	const { Welcome = ThreadWelcome } = useContext(ThreadComponentsContext);
 	const autoFollow = useSettingsStore((s) => s.autoFollow);
 
@@ -176,6 +178,14 @@ const ThreadRoot: FC<{ isEmpty: boolean }> = ({ isEmpty }) => {
 				>
 					<AuiIf condition={isNewChatView}>
 						<Welcome />
+					</AuiIf>
+
+					{/* Loading a saved conversation (sidebar tap) — built-in thread.isLoading */}
+					<AuiIf condition={(s) => s.thread.isLoading}>
+						<div className="flex flex-1 items-center justify-center gap-2 py-16 text-muted-foreground">
+							<Loader2Icon className="size-5 animate-spin" />
+							<span className="text-sm">{t("common.loading")}</span>
+						</div>
 					</AuiIf>
 
 					<div
