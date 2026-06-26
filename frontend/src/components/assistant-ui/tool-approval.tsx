@@ -86,7 +86,11 @@ export function ToolFallbackApproval({
 
 	const respond = (approved: boolean) => {
 		if (submitted) return;
-		if (approval != null && approval.approved === undefined && respondToApproval) {
+		if (
+			approval != null &&
+			approval.approved === undefined &&
+			respondToApproval
+		) {
 			respondToApproval({ approved });
 		} else if (interrupt) {
 			resume?.({ approved });
@@ -119,7 +123,8 @@ export function ToolFallbackApproval({
 	if (confirming) {
 		const confirmMeta =
 			typeof confirming.confirm === "object" ? confirming.confirm : undefined;
-		const confirmDescription = confirmMeta?.description ?? confirming.description;
+		const confirmDescription =
+			confirmMeta?.description ?? confirming.description;
 		return (
 			<div
 				data-slot="tool-fallback-approval-confirm"

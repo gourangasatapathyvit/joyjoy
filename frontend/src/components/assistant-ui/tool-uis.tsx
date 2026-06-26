@@ -169,7 +169,9 @@ function DiffView({ oldText, newText }: { oldText: string; newText: string }) {
 /** Parse deepagents' line-numbered read_file output (`"   12\t<text>"`, with
  * `12.1`-style continuation rows for wrapped long lines) into number + text.
  * Lines that don't match (e.g. the empty-file system reminder) keep no number. */
-function parseNumberedLines(text: string): { no: string | null; text: string }[] {
+function parseNumberedLines(
+	text: string,
+): { no: string | null; text: string }[] {
 	return text.split("\n").map((line) => {
 		const m = line.match(/^\s*(\d+(?:\.\d+)?)\t(.*)$/);
 		return m ? { no: m[1], text: m[2] } : { no: null, text: line };
@@ -238,7 +240,9 @@ const ExecuteToolUI: ToolCallMessagePartComponent = (part) => {
 };
 
 const WriteFileToolUI: ToolCallMessagePartComponent = (part) => {
-	const args = part.args as { file_path?: string; content?: string } | undefined;
+	const args = part.args as
+		| { file_path?: string; content?: string }
+		| undefined;
 	return (
 		<ToolShell
 			part={part}
@@ -360,7 +364,9 @@ const GlobToolUI: ToolCallMessagePartComponent = (part) => {
 	const entries = parsePyList(resultToText(part.result));
 	const note = [
 		args?.path,
-		entries ? `${entries.length} match${entries.length === 1 ? "" : "es"}` : null,
+		entries
+			? `${entries.length} match${entries.length === 1 ? "" : "es"}`
+			: null,
 	]
 		.filter(Boolean)
 		.join(" · ");

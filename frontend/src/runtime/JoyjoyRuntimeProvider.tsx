@@ -33,8 +33,8 @@ import {
 } from "@/lib/media";
 import { baseName } from "@/lib/text";
 import { prefixedId } from "@/lib/utils";
-import { useChatStore } from "@/store/chat";
 import { workspaceAttachmentAdapter } from "@/runtime/workspaceAttachment";
+import { useChatStore } from "@/store/chat";
 
 type JsonValue =
 	| string
@@ -506,10 +506,20 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 			// Attachments (already uploaded to the workspace by the adapter's send()):
 			// names for the visible bubble, their text parts for the agent instruction.
 			const atts =
-				(message as { attachments?: readonly { name: string; content?: { type: string; text?: string }[] }[] })
-					.attachments ?? [];
+				(
+					message as {
+						attachments?: readonly {
+							name: string;
+							content?: { type: string; text?: string }[];
+						}[];
+					}
+				).attachments ?? [];
 			const attNote = atts
-				.flatMap((a) => (a.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? ""))
+				.flatMap((a) =>
+					(a.content ?? [])
+						.filter((c) => c.type === "text")
+						.map((c) => c.text ?? ""),
+				)
 				.join("\n");
 			if (!text && atts.length === 0) return;
 			// Once a chat has a sent message it's no longer "fresh" — a later remount
@@ -522,10 +532,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 			)?.quote;
 			const assistantId = newId("a");
 			// Visible user bubble: typed text + a 📎 line per attachment.
-			const displayText = [
-				text,
-				...atts.map((a) => `📎 ${a.name}`),
-			]
+			const displayText = [text, ...atts.map((a) => `📎 ${a.name}`)]
 				.filter(Boolean)
 				.join("\n");
 			// Sent to the agent: typed text + the workspace-file instruction(s).

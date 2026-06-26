@@ -59,12 +59,12 @@ import {
 	ReasoningTrigger,
 } from "@/components/assistant-ui/reasoning";
 import { ToolFallback } from "@/components/assistant-ui/tool-fallback";
-import { TOOL_UIS } from "@/components/assistant-ui/tool-uis";
 import {
 	ToolGroupContent,
 	ToolGroupRoot,
 	ToolGroupTrigger,
 } from "@/components/assistant-ui/tool-group";
+import { TOOL_UIS } from "@/components/assistant-ui/tool-uis";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
