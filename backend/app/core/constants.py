@@ -20,6 +20,16 @@ MB = 1024 * 1024
 # Compiled-agent LRU cache bound (agent_common.cache_put evicts past this).
 AGENT_CACHE_MAX = 128
 
+# ---- Production agent-loop guards (langchain middleware, added in agent_middleware) ----
+# Per-turn (run) caps that bound a pathological/runaway agent loop without tripping
+# legitimate multi-step tasks (generous headroom; a real loop blows past these). On
+# hit, the run ends gracefully (returns what the agent has) rather than erroring.
+MODEL_RUN_CALL_LIMIT = 50   # max model calls in one user turn
+TOOL_RUN_CALL_LIMIT = 100   # max tool calls in one user turn
+# Transient model-error retry (rate-limit/5xx/timeout/connection only — never 4xx).
+MODEL_MAX_RETRIES = 3
+MODEL_RETRY_MAX_DELAY_S = 20.0
+
 # TTL (seconds) for the per-user blob cache (merged model specs + loaded MCP tools)
 # in agent_common. Cleared eagerly on any per-user CRUD write; this bounds staleness
 # for changes that bypass that path (e.g. global-seed edits) while still removing the

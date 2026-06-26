@@ -33,7 +33,7 @@ from langgraph.runtime import get_runtime
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 
-from app.agent.middleware import StripStaleThinkingMiddleware
+from app.agent.middleware import agent_middleware
 from app.agent.agent_common import (
     _MCP_BLOB,
     _SPEC_BLOB,
@@ -673,10 +673,10 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
         store=store,
         context_schema=AgentContext,
         interrupt_on=interrupt_on,
-        # Additive (does NOT replace deepagents' built-in stack): strips empty/redacted
-        # thinking blocks from prior turns so multi-turn reasoning chats don't 400 on
-        # Foundry Claude. See app/agent/middleware.py.
-        middleware=[StripStaleThinkingMiddleware()],
+        # Additive (does NOT replace deepagents' built-in stack): thinking-block fix +
+        # production guards (call/tool limits, transient retry, context trimming).
+        # See app/agent/middleware.py:agent_middleware().
+        middleware=agent_middleware(),
         skills=SKILL_SOURCES,
         # deepagents MemoryMiddleware: loads the user's AGENTS.md (served from the
         # DB via the /memory/ mount) into the prompt and lets the agent update it
