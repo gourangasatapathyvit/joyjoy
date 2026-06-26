@@ -143,6 +143,14 @@ services:
     # "sh: Syntax error: && unexpected" and the server never starts. One line, no folding.
     command: ["sh", "-c", "pip install --no-cache-dir uv && uvx --from opensandbox-server opensandbox-server --config /app/sandbox.toml"]
 
+networks:
+  # Pin the default network to a FIXED name (not the implicit "<project>_default",
+  # which changes with the directory/COMPOSE_PROJECT_NAME). The OpenSandbox server
+  # spawns per-session sandbox containers onto this network by name (sandbox.toml →
+  # [docker] network_mode), so it must be stable + portable. Keep the two in sync.
+  default:
+    name: joyjoy-net
+
 volumes:
   pgdata:            # used only by the `db` service (localdb profile / DB_HOSTER=0)
   workspaces:

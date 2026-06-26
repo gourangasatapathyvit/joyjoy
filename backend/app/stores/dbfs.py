@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import time
 
 from deepagents.backends.protocol import (
     BackendProtocol,
@@ -36,8 +37,17 @@ from deepagents.backends.utils import (
 from langgraph.config import get_store
 from sqlalchemy import select
 
-from app.agent.agent_common import invalidate_user_cache
-from app.core.constants import DEFAULT_USER_ID, FILE_READ_DEFAULT_LIMIT
+from app.agent.agent_common import (
+    invalidate_user_cache,
+    jittered_ttl,
+    user_blob_get,
+    user_blob_put,
+)
+from app.core.constants import (
+    DEFAULT_USER_ID,
+    FILE_READ_DEFAULT_LIMIT,
+    GLOBAL_SKILL_MANIFEST_TTL_S,
+)
 from app.db import db_session, get_or_create_user_config
 from app.db.models import GlobalSkill, SkillFile, UserConfig, UserSkill
 
@@ -174,6 +184,10 @@ class DbSkillsBackend(BackendProtocol):
     ``skill_files`` (base64-decoded for binaries). Read-only to the agent; only ENABLED
     skills are exposed for loading. The middleware calls the async methods."""
 
+    # Read-only global skills manifest, shared across all users/instances:
+    # (expiry_monotonic, {name: SKILL.md content}). See _manifest().
+    _GLOBAL_MANIFEST: tuple[float, dict[str, str]] | None = None
+
     def __init__(self, user_id: str | None = None) -> None:
         # None => global scope; otherwise the per-user scope.
         self.user_id = str(user_id) if user_id is not None else None
@@ -185,6 +199,35 @@ class DbSkillsBackend(BackendProtocol):
     @staticmethod
     def _parts(path: str) -> list[str]:
         return [p for p in (path or "").strip("/").split("/") if p]
+
+    _SKILL_MANIFEST_BLOB = "skill_manifest"
+
+    async def _manifest(self) -> dict[str, str]:
+        """``{skill_name: SKILL.md content}`` for this scope, loaded in ONE bulk query
+        and cached. The SkillsMiddleware re-lists + downloads every SKILL.md on every
+        turn; serving that from this cache turns an N+1 of remote-DB round-trips into
+        zero. Global scope → module cache (read-only at runtime, TTL only); user scope
+        → the per-user blob cache (cleared on user-skill CRUD via invalidate_user_cache)."""
+        if self._is_global:
+            ent = DbSkillsBackend._GLOBAL_MANIFEST
+            if ent is not None and ent[0] > time.monotonic():
+                return ent[1]
+            man = await self._load_manifest()
+            DbSkillsBackend._GLOBAL_MANIFEST = (
+                time.monotonic() + jittered_ttl(GLOBAL_SKILL_MANIFEST_TTL_S),
+                man,
+            )
+            return man
+        cached = user_blob_get(self.user_id, self._SKILL_MANIFEST_BLOB)
+        if cached is not None:
+            return cached  # type: ignore[return-value]
+        man = await self._load_manifest()
+        user_blob_put(self.user_id, self._SKILL_MANIFEST_BLOB, man)
+        return man
+
+    async def _load_manifest(self) -> dict[str, str]:
+        async with db_session() as s:
+            return {r.name: (r.content or "") for r in await self._list_skills(s)}
 
     async def _list_skills(self, s):
         if self._is_global:
@@ -218,10 +261,13 @@ class DbSkillsBackend(BackendProtocol):
 
     async def als(self, path: str = "/") -> LsResult:
         parts = self._parts(path)
+        if not parts:
+            # Hot path (called by SkillsMiddleware every turn): names from the cache.
+            man = await self._manifest()
+            return LsResult(
+                entries=[FileInfo(path=f"/{n}", is_dir=True, size=0, modified_at="") for n in man]
+            )
         async with db_session() as s:
-            if not parts:
-                rows = await self._list_skills(s)
-                return LsResult(entries=[FileInfo(path=f"/{r.name}", is_dir=True, size=0, modified_at="") for r in rows])
             name = parts[0]
             sk = await self._skill(s, name)
             if not sk:
@@ -232,12 +278,16 @@ class DbSkillsBackend(BackendProtocol):
             return LsResult(entries=entries)
 
     async def _resolve_bytes(self, name: str, filename: str) -> bytes | None:
+        # Hot path: SKILL.md (downloaded for every skill, every turn) → cached manifest.
+        if filename == "SKILL.md":
+            man = await self._manifest()
+            content = man.get(name)
+            return content.encode("utf-8") if content is not None else None
+        # Helper files (only read when a skill is actively loaded) → DB.
         async with db_session() as s:
             sk = await self._skill(s, name)
             if not sk:
                 return None
-            if filename == "SKILL.md":
-                return (sk.content or "").encode("utf-8")
             f = await self._file_row(s, sk.id, filename)
             return _file_bytes(f) if f else None
 

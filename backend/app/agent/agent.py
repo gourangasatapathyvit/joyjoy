@@ -35,9 +35,13 @@ from sqlalchemy import select
 
 from app.agent.middleware import StripStaleThinkingMiddleware
 from app.agent.agent_common import (
+    _MCP_BLOB,
+    _SPEC_BLOB,
     cache_get,
     cache_put,
     invalidate_user_cache as _invalidate_user_cache,
+    user_blob_get,
+    user_blob_put,
     valid_name as _valid_name,
 )
 from app.sandbox import sandbox
@@ -442,7 +446,21 @@ def _spec_from_row(settings: Settings, model_id: str, provider_name: str, settin
 
 async def merged_model_specs(settings: Settings, user_id: str | None = None) -> dict[str, dict]:
     """Global catalog + the user's own models on top, all from the DB (secrets
-    decrypted). A user entry with the same id overrides the global one."""
+    decrypted). A user entry with the same id overrides the global one.
+
+    Cached per-user (TTL + invalidate_user_cache on writes): this is read up to ~4×
+    per chat message (route + _get_or_build + build_model_for), each a remote-DB
+    round-trip, so the cache removes that repeated cost from every message."""
+    uid = str(user_id or DEFAULT_USER_ID)
+    cached = user_blob_get(uid, _SPEC_BLOB)
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+    specs = await _merged_model_specs_uncached(settings, user_id)
+    user_blob_put(uid, _SPEC_BLOB, specs)
+    return specs
+
+
+async def _merged_model_specs_uncached(settings: Settings, user_id: str | None = None) -> dict[str, dict]:
     specs: dict[str, dict] = {}
     async with db_session() as s:
         grows = await s.execute(
@@ -624,7 +642,14 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
     agent = cache_get(key)
     if agent is not None:
         return agent
-    mcp_tools = await load_mcp_tools(settings, uid)
+    # MCP tool enumeration spawns stdio servers (~3s) and is independent of
+    # (model, reasoning) — cache it per-user so only the FIRST cold build for a user
+    # pays it, not every model/reasoning combo. Binding to the session workspace is
+    # re-applied per build (it resolves the thread at call time, not here).
+    mcp_tools = user_blob_get(uid, _MCP_BLOB)
+    if mcp_tools is None:
+        mcp_tools = await load_mcp_tools(settings, uid)
+        user_blob_put(uid, _MCP_BLOB, mcp_tools)
     mcp_tools = _bind_session_workspace(mcp_tools)  # inject per-thread workspace_id
     tools = list(mcp_tools)
     if sandbox.is_enabled(settings):

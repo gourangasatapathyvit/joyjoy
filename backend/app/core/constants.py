@@ -20,6 +20,25 @@ MB = 1024 * 1024
 # Compiled-agent LRU cache bound (agent_common.cache_put evicts past this).
 AGENT_CACHE_MAX = 128
 
+# TTL (seconds) for the per-user blob cache (merged model specs + loaded MCP tools)
+# in agent_common. Cleared eagerly on any per-user CRUD write; this bounds staleness
+# for changes that bypass that path (e.g. global-seed edits) while still removing the
+# repeated remote-DB reads / MCP stdio spawns from the hot agent-build path.
+USER_BLOB_TTL_S = 60.0
+# Hard cap on total entries in the per-user blob cache (LRU-evicted past this) so a
+# long-lived process serving many users can't grow without bound. ~2 blobs/user.
+USER_BLOB_CACHE_MAX = 512
+# Fractional jitter applied to every cache TTL (±) so entries created together don't
+# all expire in the same instant (avoids a synchronized refill / thundering herd).
+CACHE_TTL_JITTER = 0.15
+
+# TTL (seconds) for the read-only GLOBAL skills manifest cache (dbfs.DbSkillsBackend).
+# The deepagents SkillsMiddleware re-lists + downloads every skill's SKILL.md on each
+# turn; without this that's an N+1 of remote-DB round-trips per message. Global skills
+# don't change at runtime (the UI rejects global edits), so a TTL alone is safe; the
+# per-user manifest rides the user-blob cache and is cleared on user-skill CRUD.
+GLOBAL_SKILL_MANIFEST_TTL_S = 300.0
+
 # ---- timeouts (seconds) ----
 # Seconds to wait when probing one MCP server's tool list — one slow/dead server
 # must not hang the agent build or the MCP tab (mcp_runtime).

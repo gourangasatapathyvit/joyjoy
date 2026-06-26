@@ -50,13 +50,14 @@ type = "sqlite"
 path = "~/.opensandbox/opensandbox.db"
 
 [docker]
-# Attach spawned sandbox containers to the COMPOSE network (project_default) — NOT
-# the default "bridge" — so the opensandbox server (also on this network) can reach
-# them in server-proxy mode. With "bridge" the sandboxes land on 172.17.x while the
-# server is on the compose net 172.22.x → server→sandbox unreachable → health-check
-# timeouts. The name is "<compose-project>_default"; here the project dir is "joyjoy".
-# For the host dev path (server runs on the host, not in compose) set this to "bridge".
-network_mode = "joyjoy_default"
+# Attach spawned sandbox containers to the COMPOSE network — NOT the default "bridge"
+# — so the opensandbox server (also on this network) can reach them in server-proxy
+# mode. With "bridge" the sandboxes land on 172.17.x while the server is on the compose
+# net → server→sandbox unreachable → health-check timeouts. This MUST match the pinned
+# network name in docker-compose.yml (networks.default.name = joyjoy-net) — it no longer
+# depends on the project/directory name. For the host dev path (server runs on the host,
+# not in compose) set this to "bridge".
+network_mode = "joyjoy-net"
 
 # Drop dangerous capabilities and block privilege escalation
 drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
