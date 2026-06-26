@@ -144,7 +144,7 @@ function DiffView({ oldText, newText }: { oldText: string; newText: string }) {
 			<div className="max-h-96 overflow-auto font-mono leading-relaxed">
 				{rows.map((r, idx) => (
 					<div
-						// Lines can repeat, so index is part of the key.
+						// biome-ignore lint/suspicious/noArrayIndexKey: diff rows are a static, non-reordering snapshot
 						key={`${r.type}-${idx}-${r.text}`}
 						className={cn(
 							"px-2.5 whitespace-pre-wrap",
@@ -184,6 +184,7 @@ function CodeListing({ text }: { text: string }) {
 	return (
 		<div className="bg-muted/30 max-h-96 overflow-auto rounded-md border font-mono text-xs">
 			{lines.map((l, idx) => (
+				// biome-ignore lint/suspicious/noArrayIndexKey: file listing is static, never reordered
 				<div key={`${idx}-${l.no ?? ""}`} className="flex">
 					{hasNumbers && (
 						<span className="text-muted-foreground/60 border-border/60 shrink-0 select-none border-r px-2 text-right tabular-nums">
@@ -312,6 +313,7 @@ function MonoList({ lines, empty }: { lines: string[]; empty: string }) {
 	return (
 		<div className="bg-muted/30 max-h-96 overflow-auto rounded-md border px-2.5 py-1 font-mono text-xs">
 			{lines.map((l, idx) => (
+				// biome-ignore lint/suspicious/noArrayIndexKey: result lines are static, never reordered
 				<div key={`${idx}-${l}`} className="whitespace-pre-wrap">
 					{l || " "}
 				</div>
@@ -417,9 +419,144 @@ const GrepToolUI: ToolCallMessagePartComponent = (part) => {
 	);
 };
 
+const TodoChecklistUI: ToolCallMessagePartComponent = (part) => {
+	const todos =
+		(
+			part.args as
+				| { todos?: { content?: string; status?: string }[] }
+				| undefined
+		)?.todos ?? [];
+	return (
+		<ToolShell
+			part={part}
+			hideResult
+			body={
+				todos.length === 0 ? (
+					<p className="text-muted-foreground text-xs">No todos</p>
+				) : (
+					<ul className="flex flex-col gap-1 text-sm">
+						{todos.map((todo, idx) => {
+							const status = todo.status ?? "pending";
+							return (
+								<li
+									// biome-ignore lint/suspicious/noArrayIndexKey: ordered task list, position is the identity
+									key={`${idx}-${todo.content}`}
+									className="flex items-start gap-2"
+								>
+									<span
+										className={cn(
+											"mt-0.5 select-none",
+											status === "completed" &&
+												"text-emerald-600 dark:text-emerald-400",
+											status === "in_progress" &&
+												"text-amber-600 dark:text-amber-400",
+											status === "pending" && "text-muted-foreground",
+										)}
+									>
+										{status === "completed"
+											? "✓"
+											: status === "in_progress"
+												? "◐"
+												: "○"}
+									</span>
+									<span
+										className={cn(
+											status === "completed" &&
+												"text-muted-foreground line-through",
+										)}
+									>
+										{todo.content}
+									</span>
+								</li>
+							);
+						})}
+					</ul>
+				)
+			}
+		/>
+	);
+};
+
+const SubagentToolUI: ToolCallMessagePartComponent = (part) => {
+	const args = part.args as
+		| { description?: string; subagent_type?: string }
+		| undefined;
+	const result = typeof part.result === "string" ? part.result : "";
+	return (
+		<ToolShell
+			part={part}
+			hideResult={!!result}
+			body={
+				<>
+					{args?.subagent_type && (
+						<div className="flex flex-wrap items-center gap-2 text-xs">
+							<code className="bg-muted rounded px-1.5 py-0.5 font-mono">
+								🤖 {args.subagent_type}
+							</code>
+						</div>
+					)}
+					{args?.description && (
+						<p className="text-muted-foreground text-xs whitespace-pre-wrap">
+							{args.description}
+						</p>
+					)}
+					{result && (
+						<div className="bg-muted/30 max-h-96 overflow-auto rounded-md border px-2.5 py-1.5 text-sm whitespace-pre-wrap">
+							{result}
+						</div>
+					)}
+				</>
+			}
+		/>
+	);
+};
+
+const FetchContentToolUI: ToolCallMessagePartComponent = (part) => {
+	const args = part.args as Record<string, unknown> | undefined;
+	const url =
+		(typeof args?.url === "string" && args.url) ||
+		(typeof args?.uri === "string" && args.uri) ||
+		(args
+			? (Object.values(args).find(
+					(v) => typeof v === "string" && /^https?:\/\//.test(v),
+				) as string | undefined)
+			: undefined);
+	const text = resultToText(part.result);
+	return (
+		<ToolShell
+			part={part}
+			hideResult={!!text}
+			body={
+				<>
+					{url && (
+						<a
+							href={url}
+							target="_blank"
+							rel="noopener noreferrer"
+							className="text-primary text-xs break-all underline"
+						>
+							{url}
+						</a>
+					)}
+					{text && (
+						<div className="bg-muted/30 max-h-96 overflow-auto rounded-md border px-2.5 py-1.5 text-sm whitespace-pre-wrap">
+							{text}
+						</div>
+					)}
+				</>
+			}
+		/>
+	);
+};
+
 /** Tool-name → bespoke renderer. `thread.tsx` consults this in the `tool-call`
- * switch, falling back to the generic `ToolFallback` for anything not listed. */
+ * switch, falling back to the generic `ToolFallback` for anything not listed.
+ * (The generic fallback itself now renders structured JSON results as tables,
+ * so unlisted MCP tools already display readably.) */
 export const TOOL_UIS: Record<string, ToolCallMessagePartComponent> = {
+	write_todos: TodoChecklistUI,
+	task: SubagentToolUI,
+	fetch_content: FetchContentToolUI,
 	execute: ExecuteToolUI,
 	write_file: WriteFileToolUI,
 	edit_file: EditFileToolUI,

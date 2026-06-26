@@ -3,6 +3,24 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 @import "tw-shimmer";
+@import "streamdown/styles.css";
+
+/* Streamdown renders its markdown/code-block/diagram chrome with Tailwind
+   utility classes; styles.css only ships keyframes. Tailwind v4 excludes
+   node_modules from auto-scan, so point it at streamdown's dist or the
+   header gap / unstyled controls (copy, download, fullscreen) appear. */
+@source "../node_modules/streamdown/dist";
+
+/* Shiki dual-theme switch: tokens carry the light color inline + a
+   `--shiki-dark` custom prop; in dark mode swap to it so code is colorized
+   (joyjoy toggles the `.dark` class via next-themes). */
+.dark .shiki,
+.dark .shiki span {
+	color: var(--shiki-dark, inherit) !important;
+	background-color: var(--shiki-dark-bg, transparent) !important;
+	font-style: var(--shiki-dark-font-style, inherit) !important;
+	font-weight: var(--shiki-dark-font-weight, inherit) !important;
+}
 
 @custom-variant dark (&:is(.dark *));
 

@@ -27,6 +27,7 @@ import {
 	PencilIcon,
 	RefreshCwIcon,
 	SquareIcon,
+	Volume2Icon,
 } from "lucide-react";
 import {
 	type ComponentType,
@@ -549,6 +550,18 @@ const AssistantActionBar: FC = () => {
 			>
 				<RefreshCwIcon />
 			</ActionBarPrimitive.Reload>
+			{/* Read aloud (Web Speech TTS) — shown only while not speaking; the
+			    StopSpeaking variant replaces it during playback. */}
+			<ActionBarPrimitive.Speak
+				render={<TooltipIconButton tooltip="Read aloud" />}
+			>
+				<Volume2Icon />
+			</ActionBarPrimitive.Speak>
+			<ActionBarPrimitive.StopSpeaking
+				render={<TooltipIconButton tooltip="Stop" />}
+			>
+				<SquareIcon />
+			</ActionBarPrimitive.StopSpeaking>
 			<ActionBarMorePrimitive.Root>
 				<ActionBarMorePrimitive.Trigger
 					render={

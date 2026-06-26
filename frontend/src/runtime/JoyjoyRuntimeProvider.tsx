@@ -4,6 +4,8 @@ import {
 	type QuoteInfo,
 	type ThreadMessageLike,
 	useExternalStoreRuntime,
+	WebSpeechDictationAdapter,
+	WebSpeechSynthesisAdapter,
 } from "@assistant-ui/react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -756,6 +758,11 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 		() => workspaceAttachmentAdapter(() => useChatStore.getState().threadId),
 		[],
 	);
+	// Voice I/O via the browser's Web Speech API (built-in adapters): TTS powers
+	// the assistant Read-aloud action; dictation powers the composer mic button
+	// (its UI already exists, gated on the dictation adapter being present).
+	const speech = useMemo(() => new WebSpeechSynthesisAdapter(), []);
+	const dictation = useMemo(() => new WebSpeechDictationAdapter(), []);
 	const runtime = useExternalStoreRuntime({
 		messages,
 		isRunning,
@@ -765,7 +772,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 		onEdit,
 		onReload,
 		onCancel,
-		adapters: { attachments },
+		adapters: { attachments, speech, dictation },
 	});
 	const approvalsValue = useMemo<ApprovalsContextValue>(
 		() => ({ pending, hasPending: Object.keys(pending).length > 0, respond }),

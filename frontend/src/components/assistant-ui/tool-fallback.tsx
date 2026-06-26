@@ -241,6 +241,124 @@ function ToolFallbackArgs({
 	);
 }
 
+// If the result is (or is a string encoding) a JSON array/object, return the
+// parsed value so it can be rendered structurally; otherwise return as-is.
+function coerceStructured(result: unknown): unknown {
+	if (result !== null && typeof result === "object") return result;
+	if (typeof result === "string") {
+		const t = result.trim();
+		if (t.startsWith("{") || t.startsWith("[")) {
+			try {
+				return JSON.parse(t);
+			} catch {
+				/* not JSON — fall through to text */
+			}
+		}
+	}
+	return result;
+}
+
+function cellText(v: unknown): string {
+	if (v === null || v === undefined) return "";
+	if (typeof v === "object") return JSON.stringify(v);
+	return String(v);
+}
+
+/** Render a tool result: a table for an array of uniform objects, a key/value
+ * table for a single object, a list for a primitive array, and otherwise the
+ * raw text. Lets every tool on the generic fallback (notably MCP tools that
+ * return JSON) display readably instead of as one JSON blob. */
+function StructuredResult({ result }: { result: unknown }) {
+	const data = coerceStructured(result);
+	const Box = "max-h-96 overflow-auto rounded-md border text-xs";
+
+	// Array of plain objects → table.
+	if (
+		Array.isArray(data) &&
+		data.length > 0 &&
+		data.every((x) => x !== null && typeof x === "object" && !Array.isArray(x))
+	) {
+		const cols: string[] = [];
+		for (const row of data as Record<string, unknown>[])
+			for (const k of Object.keys(row)) if (!cols.includes(k)) cols.push(k);
+		if (cols.length > 0 && cols.length <= 12) {
+			return (
+				<div className={Box}>
+					<table className="w-full border-collapse">
+						<thead>
+							<tr className="bg-muted/50 text-left">
+								{cols.map((c) => (
+									<th key={c} className="border-b px-2 py-1 font-medium">
+										{c}
+									</th>
+								))}
+							</tr>
+						</thead>
+						<tbody>
+							{(data as Record<string, unknown>[]).map((row, i) => (
+								// biome-ignore lint/suspicious/noArrayIndexKey: static result snapshot, never reordered
+								<tr key={i} className="border-b last:border-0 align-top">
+									{cols.map((c) => (
+										<td key={c} className="px-2 py-1 whitespace-pre-wrap">
+											{cellText(row[c])}
+										</td>
+									))}
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
+			);
+		}
+	}
+
+	// Single object → key/value table.
+	if (data !== null && typeof data === "object" && !Array.isArray(data)) {
+		const entries = Object.entries(data as Record<string, unknown>);
+		if (entries.length > 0) {
+			return (
+				<div className={Box}>
+					<table className="w-full border-collapse">
+						<tbody>
+							{entries.map(([k, v]) => (
+								<tr key={k} className="border-b align-top last:border-0">
+									<td className="bg-muted/50 px-2 py-1 font-medium whitespace-nowrap">
+										{k}
+									</td>
+									<td className="px-2 py-1 whitespace-pre-wrap">
+										{cellText(v)}
+									</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
+			);
+		}
+	}
+
+	// Array of primitives → simple list.
+	if (Array.isArray(data) && data.length > 0) {
+		return (
+			<div className={cn(Box, "bg-muted/30 px-2.5 py-1 font-mono")}>
+				{(data as unknown[]).map((v, i) => (
+					// biome-ignore lint/suspicious/noArrayIndexKey: static result snapshot, never reordered
+					<div key={i} className="whitespace-pre-wrap">
+						{cellText(v)}
+					</div>
+				))}
+			</div>
+		);
+	}
+
+	// Anything else → text.
+	return (
+		<pre className="aui-tool-fallback-result-content bg-muted/50 text-muted-foreground mt-1 rounded-md p-2.5 text-xs whitespace-pre-wrap">
+			{typeof result === "string" ? result : JSON.stringify(result, null, 2)}
+		</pre>
+	);
+}
+
 function ToolFallbackResult({
 	result,
 	className,
@@ -259,9 +377,9 @@ function ToolFallbackResult({
 			<p className="aui-tool-fallback-result-header text-muted-foreground text-xs font-medium">
 				Result:
 			</p>
-			<pre className="aui-tool-fallback-result-content bg-muted/50 text-muted-foreground mt-1 rounded-md p-2.5 text-xs whitespace-pre-wrap">
-				{typeof result === "string" ? result : JSON.stringify(result, null, 2)}
-			</pre>
+			<div className="mt-1">
+				<StructuredResult result={result} />
+			</div>
 		</div>
 	);
 }
