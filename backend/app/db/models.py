@@ -201,5 +201,8 @@ class Session(Base):
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     workspace_path: Mapped[str] = mapped_column(String(255), default="")  # relative to workspace_root
     forked_from: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Per-thread UI telemetry persisted from the last run so the Context Display
+    # badge + Sources footer survive reloads: {"usage": {...}, "sources": [...]}.
+    meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

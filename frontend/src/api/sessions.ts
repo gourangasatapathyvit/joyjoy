@@ -1,13 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { http } from "@/api/client";
-import type { Ok, Session, SessionMessageWire } from "@/api/types";
+import type {
+	Ok,
+	Session,
+	SessionMessageWire,
+	Source,
+	TokenUsage,
+} from "@/api/types";
 
 export const sessionApi = {
 	list: () => http<{ sessions: Session[] }>("/v1/sessions"),
 	messages: (tid: string) =>
-		http<{ thread_id: string; messages: SessionMessageWire[] }>(
-			`/v1/sessions/${encodeURIComponent(tid)}/messages`,
-		),
+		http<{
+			thread_id: string;
+			messages: SessionMessageWire[];
+			meta?: { usage?: TokenUsage | null; sources?: Record<string, Source[]> };
+		}>(`/v1/sessions/${encodeURIComponent(tid)}/messages`),
 	create: (title?: string) =>
 		http<Session>("/v1/sessions", {
 			method: "POST",

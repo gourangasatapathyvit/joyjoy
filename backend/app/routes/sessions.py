@@ -44,7 +44,10 @@ async def sessions_messages(thread_id: str, request: Request):
         settings, request.app.state.checkpointer, request.app.state.store, await resolve_model(settings, None, uid), uid
     )
     msgs = await sessions_mod.get_thread_messages(agent, uid, thread_id)
-    return {"thread_id": thread_id, "messages": msgs}
+    # Per-thread UI telemetry (Context Display usage + Sources) persisted from the
+    # last run, so they repopulate on reload.
+    meta = await sessions_mod.get_thread_meta(thread_id)
+    return {"thread_id": thread_id, "messages": msgs, "meta": meta}
 
 
 @router.post("/v1/sessions/import")

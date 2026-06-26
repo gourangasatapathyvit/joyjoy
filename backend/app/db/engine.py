@@ -92,6 +92,9 @@ async def db_session():
 # never drop/retype. DDL is written to work on both SQLite (>=3.23) and Postgres.
 _ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("sessions", "pinned", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    # Per-thread UI telemetry (usage + sources). JSON on Postgres; SQLite accepts
+    # the keyword (text affinity) and SQLAlchemy's JSON (de)serializes it.
+    ("sessions", "meta", "JSON"),
 ]
 
 

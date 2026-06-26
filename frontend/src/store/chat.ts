@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persistPref } from "@/api/prefs";
 import { sessionApi } from "@/api/sessions";
-import type { ReasoningEffort } from "@/api/types";
+import type { ReasoningEffort, Source, TokenUsage } from "@/api/types";
 import { STORAGE_KEYS, WORKSPACE_DOCK } from "@/lib/constants";
 import { prefixedId } from "@/lib/utils";
 
@@ -96,6 +96,16 @@ interface ChatState {
 	autoApprove: boolean;
 	// Account-level default for new chats (UserConfig.auto_approve_default).
 	autoApproveDefault: boolean;
+	// Live per-turn telemetry from the run SSE stream: latest token usage (drives
+	// the Context Display badge) and citations for the most recent answer (Sources
+	// footer). Reset when the active thread changes.
+	usage: TokenUsage | null;
+	// Citations keyed by assistant message id, so each turn keeps its own Sources
+	// footer (live id during a run; backend message id after reload).
+	sourcesByMessage: Record<string, Source[]>;
+	setUsage: (usage: TokenUsage | null) => void;
+	setSourcesForMessage: (messageId: string, sources: Source[]) => void;
+	setSourcesMap: (map: Record<string, Source[]>) => void;
 	setModel: (model: string) => void;
 	setReasoningEffort: (effort: ReasoningEffort) => void;
 	// User-driven toggle: reflect immediately AND persist on the current session.
@@ -121,6 +131,14 @@ export const useChatStore = create<ChatState>((set) => ({
 	workspaceWidth: readWorkspaceWidth(),
 	autoApprove: false,
 	autoApproveDefault: false,
+	usage: null,
+	sourcesByMessage: {},
+	setUsage: (usage) => set({ usage }),
+	setSourcesForMessage: (messageId, sources) =>
+		set((s) => ({
+			sourcesByMessage: { ...s.sourcesByMessage, [messageId]: sources },
+		})),
+	setSourcesMap: (sourcesByMessage) => set({ sourcesByMessage }),
 	// The picker's choice is remembered as the user's default (server-persisted).
 	setModel: (model) => {
 		set({ model });
@@ -148,7 +166,7 @@ export const useChatStore = create<ChatState>((set) => ({
 	// starting a chat just switches the active thread id.
 	selectThread: (threadId) => {
 		persistThreadId(threadId);
-		set({ threadId, freshThread: false });
+		set({ threadId, freshThread: false, usage: null, sourcesByMessage: {} });
 	},
 	newChat: () => {
 		const threadId = newThreadId();
@@ -158,6 +176,8 @@ export const useChatStore = create<ChatState>((set) => ({
 			threadId,
 			freshThread: true,
 			autoApprove: useChatStore.getState().autoApproveDefault,
+			usage: null,
+			sourcesByMessage: {},
 		});
 	},
 	setWorkspaceWidth: (px) => {

@@ -204,7 +204,9 @@ function wireToUI(wire: SessionMessageWire[]): UIMessage[] {
 			}
 			if (parts.length)
 				out.push({
-					id: newId("a"),
+					// Prefer the stable backend message id so persisted per-message
+					// sources reattach on reload; fall back to a generated id.
+					id: m.id ?? newId("a"),
 					role: "assistant",
 					parts,
 					createdAt: Date.now(),
@@ -467,6 +469,22 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 								case "approval.request":
 									requestApproval(ev);
 									break;
+								case "usage":
+									useChatStore.getState().setUsage({
+										input_tokens: ev.input_tokens,
+										output_tokens: ev.output_tokens,
+										total_tokens: ev.total_tokens,
+										cached_input_tokens: ev.cached_input_tokens,
+										reasoning_tokens: ev.reasoning_tokens,
+									});
+									break;
+								case "sources":
+									// Attach to the in-flight assistant message (its frontend
+									// id); after reload these reattach by backend message id.
+									useChatStore
+										.getState()
+										.setSourcesForMessage(assistantId, ev.sources ?? []);
+									break;
 								case "run.completed":
 									// Backstop: ensure the tree (and the media-readiness gate)
 									// reflect every file the run produced.
@@ -678,8 +696,15 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 		}
 		setThreadLoading(true);
 		try {
-			const { messages: wire } = await sessionApi.messages(tid);
-			if (seq === loadSeqRef.current) setMessages(wireToUI(wire));
+			const { messages: wire, meta } = await sessionApi.messages(tid);
+			if (seq === loadSeqRef.current) {
+				setMessages(wireToUI(wire));
+				// Repopulate the Context Display badge (thread-level usage) + the
+				// per-message Sources footers (keyed by backend message id) from the
+				// telemetry persisted across this thread's runs.
+				useChatStore.getState().setUsage(meta?.usage ?? null);
+				useChatStore.getState().setSourcesMap(meta?.sources ?? {});
+			}
 		} catch {
 			if (seq === loadSeqRef.current) setMessages([]);
 		} finally {
@@ -763,6 +788,16 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 	// (its UI already exists, gated on the dictation adapter being present).
 	const speech = useMemo(() => new WebSpeechSynthesisAdapter(), []);
 	const dictation = useMemo(() => new WebSpeechDictationAdapter(), []);
+	// Warm the Web Speech voice list at mount. Voices load asynchronously, so the
+	// first Read-aloud click can otherwise hit an empty list and stay silent;
+	// touching getVoices() + the voiceschanged event primes them ahead of time.
+	useEffect(() => {
+		if (typeof speechSynthesis === "undefined") return;
+		const warm = () => speechSynthesis.getVoices();
+		warm();
+		speechSynthesis.addEventListener("voiceschanged", warm);
+		return () => speechSynthesis.removeEventListener("voiceschanged", warm);
+	}, []);
 	const runtime = useExternalStoreRuntime({
 		messages,
 		isRunning,

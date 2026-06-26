@@ -68,9 +68,36 @@ export type RunEvent =
 			choices?: string[];
 			allow_permanent?: boolean;
 	  }
+	| {
+			event: "usage";
+			input_tokens?: number;
+			output_tokens?: number;
+			total_tokens?: number;
+			cached_input_tokens?: number;
+			reasoning_tokens?: number;
+	  }
+	| { event: "sources"; sources: Source[]; message_id?: string }
 	| { event: "run.completed"; output?: string }
 	| { event: "run.failed"; error?: string }
 	| { event: "run.cancelled" };
+
+/** A citation surfaced for an assistant turn — any referenced content (a fetched
+ * URL, a web-search hit, a file the agent read, or a link in the answer). */
+export interface Source {
+	sourceType: "url" | "document";
+	url?: string;
+	title?: string;
+	name?: string;
+}
+
+/** Latest per-thread token usage for the Context Display badge. */
+export interface TokenUsage {
+	input_tokens?: number;
+	output_tokens?: number;
+	total_tokens?: number;
+	cached_input_tokens?: number;
+	reasoning_tokens?: number;
+}
 
 // POST /v1/runs body. `input` is the user's prompt; thread_id keeps a conversation.
 export interface CreateRunRequest {
@@ -204,6 +231,7 @@ export interface Session {
 
 // A persisted message as returned by GET /v1/sessions/{tid}/messages.
 export interface SessionMessageWire {
+	id?: string;
 	role: "user" | "assistant" | "tool" | "system";
 	content: string;
 	tool_calls?: { id: string; name: string; args: Record<string, unknown> }[];

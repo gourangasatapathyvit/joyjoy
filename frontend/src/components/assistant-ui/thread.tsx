@@ -39,6 +39,7 @@ import {
 	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
 	ComposerAddAttachment,
 	ComposerAttachments,
@@ -67,6 +68,7 @@ import {
 } from "@/components/assistant-ui/tool-group";
 import { TOOL_UIS } from "@/components/assistant-ui/tool-uis";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
+import { ContextBadge, TurnSources } from "@/components/assistant-ui/turn-info";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useApprovals } from "@/runtime/JoyjoyRuntimeProvider";
@@ -323,6 +325,8 @@ const ComposerAction: FC = () => {
 		<div className="aui-composer-action-wrapper relative flex items-center justify-between">
 			<ComposerAddAttachment />
 			<div className="flex items-center gap-1.5">
+				{/* Context Display: token/context-fill badge, left of voice input. */}
+				<ContextBadge />
 				<AuiIf condition={(s) => s.thread.capabilities.dictation}>
 					<AuiIf condition={(s) => s.composer.dictation == null}>
 						<ComposerPrimitive.Dictate
@@ -413,6 +417,8 @@ const AssistantMessage: FC = () => {
 		ReasoningGroup,
 	} = useContext(ThreadComponentsContext);
 	const activityDisplay = useSettingsStore((s) => s.activityDisplay);
+	// This message's id — keys its persisted citations (Sources footer).
+	const messageId = useAuiState((s) => s.message.id);
 
 	// reserves space for action bar and compensates with `-mb` for consistent msg spacing
 	// keeps hovered action bar from shifting layout (autohide doesn't support absolute positioning well)
@@ -424,7 +430,10 @@ const AssistantMessage: FC = () => {
 		<MessagePrimitive.Root
 			data-slot="aui_assistant-message-root"
 			data-role="assistant"
-			className="fade-in slide-in-from-bottom-1 animate-in relative duration-150"
+			// hover/focus z-lift: the footer uses a negative margin so the next
+			// message overlaps its action bar by a few px — raising the hovered
+			// message keeps every action-bar button fully clickable.
+			className="fade-in slide-in-from-bottom-1 animate-in relative duration-150 hover:z-10 focus-within:z-10"
 		>
 			<div
 				data-slot="aui_assistant-message-content"
@@ -519,6 +528,9 @@ const AssistantMessage: FC = () => {
 				<MessageError />
 			</div>
 
+			{/* Per-answer citations, keyed to this message id (persists across reloads). */}
+			<TurnSources messageId={messageId} />
+
 			<div
 				data-slot="aui_assistant-message-footer"
 				className={cn("ms-2 flex items-center", ACTION_BAR_HEIGHT)}
@@ -537,7 +549,14 @@ const AssistantActionBar: FC = () => {
 			autohide="not-last"
 			className="aui-assistant-action-bar-root text-muted-foreground animate-in fade-in col-start-3 row-start-2 -ms-1 flex gap-1 duration-200"
 		>
-			<ActionBarPrimitive.Copy render={<TooltipIconButton tooltip="Copy" />}>
+			<ActionBarPrimitive.Copy
+				render={
+					<TooltipIconButton
+						tooltip="Copy"
+						onClick={() => toast.success("Copied to clipboard")}
+					/>
+				}
+			>
 				<AuiIf condition={(s) => s.message.isCopied}>
 					<CheckIcon className="animate-in zoom-in-50 fade-in duration-200 ease-out" />
 				</AuiIf>

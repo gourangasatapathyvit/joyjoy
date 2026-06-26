@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 
 from langchain_core.messages import (
@@ -53,9 +54,52 @@ class _Run:
         self.final_text = ""
         self.cancelled = False
         self.task = None
+        # Citations collected this turn (ordered, deduped by key) → emitted as a
+        # `sources` event at completion. ANY referenced external content becomes a
+        # source: fetched/searched URLs, files read, and links in the answer.
+        self.sources: dict[str, dict] = {}
+        # Latest token usage seen this turn (most recent model call) → persisted for
+        # the Context Display badge so it survives reloads.
+        self.last_usage: dict | None = None
+        # Id of this turn's answer message → sources are persisted keyed by it so
+        # each assistant turn keeps its own citations across reloads.
+        self.answer_id: str | None = None
 
 
 _RUNS: dict[str, _Run] = {}
+
+# Matches bare http(s) URLs in tool results / answer text for citation extraction.
+_URL_RE = re.compile(r"""https?://[^\s<>()\[\]"'`]+""")
+
+
+def _add_source(
+    run: "_Run", *, kind: str, url: str | None = None, title: str | None = None, name: str | None = None
+) -> None:
+    """Add a citation (deduped by url|name|title). kind is 'url' or 'document'."""
+    key = url or name or title
+    if not key or key in run.sources:
+        return
+    src: dict[str, str] = {"sourceType": kind}
+    if url:
+        src["url"] = url.rstrip(".,);")
+    if title:
+        src["title"] = title
+    if name:
+        src["name"] = name
+    run.sources[key] = src
+
+
+def _collect_tool_sources(run: "_Run", name: str | None, args) -> None:
+    """Cite what a tool referenced: http(s) URL args (fetch/search/etc.) become
+    url sources; read_file paths become document sources. Generic by design so any
+    URL-bearing tool contributes citations, not just web fetch."""
+    a = args if isinstance(args, dict) else {}
+    for v in a.values():
+        if isinstance(v, str) and v.startswith(("http://", "https://")):
+            _add_source(run, kind="url", url=v, title=v)
+    fp = a.get("file_path") or a.get("path")
+    if name == "read_file" and isinstance(fp, str) and fp:
+        _add_source(run, kind="document", name=fp.rsplit("/", 1)[-1], title=fp)
 
 
 def _config(ctx: AgentContext) -> dict:
@@ -140,8 +184,31 @@ async def _stream_segment(run: _Run, agent_input):
                 if msgs is not None and not isinstance(msgs, list) and hasattr(msgs, "value"):
                     msgs = msgs.value
                 for m in (msgs or []):
-                    if isinstance(m, AIMessage) and getattr(m, "tool_calls", None):
-                        for tc in m.tool_calls:
+                    if isinstance(m, AIMessage):
+                        # The final answer is the last AIMessage of the turn — keep its
+                        # id so its citations persist keyed to it.
+                        if getattr(m, "id", None):
+                            run.answer_id = m.id
+                        # Token usage for the Context Display badge — each model call
+                        # reports usage_metadata; the frontend keeps the latest (the
+                        # most recent call's input_tokens = current context fill).
+                        um = getattr(m, "usage_metadata", None)
+                        if um:
+                            itd = um.get("input_token_details") or {}
+                            otd = um.get("output_token_details") or {}
+                            usage = {
+                                "input_tokens": um.get("input_tokens"),
+                                "output_tokens": um.get("output_tokens"),
+                                "total_tokens": um.get("total_tokens"),
+                                # Richer breakdown for the Context Display tooltip
+                                # (cache hits and reasoning tokens, when reported).
+                                "cached_input_tokens": itd.get("cache_read"),
+                                "reasoning_tokens": otd.get("reasoning"),
+                            }
+                            run.last_usage = {k: v for k, v in usage.items() if v is not None}
+                            await _emit(run, "usage", **run.last_usage)
+                        for tc in (getattr(m, "tool_calls", None) or []):
+                            _collect_tool_sources(run, tc.get("name"), tc.get("args"))
                             await _emit(run, "tool.started", tool=tc.get("name"), name=tc.get("name"),
                                         toolCallId=tc.get("id"), args=tc.get("args") or {}, label=tc.get("name"))
                     elif isinstance(m, ToolMessage):
@@ -195,6 +262,24 @@ async def _drive(run: _Run) -> None:
                 decisions = [await f for f in futs]
                 agent_input = Command(resume={"decisions": decisions})
                 continue
+            # URLs in the final answer are explicit citations too — merge, then emit
+            # the deduped citation set for this turn (any kind: web, file, search…).
+            for u in _URL_RE.findall(run.final_text or ""):
+                _add_source(run, kind="url", url=u, title=u)
+            src_list = list(run.sources.values())
+            if src_list:
+                await _emit(run, "sources", sources=src_list, message_id=run.answer_id)
+            # Persist usage (thread-level) + sources (keyed by this answer's message
+            # id) so the badge and per-message Sources footers repopulate on reload.
+            if run.last_usage is not None or src_list:
+                from app.stores import sessions as _sessions
+
+                await _sessions.set_thread_meta(
+                    run.ctx.thread_id,
+                    usage=run.last_usage,
+                    message_id=run.answer_id,
+                    sources=src_list,
+                )
             await _emit(run, "run.completed", output=run.final_text)
             return
     except Exception as exc:  # noqa: BLE001 - surface to the event stream

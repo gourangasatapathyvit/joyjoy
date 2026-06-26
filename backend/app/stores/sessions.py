@@ -234,6 +234,46 @@ async def owns_session(user_id: str, thread_id: str) -> bool:
     return await session_owner(thread_id) == str(user_id)
 
 
+async def set_thread_meta(
+    thread_id: str, *, usage: Any = None, message_id: str | None = None, sources: Any = None
+) -> None:
+    """Persist per-thread UI telemetry onto the session row so it survives reloads:
+    `usage` (latest token usage → Context Display badge) is thread-level; `sources`
+    are stored PER assistant message ({message_id: [...]}) so each answer keeps its
+    own citations across turns. Best-effort; no-op if the session row is absent."""
+    if usage is None and not (message_id and sources):
+        return
+    try:
+        async with db_session() as s:
+            row = await s.get(Session, thread_id)
+            if row is None:
+                return
+            meta = dict(row.meta or {})
+            if usage is not None:
+                meta["usage"] = usage
+            # sources: per-message map. Migrate any legacy list value to a fresh map.
+            smap = meta.get("sources")
+            if not isinstance(smap, dict):
+                smap = {}
+            if message_id and sources:
+                smap[message_id] = sources
+            meta["sources"] = smap
+            row.meta = meta  # reassign so SQLAlchemy flags the JSON column dirty
+            await s.commit()
+    except Exception:
+        logger.warning("set_thread_meta failed", exc_info=True)
+
+
+async def get_thread_meta(thread_id: str) -> dict:
+    """Return persisted per-thread UI telemetry ({usage, sources}) or {}."""
+    try:
+        async with db_session() as s:
+            m = await s.scalar(select(Session.meta).where(Session.thread_id == thread_id))
+            return m or {}
+    except Exception:
+        return {}
+
+
 def _serialize_message(m: Any) -> dict | None:
     """Convert a stored LangChain BaseMessage (or raw dict) to a wire dict the
     frontend can rebuild: {role, content, tool_calls?, tool_call_id?, name?, media?}."""
@@ -246,6 +286,10 @@ def _serialize_message(m: Any) -> dict | None:
             "role": role_map.get(mtype, mtype),
             "content": _content_to_text(getattr(m, "content", "")),
         }
+        # Stable LangGraph message id → lets the frontend key per-message UI (e.g.
+        # the Sources footer persisted in session.meta) to the right turn on reload.
+        if getattr(m, "id", None):
+            out["id"] = m.id
         tcs = getattr(m, "tool_calls", None)
         if tcs:
             out["tool_calls"] = [
