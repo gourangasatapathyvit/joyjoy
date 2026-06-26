@@ -57,10 +57,9 @@ def _strip_textless_thinking(messages: list) -> list:
 class StripStaleThinkingMiddleware(AgentMiddleware):
     """Drop textless (signature-only / redacted) thinking blocks before each model
     call so Foundry adaptive-thinking chats don't 400, while preserving real
-    reasoning text — see the helper docstring."""
-
-    def wrap_model_call(self, request, handler):
-        return handler(request.override(messages=_strip_textless_thinking(request.messages)))
+    reasoning text — see the helper docstring. Async-only: the agent always runs via
+    astream, so only ``awrap_model_call`` is reached (the base sync ``wrap_model_call``
+    default is fine for any non-async path)."""
 
     async def awrap_model_call(self, request, handler):
         return await handler(request.override(messages=_strip_textless_thinking(request.messages)))
