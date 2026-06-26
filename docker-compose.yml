@@ -116,14 +116,40 @@ services:
     command: ["true"]
     restart: "no"
 
+  # Tier 2 — least-privilege Docker access. Instead of mounting the raw docker.sock
+  # into the OpenSandbox server (= root-equivalent host control), the server talks to
+  # this proxy, which mounts the socket and whitelists ONLY the API surface OpenSandbox
+  # needs (container/image/volume/network lifecycle). It denies exec, swarm, secrets,
+  # configs, plugins, system-prune, build, etc. — so a compromised server can't, e.g.,
+  # bind-mount the host or take over the daemon. (Endpoint-level filtering; for create-
+  # body filtering — block privileged/host-mounts — swap in wollomatic/socket-proxy.)
+  docker-socket-proxy:
+    profiles: ["sandbox"]
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1   # create/start/kill/remove + cp (the execd archive)
+      IMAGES: 1       # inspect/pull the execd + sandbox image
+      VOLUMES: 1      # create the durable per-session volume
+      NETWORKS: 1     # attach sandboxes to joyjoy-sandbox-net
+      INFO: 1
+      PING: 1
+      POST: 1         # master switch: allow the write verbs above
+      EXEC: 0         # OpenSandbox runs commands via its own execd over HTTP, not docker exec
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    # No ports published — only reachable in-network by the opensandbox service.
+
   # The OpenSandbox server: spawns the per-session sandbox CONTAINERS as SIBLINGS on
-  # the host daemon (via the mounted docker.sock) and proxies the backend's file/exec
-  # calls to them. SECURITY: mounting docker.sock = host-level container control; this
-  # is the privileged agent-execution tier — isolate/network-restrict it.
-  # REQUIRED for cross-container reach: set `[server] host = "0.0.0.0"` in sandbox.toml
-  # (the committed file uses 127.0.0.1, which only works when server+backend share a
-  # host as in dev) so the backend container can reach opensandbox:8090 and its proxy
-  # ports. Also set OPENSANDBOX_API_KEY in .env to match the toml's api_key.
+  # the host daemon (through the socket proxy) and proxies the backend's file/exec
+  # calls to them. SECURITY (the privileged agent-execution tier):
+  #   * Tier 2: talks to docker-socket-proxy (DOCKER_HOST below), NOT the raw socket.
+  #   * Tier 3: sits on BOTH joyjoy-net (so the backend reaches :8090) and the ISOLATED
+  #     joyjoy-sandbox-net; spawned sandboxes live ONLY on joyjoy-sandbox-net, so agent
+  #     code can't reach the backend/DB (lateral movement) — only egress + this server.
+  #   * Tier 1/4 (kata/gVisor runtime, AppArmor, nft-egress) are set in sandbox.toml.
+  # REQUIRED for cross-container reach: `[server] host = "0.0.0.0"` in sandbox.toml, and
+  # OPENSANDBOX_API_KEY in .env matching the toml's api_key.
   opensandbox:
     profiles: ["sandbox"]
     image: python:3.13-slim
@@ -131,11 +157,17 @@ services:
     depends_on:
       sandbox-image:
         condition: service_completed_successfully
+      docker-socket-proxy:
+        condition: service_started
+    networks:
+      - default        # joyjoy-net: reachable by the backend
+      - sandbox-net    # isolated: reach the sandboxes it spawns
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - ./sandbox.toml:/app/sandbox.toml:ro
       - opensandbox-state:/root/.opensandbox
     environment:
+      # Tier 2: drive the daemon through the filtering proxy, not the raw socket.
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
       # Non-interactive ack if you run with an empty api_key (prefer a real key instead).
       OPENSANDBOX_INSECURE_SERVER: ${OPENSANDBOX_INSECURE_SERVER:-}
     # exec-array form, NOT `command: >`. A folded block scalar keeps the newline before a
@@ -144,12 +176,18 @@ services:
     command: ["sh", "-c", "pip install --no-cache-dir uv && uvx --from opensandbox-server opensandbox-server --config /app/sandbox.toml"]
 
 networks:
-  # Pin the default network to a FIXED name (not the implicit "<project>_default",
-  # which changes with the directory/COMPOSE_PROJECT_NAME). The OpenSandbox server
-  # spawns per-session sandbox containers onto this network by name (sandbox.toml →
-  # [docker] network_mode), so it must be stable + portable. Keep the two in sync.
+  # App plane: backend ↔ opensandbox ↔ (db / socket-proxy). Pinned to a FIXED name
+  # (not the implicit "<project>_default", which changes with the directory) so it's
+  # stable + portable.
   default:
     name: joyjoy-net
+  # Tier 3 — isolated sandbox plane. Spawned sandbox containers live ONLY here
+  # (sandbox.toml → [docker] network_mode = joyjoy-sandbox-net); the opensandbox
+  # server bridges both networks. The backend/DB are NOT on this network, so agent
+  # code in a sandbox cannot reach them. Sandboxes still get NAT egress for package
+  # installs (tighten that via OpenSandbox [egress] mode=dns+nft in prod).
+  sandbox-net:
+    name: joyjoy-sandbox-net
 
 volumes:
   pgdata:            # used only by the `db` service (localdb profile / DB_HOSTER=0)

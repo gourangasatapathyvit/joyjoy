@@ -107,6 +107,29 @@ class OpenSandboxBackend(BaseSandbox):
     def grep(self, pattern: str, path: str | None = None, glob: str | None = None):
         return super().grep(pattern, self._w(path) if path else self._mount, glob)
 
+    # The agent runs ASYNC, so deepagents calls the a* methods — which in BaseSandbox
+    # route to aupload_files/aexecute with the RAW agent path and BYPASS the sync
+    # overrides above. Without these, write_file("/x") lands in the container's
+    # ephemeral root instead of the /workspace volume (lost + invisible to the dock).
+    # Mirror the sync remapping so every path lands under the mount. (_w is idempotent.)
+    async def als(self, path: str):
+        return await super().als(self._w(path))
+
+    async def aread(self, file_path: str, offset: int = 0, limit: int = FILE_READ_DEFAULT_LIMIT):
+        return await super().aread(self._w(file_path), offset, limit)
+
+    async def awrite(self, file_path: str, content: str):
+        return await super().awrite(self._w(file_path), content)
+
+    async def aedit(self, file_path: str, old_string: str, new_string: str, replace_all: bool = False):  # noqa: FBT001, FBT002
+        return await super().aedit(self._w(file_path), old_string, new_string, replace_all)
+
+    async def aglob(self, pattern: str, path: str | None = None):
+        return await super().aglob(pattern, self._w(path) if path else self._mount)
+
+    async def agrep(self, pattern: str, path: str | None = None, glob: str | None = None):
+        return await super().agrep(pattern, self._w(path) if path else self._mount, glob)
+
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         sb = self._sb()
         # Run with the volume as cwd so relative paths + the agent's working dir

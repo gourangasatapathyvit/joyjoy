@@ -36,6 +36,29 @@ level = "INFO"
 type = "docker"
 execd_image = "opensandbox/execd:v1.0.19"
 
+# Tier 1 — kernel-level isolation for the UNTRUSTED agent code run in sandboxes.
+# Plain runc shares the host kernel ("a container is not a sandbox"). Pick per HOST
+# capability — this is an operator/deploy decision, NOT auto-detected across the
+# docker.sock boundary:
+#   * Kata (PRIMARY) — microVM, hardware boundary, strongest. Needs nested virt (KVM,
+#     /dev/kvm) + kata installed and registered in the host /etc/docker/daemon.json
+#     "runtimes". Use where nested virt is available.
+#       type = "kata"    docker_runtime = "kata-runtime"
+#   * gVisor (FALLBACK) — userspace syscall interception, ~10-30% I/O overhead, NO
+#     nested virt required. Use where KVM is unavailable. Needs runsc installed +
+#     registered in daemon.json "runtimes".
+#       type = "gvisor"  docker_runtime = "runsc"
+# Leave this section COMMENTED for dev/WSL2 (no KVM/runsc/kata) → runc, stack works
+# (server logs "Secure runtime is not configured"). UNCOMMENT one block on your real
+# Linux prod host. (OpenSandbox rejects type="" with docker_runtime set, so the whole
+# section must be absent when using runc — don't ship empty values.)
+# [secure_runtime]            # Kata (primary, needs nested virt/KVM):
+# type = "kata"
+# docker_runtime = "kata-runtime"
+# [secure_runtime]            # gVisor (fallback, no nested virt):
+# type = "gvisor"
+# docker_runtime = "runsc"
+
 [storage]
 # Allowlist of host path prefixes permitted for bind mounts.
 # If empty, all host paths are allowed (not recommended for production).
@@ -50,19 +73,19 @@ type = "sqlite"
 path = "~/.opensandbox/opensandbox.db"
 
 [docker]
-# Attach spawned sandbox containers to the COMPOSE network — NOT the default "bridge"
-# — so the opensandbox server (also on this network) can reach them in server-proxy
-# mode. With "bridge" the sandboxes land on 172.17.x while the server is on the compose
-# net → server→sandbox unreachable → health-check timeouts. This MUST match the pinned
-# network name in docker-compose.yml (networks.default.name = joyjoy-net) — it no longer
-# depends on the project/directory name. For the host dev path (server runs on the host,
-# not in compose) set this to "bridge".
-network_mode = "joyjoy-net"
+# Tier 3 — spawn sandboxes onto the ISOLATED sandbox network (NOT the app network and
+# NOT the default "bridge"). Must match docker-compose.yml networks.sandbox-net.name.
+# The opensandbox server bridges both nets so it can reach the sandboxes; the backend/DB
+# are NOT on this net, so agent code can't reach them. (Host dev path / server-on-host:
+# set this to "bridge".)
+network_mode = "joyjoy-sandbox-net"
 
 # Drop dangerous capabilities and block privilege escalation
 drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
 no_new_privileges = true
-# Optional: set an AppArmor profile name (e.g., "docker-default") when AppArmor is enabled
+# Tier 4 — AppArmor. Set "docker-default" on a PROD host where AppArmor is enabled.
+# Left empty for dev (WSL2 has no AppArmor LSM → "docker-default" would fail container
+# create). Docker already applies docker-default automatically when AppArmor is present.
 apparmor_profile = ""
 # Limit process count to reduce host impact from fork bombs; set to null to disable
 pids_limit = 4096
@@ -74,6 +97,10 @@ mode = "direct"
 
 [egress]
 image = "opensandbox/egress:v1.1.0"
+# Tier 4 — egress filtering. "dns" (dev) allows outbound for package installs. On a PROD
+# host prefer "dns+nft" (adds nftables egress rules — needs nft in the egress container)
+# to drop traffic to internal ranges + the cloud metadata IP (169.254.169.254, a classic
+# SSRF/credential-theft target). Also consider disable_ipv6 = true.
 mode = "dns"
 
 # 🧪 [EXPERIMENTAL] Renew-on-access. Off by default — see server/README.md.
