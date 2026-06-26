@@ -130,7 +130,9 @@ export function ContextBadge() {
 				</TooltipTrigger>
 				<TooltipContent
 					side="top"
-					className="bg-popover text-popover-foreground rounded-lg border px-3 py-2 shadow-md"
+					// Match the arrow to the popover body (the shared tooltip's arrow
+					// defaults to the inverted foreground color, which clashes here).
+					className="bg-popover text-popover-foreground rounded-lg border px-3 py-2 shadow-md [&_[data-slot=tooltip-arrow]]:bg-popover [&_[data-slot=tooltip-arrow]]:fill-popover"
 				>
 					<div className="grid min-w-40 gap-1.5 text-xs">
 						{cw ? (
