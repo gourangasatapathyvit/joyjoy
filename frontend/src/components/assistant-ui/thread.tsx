@@ -59,6 +59,7 @@ import {
 	ReasoningTrigger,
 } from "@/components/assistant-ui/reasoning";
 import { ToolFallback } from "@/components/assistant-ui/tool-fallback";
+import { TOOL_UIS } from "@/components/assistant-ui/tool-uis";
 import {
 	ToolGroupContent,
 	ToolGroupRoot,
@@ -485,8 +486,18 @@ const AssistantMessage: FC = () => {
 								);
 							case "reasoning":
 								return <Reasoning {...part} />;
-							case "tool-call":
-								return part.toolUI ?? <ToolFallbackComponent {...part} />;
+							case "tool-call": {
+								// Prefer any registry-provided override, then our bespoke
+								// per-tool UIs, then the generic fallback. All paths reuse
+								// the same approval controls, so HITL gating is preserved.
+								if (part.toolUI) return part.toolUI;
+								const CustomToolUI = TOOL_UIS[part.toolName];
+								return CustomToolUI ? (
+									<CustomToolUI {...part} />
+								) : (
+									<ToolFallbackComponent {...part} />
+								);
+							}
 							case "data":
 								return part.dataRendererUI;
 							case "indicator":

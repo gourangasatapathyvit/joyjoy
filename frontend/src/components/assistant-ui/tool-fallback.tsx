@@ -1,10 +1,7 @@
 "use client";
 
 import {
-	type ToolApprovalOption,
-	type ToolCallMessagePart,
 	type ToolCallMessagePartComponent,
-	type ToolCallMessagePartProps,
 	type ToolCallMessagePartStatus,
 	useScrollLock,
 	useToolCallElapsed,
@@ -18,15 +15,17 @@ import {
 } from "lucide-react";
 import { memo, useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
 import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { useApprovals } from "@/runtime/JoyjoyRuntimeProvider";
-import { useChatStore } from "@/store/chat";
+import {
+	ToolApprovalControls,
+	ToolFallbackApproval,
+	useToolNeedsAction,
+} from "./tool-approval";
 
 const ANIMATION_DURATION = 200;
 
@@ -307,240 +306,24 @@ function ToolFallbackError({
 	);
 }
 
-// Tool-RESULT payloads that flow back to the model — kept English (consistent
-// model-facing content), NOT translated like UI chrome.
-const APPROVED_RESULT = "Approved by user";
-const DENIED_RESULT = "User denied tool execution";
-
-// Maps an approval kind to its i18n key for the button label.
-const APPROVAL_OPTION_KEYS: Record<string, string> = {
-	"allow-once": "tools.allow",
-	"allow-always": "tools.allowAlways",
-	"reject-once": "tools.deny",
-	"reject-always": "tools.denyAlways",
-};
-
-const isAllowKind = (kind: string) =>
-	kind === "allow-once" || kind === "allow-always";
-
-const approvalOptionLabel = (
-	option: ToolApprovalOption,
-	t: (key: string) => string,
-) =>
-	option.label ??
-	(Object.hasOwn(APPROVAL_OPTION_KEYS, option.kind)
-		? t(APPROVAL_OPTION_KEYS[option.kind] as string)
-		: undefined) ??
-	option.id;
-
-function ToolFallbackApproval({
-	className,
-	addResult,
-	resume,
-	interrupt,
-	approval,
-	respondToApproval,
-	...props
-}: React.ComponentProps<"div"> &
-	Partial<
-		Pick<ToolCallMessagePartProps, "addResult" | "resume" | "respondToApproval">
-	> & {
-		interrupt?: ToolCallMessagePart["interrupt"];
-		approval?: ToolCallMessagePart["approval"];
-	}) {
-	const [submitted, setSubmitted] = useState(false);
-	const [confirmingId, setConfirmingId] = useState<string | null>(null);
-	const { t } = useTranslation();
-
-	if (
-		approval != null &&
-		(approval.approved !== undefined || approval.resolution !== undefined)
-	)
-		return null;
-
-	// Custom (`_`-prefixed) kinds cannot be resolved to a boolean by the kit;
-	// hosts using custom kinds render their own bar. A declared option list is
-	// a host constraint: the kit never adds an approval path beyond it, but
-	// always preserves a refusal path.
-	const declaredOptions = respondToApproval ? approval?.options : undefined;
-	const options = declaredOptions?.filter((o) =>
-		Object.hasOwn(APPROVAL_OPTION_KEYS, o.kind),
-	);
-
-	const respond = (approved: boolean) => {
-		if (submitted) return;
-		if (
-			approval != null &&
-			approval.approved === undefined &&
-			respondToApproval
-		) {
-			respondToApproval({ approved });
-		} else if (interrupt) {
-			resume?.({ approved });
-		} else {
-			addResult?.(approved ? APPROVED_RESULT : DENIED_RESULT);
-		}
-		setSubmitted(true);
-	};
-
-	const respondWithOption = (option: ToolApprovalOption) => {
-		if (submitted) return;
-		respondToApproval?.({ optionId: option.id });
-		setSubmitted(true);
-		setConfirmingId(null);
-	};
-
-	const handleOption = (option: ToolApprovalOption) => {
-		if (option.confirm) {
-			setConfirmingId(option.id);
-		} else {
-			respondWithOption(option);
-		}
-	};
-
-	const confirming =
-		confirmingId != null
-			? options?.find((o) => o.id === confirmingId)
-			: undefined;
-
-	if (confirming) {
-		const confirmMeta =
-			typeof confirming.confirm === "object" ? confirming.confirm : undefined;
-		const confirmDescription =
-			confirmMeta?.description ?? confirming.description;
-		return (
-			<div
-				data-slot="tool-fallback-approval-confirm"
-				className={cn(
-					"aui-tool-fallback-approval-confirm flex flex-col gap-2 pt-1",
-					className,
-				)}
-				{...props}
-			>
-				<p className="aui-tool-fallback-approval-confirm-title font-semibold">
-					{confirmMeta?.title ?? `${approvalOptionLabel(confirming, t)}?`}
-				</p>
-				{confirmDescription && (
-					<p className="aui-tool-fallback-approval-confirm-description text-muted-foreground">
-						{confirmDescription}
-					</p>
-				)}
-				{confirming.grants && confirming.grants.length > 0 && (
-					<ul className="aui-tool-fallback-approval-confirm-grants flex flex-col gap-1">
-						{confirming.grants.map((grant) => (
-							<li key={grant}>
-								<code className="aui-tool-fallback-approval-confirm-grant bg-muted rounded px-1.5 py-0.5 text-xs">
-									{grant}
-								</code>
-							</li>
-						))}
-					</ul>
-				)}
-				<div className="flex items-center gap-2">
-					<Button
-						size="sm"
-						onClick={() => respondWithOption(confirming)}
-						disabled={submitted}
-					>
-						Confirm
-					</Button>
-					<Button
-						size="sm"
-						variant="outline"
-						onClick={() => setConfirmingId(null)}
-						disabled={submitted}
-					>
-						Back
-					</Button>
-				</div>
-			</div>
-		);
-	}
-
-	if (declaredOptions && declaredOptions.length > 0) {
-		const allowOptions = options?.filter((o) => isAllowKind(o.kind)) ?? [];
-		const rejectOptions = options?.filter((o) => !isAllowKind(o.kind)) ?? [];
-		return (
-			<div
-				data-slot="tool-fallback-approval"
-				className={cn(
-					"aui-tool-fallback-approval flex flex-wrap items-center gap-2 pt-1",
-					className,
-				)}
-				{...props}
-			>
-				{[...allowOptions, ...rejectOptions].map((option) => (
-					<Button
-						key={option.id}
-						size="sm"
-						variant={option === allowOptions[0] ? "default" : "outline"}
-						onClick={() => handleOption(option)}
-						disabled={submitted}
-					>
-						{approvalOptionLabel(option, t)}
-					</Button>
-				))}
-				{rejectOptions.length === 0 && (
-					<Button
-						size="sm"
-						variant="outline"
-						onClick={() => respond(false)}
-						disabled={submitted}
-					>
-						Deny
-					</Button>
-				)}
-			</div>
-		);
-	}
-
-	return (
-		<div
-			data-slot="tool-fallback-approval"
-			className={cn(
-				"aui-tool-fallback-approval flex items-center gap-2 pt-1",
-				className,
-			)}
-			{...props}
-		>
-			<Button size="sm" onClick={() => respond(true)} disabled={submitted}>
-				Allow
-			</Button>
-			<Button
-				size="sm"
-				variant="outline"
-				onClick={() => respond(false)}
-				disabled={submitted}
-			>
-				Deny
-			</Button>
-		</div>
-	);
-}
-
-const ToolFallbackImpl: ToolCallMessagePartComponent = ({
-	toolCallId,
-	toolName,
-	argsText,
-	result,
-	status,
-	addResult,
-	resume,
-	interrupt,
-	approval,
-	respondToApproval,
-}) => {
-	const { t } = useTranslation();
-	// joyjoy HITL: the backend gates MCP/plugin tools; the pending approval is
-	// surfaced via context (keyed by toolCallId) and rendered inline below.
-	const { pending, respond } = useApprovals();
-	const setAutoApprove = useChatStore((s) => s.setAutoApprove);
-	const joyApproval = toolCallId ? pending[toolCallId] : undefined;
+const ToolFallbackImpl: ToolCallMessagePartComponent = (part) => {
+	const {
+		toolCallId,
+		toolName,
+		argsText,
+		result,
+		status,
+		addResult,
+		resume,
+		interrupt,
+		approval,
+		respondToApproval,
+	} = part;
 
 	const isCancelled =
 		status?.type === "incomplete" && status.reason === "cancelled";
-	const isRequiresAction = status?.type === "requires-action";
-	const needsAction = isRequiresAction || !!joyApproval;
+	// Auto-open while awaiting approval (native interrupt OR joyjoy pending).
+	const needsAction = useToolNeedsAction(toolCallId, status?.type);
 
 	const [open, setOpen] = useState(needsAction);
 	const [prevNeedsAction, setPrevNeedsAction] = useState(needsAction);
@@ -558,40 +341,15 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 					argsText={argsText}
 					className={cn(isCancelled && "opacity-60")}
 				/>
-				{isRequiresAction && (
-					<ToolFallbackApproval
-						addResult={addResult}
-						resume={resume}
-						interrupt={interrupt}
-						approval={approval}
-						respondToApproval={respondToApproval}
-					/>
-				)}
-				{joyApproval && toolCallId && (
-					<div className="aui-tool-fallback-approval flex flex-wrap items-center gap-2 pt-1">
-						<Button size="sm" onClick={() => respond(toolCallId, "approve")}>
-							{t("tools.allowOnce")}
-						</Button>
-						<Button
-							size="sm"
-							variant="outline"
-							onClick={() => {
-								// Approve this call and stop asking for the rest of the chat.
-								setAutoApprove(true);
-								respond(toolCallId, "approve");
-							}}
-						>
-							{t("tools.allowSession")}
-						</Button>
-						<Button
-							size="sm"
-							variant="outline"
-							onClick={() => respond(toolCallId, "reject")}
-						>
-							{t("tools.deny")}
-						</Button>
-					</div>
-				)}
+				<ToolApprovalControls
+					toolCallId={toolCallId}
+					status={status}
+					addResult={addResult}
+					resume={resume}
+					interrupt={interrupt}
+					approval={approval}
+					respondToApproval={respondToApproval}
+				/>
 				{!isCancelled && <ToolFallbackResult result={result} />}
 			</ToolFallbackContent>
 		</ToolFallbackRoot>
