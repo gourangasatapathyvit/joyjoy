@@ -34,6 +34,7 @@ import {
 import { baseName } from "@/lib/text";
 import { prefixedId } from "@/lib/utils";
 import { useChatStore } from "@/store/chat";
+import { workspaceAttachmentAdapter } from "@/runtime/workspaceAttachment";
 
 type JsonValue =
 	| string
@@ -502,7 +503,15 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 				.map((c) => (c.type === "text" ? c.text : ""))
 				.join("")
 				.trim();
-			if (!text) return;
+			// Attachments (already uploaded to the workspace by the adapter's send()):
+			// names for the visible bubble, their text parts for the agent instruction.
+			const atts =
+				(message as { attachments?: readonly { name: string; content?: { type: string; text?: string }[] }[] })
+					.attachments ?? [];
+			const attNote = atts
+				.flatMap((a) => (a.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? ""))
+				.join("\n");
+			if (!text && atts.length === 0) return;
 			// Once a chat has a sent message it's no longer "fresh" — a later remount
 			// (settings→chat) must reload its messages with a spinner, not skip them.
 			useChatStore.setState({ freshThread: false });
@@ -512,12 +521,21 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 				message.metadata?.custom as { quote?: QuoteInfo } | undefined
 			)?.quote;
 			const assistantId = newId("a");
+			// Visible user bubble: typed text + a 📎 line per attachment.
+			const displayText = [
+				text,
+				...atts.map((a) => `📎 ${a.name}`),
+			]
+				.filter(Boolean)
+				.join("\n");
+			// Sent to the agent: typed text + the workspace-file instruction(s).
+			const sendText = [text, attNote].filter(Boolean).join("\n\n");
 			setMessages((prev) => [
 				...prev,
 				{
 					id: newId("u"),
 					role: "user",
-					parts: [{ type: "text", text }],
+					parts: [{ type: "text", text: displayText }],
 					createdAt: Date.now(),
 					...(quote ? { quote } : {}),
 				},
@@ -528,7 +546,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 					createdAt: Date.now(),
 				},
 			]);
-			await runTurn(assistantId, buildSendText(text, quote));
+			await runTurn(assistantId, buildSendText(sendText, quote));
 		},
 		[runTurn],
 	);
@@ -725,6 +743,12 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 		[threadId],
 	);
 
+	// Built-in attachment support: files upload into the active thread's workspace,
+	// then the agent reads them with its own tools (see workspaceAttachmentAdapter).
+	const attachments = useMemo(
+		() => workspaceAttachmentAdapter(() => useChatStore.getState().threadId),
+		[],
+	);
 	const runtime = useExternalStoreRuntime({
 		messages,
 		isRunning,
@@ -734,6 +758,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 		onEdit,
 		onReload,
 		onCancel,
+		adapters: { attachments },
 	});
 	const approvalsValue = useMemo<ApprovalsContextValue>(
 		() => ({ pending, hasPending: Object.keys(pending).length > 0, respond }),
