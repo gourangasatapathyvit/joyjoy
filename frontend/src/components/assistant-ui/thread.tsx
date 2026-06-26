@@ -543,6 +543,7 @@ const AssistantMessage: FC = () => {
 };
 
 const AssistantActionBar: FC = () => {
+	const { t } = useTranslation();
 	return (
 		<ActionBarPrimitive.Root
 			hideWhenRunning
@@ -553,7 +554,7 @@ const AssistantActionBar: FC = () => {
 				render={
 					<TooltipIconButton
 						tooltip="Copy"
-						onClick={() => toast.success("Copied to clipboard")}
+						onClick={() => toast.success(t("chat.copied"))}
 					/>
 				}
 			>

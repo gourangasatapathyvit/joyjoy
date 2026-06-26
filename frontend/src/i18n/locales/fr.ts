@@ -295,6 +295,17 @@ export const fr: Resources = {
 		placeholder: "Envoyer un message…",
 		send: "Envoyer le message",
 		stop: "Arrêter la génération",
+		copied: "Copié dans le presse-papiers",
+		sources: "Sources",
+		context: {
+			label: "Utilisation du contexte",
+			usage: "Utilisation",
+			input: "Entrée",
+			cached: "En cache",
+			output: "Sortie",
+			reasoning: "Raisonnement",
+			total: "Total",
+		},
 	},
 	language: {
 		label: "Langue",

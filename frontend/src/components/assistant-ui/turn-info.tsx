@@ -6,6 +6,7 @@
 // so this is a small custom badge fed by our external-store usage events.
 
 import { FileTextIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import {
 	Tooltip,
 	TooltipContent,
@@ -74,6 +75,7 @@ function UsageRow({ label, value }: { label: string; value: string }) {
  * cached, output, reasoning, total), like assistant-ui's Context Display. Fed by
  * our external-store run telemetry rather than the AI-SDK-coupled built-in. */
 export function ContextBadge() {
+	const { t } = useTranslation();
 	const usage = useChatStore((s) => s.usage);
 	const model = useChatStore((s) => s.model);
 
@@ -92,7 +94,7 @@ export function ContextBadge() {
 					render={
 						<button
 							type="button"
-							aria-label="Context usage"
+							aria-label={t("chat.context.label")}
 							className="hover:bg-accent inline-flex items-center rounded-md p-0.5 transition-colors"
 						/>
 					}
@@ -136,29 +138,38 @@ export function ContextBadge() {
 				>
 					<div className="grid min-w-40 gap-1.5 text-xs">
 						{cw ? (
-							<UsageRow label="Usage" value={`${Math.round(percent)}%`} />
+							<UsageRow
+								label={t("chat.context.usage")}
+								value={`${Math.round(percent)}%`}
+							/>
 						) : null}
 						{usage?.input_tokens !== undefined && (
-							<UsageRow label="Input" value={fmtTokens(usage.input_tokens)} />
+							<UsageRow
+								label={t("chat.context.input")}
+								value={fmtTokens(usage.input_tokens)}
+							/>
 						)}
 						{usage?.cached_input_tokens ? (
 							<UsageRow
-								label="Cached"
+								label={t("chat.context.cached")}
 								value={fmtTokens(usage.cached_input_tokens)}
 							/>
 						) : null}
 						{usage?.output_tokens !== undefined && (
-							<UsageRow label="Output" value={fmtTokens(usage.output_tokens)} />
+							<UsageRow
+								label={t("chat.context.output")}
+								value={fmtTokens(usage.output_tokens)}
+							/>
 						)}
 						{usage?.reasoning_tokens ? (
 							<UsageRow
-								label="Reasoning"
+								label={t("chat.context.reasoning")}
 								value={fmtTokens(usage.reasoning_tokens)}
 							/>
 						) : null}
 						<div className="mt-0.5 border-t pt-1.5">
 							<UsageRow
-								label="Total"
+								label={t("chat.context.total")}
 								value={
 									cw ? `${fmtTokens(used)} / ${fmtTokens(cw)}` : fmtTokens(used)
 								}
@@ -174,12 +185,15 @@ export function ContextBadge() {
 /** Citation chips for the most recent answer — URL sources link out (by host),
  * document sources show a file chip. Driven by the run's `sources` event. */
 export function TurnSources({ messageId }: { messageId: string }) {
+	const { t } = useTranslation();
 	const sources = useChatStore((s) => s.sourcesByMessage[messageId]);
 	if (!sources?.length) return null;
 
 	return (
 		<div className="mt-1 mb-1 flex flex-col gap-1 px-2">
-			<span className="text-muted-foreground text-xs font-medium">Sources</span>
+			<span className="text-muted-foreground text-xs font-medium">
+				{t("chat.sources")}
+			</span>
 			<div className="flex flex-wrap gap-1.5">
 				{sources.map((s) =>
 					s.sourceType === "url" && s.url ? (

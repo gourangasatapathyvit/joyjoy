@@ -294,6 +294,17 @@ export const ru: Resources = {
 		placeholder: "Отправьте сообщение…",
 		send: "Отправить сообщение",
 		stop: "Остановить генерацию",
+		copied: "Скопировано в буфер обмена",
+		sources: "Источники",
+		context: {
+			label: "Использование контекста",
+			usage: "Использование",
+			input: "Ввод",
+			cached: "Кэшировано",
+			output: "Вывод",
+			reasoning: "Рассуждение",
+			total: "Всего",
+		},
 	},
 	language: {
 		label: "Язык",

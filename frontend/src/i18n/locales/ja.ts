@@ -292,6 +292,17 @@ export const ja: Resources = {
 		placeholder: "メッセージを送信…",
 		send: "メッセージを送信",
 		stop: "生成を停止",
+		copied: "クリップボードにコピーしました",
+		sources: "ソース",
+		context: {
+			label: "コンテキスト使用量",
+			usage: "使用量",
+			input: "入力",
+			cached: "キャッシュ",
+			output: "出力",
+			reasoning: "推論",
+			total: "合計",
+		},
 	},
 	language: {
 		label: "言語",

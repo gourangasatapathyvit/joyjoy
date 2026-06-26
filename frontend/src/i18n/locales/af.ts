@@ -292,6 +292,17 @@ export const af: Resources = {
 		placeholder: "Stuur 'n boodskap…",
 		send: "Stuur boodskap",
 		stop: "Stop generering",
+		copied: "Na knipbord gekopieer",
+		sources: "Bronne",
+		context: {
+			label: "Konteksgebruik",
+			usage: "Gebruik",
+			input: "Invoer",
+			cached: "Gekas",
+			output: "Uitvoer",
+			reasoning: "Redenering",
+			total: "Totaal",
+		},
 	},
 	language: {
 		label: "Taal",

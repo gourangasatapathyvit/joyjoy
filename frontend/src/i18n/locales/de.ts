@@ -294,6 +294,17 @@ export const de: Resources = {
 		placeholder: "Nachricht senden…",
 		send: "Nachricht senden",
 		stop: "Generierung stoppen",
+		copied: "In die Zwischenablage kopiert",
+		sources: "Quellen",
+		context: {
+			label: "Kontextnutzung",
+			usage: "Nutzung",
+			input: "Eingabe",
+			cached: "Zwischengespeichert",
+			output: "Ausgabe",
+			reasoning: "Denkprozess",
+			total: "Gesamt",
+		},
 	},
 	language: {
 		label: "Sprache",

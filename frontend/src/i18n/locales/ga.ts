@@ -295,6 +295,17 @@ export const ga: Resources = {
 		placeholder: "Seol teachtaireacht…",
 		send: "Seol teachtaireacht",
 		stop: "Stop ag giniúint",
+		copied: "Cóipeáilte chuig an ngearrthaisce",
+		sources: "Foinsí",
+		context: {
+			label: "Úsáid comhthéacs",
+			usage: "Úsáid",
+			input: "Ionchur",
+			cached: "I dtaisce",
+			output: "Aschur",
+			reasoning: "Réasúnaíocht",
+			total: "Iomlán",
+		},
 	},
 	language: {
 		label: "Teanga",

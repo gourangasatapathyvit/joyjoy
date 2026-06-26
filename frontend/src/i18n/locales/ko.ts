@@ -286,6 +286,17 @@ export const ko: Resources = {
 		placeholder: "메시지 보내기…",
 		send: "메시지 보내기",
 		stop: "생성 중지",
+		copied: "클립보드에 복사됨",
+		sources: "출처",
+		context: {
+			label: "컨텍스트 사용량",
+			usage: "사용량",
+			input: "입력",
+			cached: "캐시됨",
+			output: "출력",
+			reasoning: "추론",
+			total: "합계",
+		},
 	},
 	language: {
 		label: "언어",

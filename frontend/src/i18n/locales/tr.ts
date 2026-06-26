@@ -290,6 +290,17 @@ export const tr: Resources = {
 		placeholder: "Bir mesaj gönderin…",
 		send: "Mesaj gönder",
 		stop: "Üretmeyi durdur",
+		copied: "Panoya kopyalandı",
+		sources: "Kaynaklar",
+		context: {
+			label: "Bağlam kullanımı",
+			usage: "Kullanım",
+			input: "Giriş",
+			cached: "Önbellekte",
+			output: "Çıkış",
+			reasoning: "Akıl yürütme",
+			total: "Toplam",
+		},
 	},
 	language: {
 		label: "Dil",

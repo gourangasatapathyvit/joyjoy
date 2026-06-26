@@ -288,6 +288,17 @@ export const en = {
 		placeholder: "Send a message…",
 		send: "Send message",
 		stop: "Stop generating",
+		copied: "Copied to clipboard",
+		sources: "Sources",
+		context: {
+			label: "Context usage",
+			usage: "Usage",
+			input: "Input",
+			cached: "Cached",
+			output: "Output",
+			reasoning: "Reasoning",
+			total: "Total",
+		},
 	},
 	language: {
 		label: "Language",

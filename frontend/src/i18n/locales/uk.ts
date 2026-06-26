@@ -294,6 +294,17 @@ export const uk: Resources = {
 		placeholder: "Надіслати повідомлення…",
 		send: "Надіслати повідомлення",
 		stop: "Зупинити генерацію",
+		copied: "Скопійовано в буфер обміну",
+		sources: "Джерела",
+		context: {
+			label: "Використання контексту",
+			usage: "Використання",
+			input: "Вхід",
+			cached: "Кешовано",
+			output: "Вихід",
+			reasoning: "Міркування",
+			total: "Усього",
+		},
 	},
 	language: {
 		label: "Мова",

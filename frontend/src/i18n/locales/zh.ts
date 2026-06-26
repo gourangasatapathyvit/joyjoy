@@ -284,6 +284,17 @@ export const zh: Resources = {
 		placeholder: "发送消息…",
 		send: "发送消息",
 		stop: "停止生成",
+		copied: "已复制到剪贴板",
+		sources: "来源",
+		context: {
+			label: "上下文用量",
+			usage: "用量",
+			input: "输入",
+			cached: "缓存",
+			output: "输出",
+			reasoning: "推理",
+			total: "总计",
+		},
 	},
 	language: {
 		label: "语言",

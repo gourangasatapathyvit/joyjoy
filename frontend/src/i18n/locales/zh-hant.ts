@@ -284,6 +284,17 @@ export const zhHant: Resources = {
 		placeholder: "傳送訊息…",
 		send: "傳送訊息",
 		stop: "停止產生",
+		copied: "已複製到剪貼簿",
+		sources: "來源",
+		context: {
+			label: "上下文用量",
+			usage: "用量",
+			input: "輸入",
+			cached: "快取",
+			output: "輸出",
+			reasoning: "推理",
+			total: "總計",
+		},
 	},
 	language: {
 		label: "語言",

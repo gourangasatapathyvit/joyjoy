@@ -295,6 +295,17 @@ export const it: Resources = {
 		placeholder: "Invia un messaggio…",
 		send: "Invia messaggio",
 		stop: "Interrompi generazione",
+		copied: "Copiato negli appunti",
+		sources: "Fonti",
+		context: {
+			label: "Utilizzo del contesto",
+			usage: "Utilizzo",
+			input: "Input",
+			cached: "In cache",
+			output: "Output",
+			reasoning: "Ragionamento",
+			total: "Totale",
+		},
 	},
 	language: {
 		label: "Lingua",

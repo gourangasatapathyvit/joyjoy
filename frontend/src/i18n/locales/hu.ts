@@ -295,6 +295,17 @@ export const hu: Resources = {
 		placeholder: "Üzenet küldése…",
 		send: "Üzenet küldése",
 		stop: "Generálás leállítása",
+		copied: "Vágólapra másolva",
+		sources: "Források",
+		context: {
+			label: "Kontextushasználat",
+			usage: "Használat",
+			input: "Bemenet",
+			cached: "Gyorsítótárazott",
+			output: "Kimenet",
+			reasoning: "Érvelés",
+			total: "Összesen",
+		},
 	},
 	language: {
 		label: "Nyelv",
