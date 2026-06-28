@@ -17,6 +17,7 @@ import { useMemo, useState } from "react";
 import { computeLineDiff, diffStats } from "@/lib/diff";
 import { cn } from "@/lib/utils";
 import { GenerativeUI } from "./generative-ui";
+import { HtmlCanvas } from "./html-canvas";
 import { ToolApprovalControls, useToolNeedsAction } from "./tool-approval";
 import {
 	ToolFallbackContent,
@@ -564,8 +565,16 @@ function RenderUiToolUI(part: ToolCallMessagePartProps) {
 	return <GenerativeUI spec={spec} />;
 }
 
+// render_html: the agent's HTML/CSS/JS rendered in a sandboxed iframe canvas.
+function RenderHtmlToolUI(part: ToolCallMessagePartProps) {
+	const html = (part.args as { html?: string } | undefined)?.html;
+	if (typeof html !== "string" || !html.trim()) return null;
+	return <HtmlCanvas html={html} />;
+}
+
 export const TOOL_UIS: Record<string, ToolCallMessagePartComponent> = {
 	render_ui: RenderUiToolUI,
+	render_html: RenderHtmlToolUI,
 	write_todos: TodoChecklistUI,
 	task: SubagentToolUI,
 	fetch_content: FetchContentToolUI,

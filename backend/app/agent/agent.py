@@ -61,6 +61,7 @@ from app.core.enums import Provider
 from app.agent.prompts import (
     DEFAULT_SYSTEM_PROMPT,
     LOAD_SKILL_TOOL_DESCRIPTION,
+    RENDER_HTML_TOOL_DESCRIPTION,
     RENDER_UI_TOOL_DESCRIPTION,
     SANDBOX_PROMPT_SUFFIX,
 )
@@ -355,6 +356,22 @@ def _make_render_ui_tool():
         coroutine=_render,
         name="render_ui",
         description=RENDER_UI_TOOL_DESCRIPTION,
+    )
+
+
+def _make_render_html_tool():
+    """A ``render_html`` tool: the model passes a self-contained HTML/CSS/JS string
+    and the frontend renders it in a sandboxed iframe (the "HTML canvas" — full
+    flexibility). No-op server-side; runs.py streams the call and the frontend's
+    tool UI renders the markup."""
+
+    async def _render(html: str) -> str:
+        return f"HTML canvas rendered ({len(html or '')} chars)."
+
+    return StructuredTool.from_function(
+        coroutine=_render,
+        name="render_html",
+        description=RENDER_HTML_TOOL_DESCRIPTION,
     )
 
 
@@ -678,7 +695,8 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
     mcp_tools = _bind_session_workspace(mcp_tools)  # inject per-thread workspace_id
     tools = list(mcp_tools)
     if genui:
-        tools.append(_make_render_ui_tool())  # generative UI (render_ui)
+        tools.append(_make_render_ui_tool())  # generative UI — JSON component kit
+        tools.append(_make_render_html_tool())  # generative UI — HTML canvas (iframe)
     if sandbox.is_enabled(settings):
         tools.append(_make_load_skill_tool(settings, uid))  # materialize skills into the sandbox
     system_prompt = await _system_prompt_for(uid, settings)

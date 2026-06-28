@@ -22,7 +22,9 @@ import {
 	TriangleAlertIcon,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { mediaUrl } from "@/lib/media";
 import { cn } from "@/lib/utils";
+import { useChatStore } from "@/store/chat";
 
 // ── prop readers (defensive: agent props are untrusted) ────────────────────
 type Props = Record<string, unknown>;
@@ -43,6 +45,16 @@ function safeUrl(v: unknown): string | undefined {
 	if (!s) return undefined;
 	if (/^(https?:|mailto:|\/|#|\.)/i.test(s)) return s;
 	return undefined;
+}
+
+// Resolve a `workspace:<path>` scheme to the active thread's media URL (so the
+// agent can show files it created), otherwise sanitize as a normal URL.
+function resolveUrl(v: unknown, threadId: string): string | undefined {
+	const s = optStr(v)?.trim();
+	if (!s) return undefined;
+	if (s.startsWith("workspace:"))
+		return mediaUrl(threadId, s.slice("workspace:".length));
+	return safeUrl(s);
 }
 
 type GenComponent = (p: Props & { children?: ReactNode }) => ReactNode;
@@ -235,7 +247,8 @@ const List: GenComponent = ({ ...p }) => {
 };
 
 const Image: GenComponent = ({ ...p }) => {
-	const src = safeUrl(p.src);
+	const threadId = useChatStore((s) => s.threadId);
+	const src = resolveUrl(p.src, threadId);
 	if (!src) return null;
 	const width = numOf(p.width);
 	return (
@@ -249,7 +262,8 @@ const Image: GenComponent = ({ ...p }) => {
 };
 
 const Link: GenComponent = ({ ...p }) => {
-	const href = safeUrl(p.href);
+	const threadId = useChatStore((s) => s.threadId);
+	const href = resolveUrl(p.href, threadId);
 	if (!href) return <span>{str(p.text)}</span>;
 	return (
 		<a
