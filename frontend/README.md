@@ -1,42 +1,68 @@
 # joyjoy frontend
 
-The React SPA for **joyjoy**. It is **not a standalone app** — it's built to `frontend/dist` and served by the FastAPI backend from the same origin (`:8080`), so there's no separate UI server in production. It talks to the backend's `/v1/*` API with `credentials: "include"` (httpOnly session cookie = identity).
+The joyjoy web client: a **React 19 + Vite** single-page app built on **assistant-ui** (external-store runtime). In production it's compiled to `dist/` and served by the FastAPI backend on the same origin as the `/v1` API (`:8080`) — there is no separate web server.
+
+> Big-picture architecture lives in [`../ARCHITECTURE.md`](../ARCHITECTURE.md); the API it talks to is in [`../backend/README.md`](../backend/README.md). This README is the frontend dev guide.
 
 ## Stack
 
-React 19 + TypeScript + **Vite** · **assistant-ui** (chat runtime/UI) · Tailwind v4 + shadcn (Radix / base-ui) · **TanStack Query** (server state) · **Zustand** (UI state) · **react-i18next** (16 locales) · **Biome** (lint/format).
+- **React 19** + **TypeScript** (strict), **Vite 8**
+- **@assistant-ui/react** — chat UI primitives; used in **external-store** mode (app owns chat state)
+- **Tailwind CSS v4** + **shadcn** / **radix-ui** / **base-ui** components, `lucide-react` icons, Geist font
+- **zustand** (client state) + **@tanstack/react-query** (server cache)
+- **react-router 7**, **i18next** (16 locales), **next-themes** (default dark), **sonner** (toasts)
+- **Biome** (lint + format)
 
-## Scripts
+## Layout (`src/`)
 
-```bash
-npm install          # first time (start_all.sh / serve.sh do this for you)
-npm run dev          # Vite dev server on :5173, proxies /v1 → :8080 (hot reload)
-npm run build        # tsc -b && vite build → frontend/dist (what the backend serves)
-npm run check        # biome check --write .   (lint + format, autofix)
-npm run lint         # biome lint .
-npm run preview      # preview the production build
+```
+main.tsx  App.tsx  providers.tsx   # entry, routes, app-wide providers (QueryClient, theme, tooltips)
+runtime/        # JoyjoyRuntimeProvider.tsx — assistant-ui external-store runtime + custom SSE client
+                #   workspaceAttachment.ts — composer attachments → agent workspace
+routes/         # ChatPage, SettingsPage, McpPanel, SkillsPanel, MemoryPanel, ProvidersPanel, AuthPage
+components/
+  assistant-ui/ # thread, tool-uis, generative-ui (render_ui kit), html-canvas (render_html iframe),
+                #   reasoning, media-part, dot-matrix, model-selector, tool-approval/group, …
+  chat/         # ConversationSidebar, ModelPicker, WorkspaceDock, DownloadButton
+  layout/       # AppShell, PanelLayout, ConnectionStatus
+  memory/ skills/ settings/ auth/ ui/(shadcn primitives)
+store/          # zustand stores: chat.ts, settings.ts
+api/            # client.ts (fetch wrapper), queries.ts (TanStack hooks), sessions/auth/workspace/types…
+i18n/           # config + languages + 16 locale files (strict Resources = typeof en)
+lib/            # media.ts (workspace:<path> → /v1/media), utils, nav, text, diff, useFileDownload
 ```
 
-**Type-check is part of the build** (`tsc -b`). Before committing, `npx tsc --noEmit` and `npm run check` must be clean. To iterate on the UI: run the backend (`scripts/restart_backend.sh`) on `:8080`, then `npm run dev`. To update what the backend actually serves, `npm run build` (or `scripts/serve.sh`).
+Routes (`App.tsx`): `/signin` (public) and, behind `RequireAuth` + `AppShell`, `/` & `/session/:id` (chat), `/mcp`, `/skills`, `/memory`, `/settings`.
 
-## Structure (`src/`)
+## Develop
 
-- `api/` — the typed `/v1` client (`client.ts`) + TanStack Query hooks: `sessions.ts`, `workspace.ts`, `usersettings.ts`/`prefs.ts` (UI prefs), `queries.ts`, `types.ts`.
-- `runtime/JoyjoyRuntimeProvider.tsx` — the heart of chat: an assistant-ui **ExternalStore** runtime that drives a turn via `POST /v1/runs` + an SSE `EventSource` (`/v1/runs/{id}/events`), streams text/reasoning/tool events, and surfaces **HITL tool approvals** (incl. per-chat auto-approve).
-- `components/`
-  - `assistant-ui/` — chat surface (mostly vendored registry components). Notable joyjoy edits: `tool-fallback.tsx` (approval cards + "Allow for rest of chat"), `thread.tsx` (auto-expands the tool group on a pending approval; per-message copy button), `media-part.tsx` (inline image/audio/video/pdf/office/text with a **"Media inaccessible"** fallback that probes each URL).
-  - `chat/` — `WorkspaceDock.tsx` (resizable, per-session file dock), `ModelPicker.tsx` (model + reasoning + **Auto-approve** toggle), `ConversationSidebar.tsx`.
-  - `settings/` `skills/` `memory/` `auth/` `layout/` `ui/` — Settings panes, Skills/MCP/Memory CRUD, login, app shell, shadcn primitives.
-- `routes/` — pages (`ChatPage`, `SettingsPage` + panels, `AuthPage`) wired with react-router.
-- `store/chat.ts` — Zustand: active `threadId`, model/reasoning, `autoApprove` (+ account default), workspace dock open/width. The runtime reads it at send-time via `getState()`.
-- `i18n/` — `locales/*.ts`; **`en.ts` is the source of truth** (`Resources = typeof en`), so every other locale must carry the same keys or `tsc` fails. Default language English.
-- `lib/` — `media.ts` (media-type detection + URL builders, incl. `mediaUrl(threadId, path)`), `constants.ts` (storage keys, dock bounds).
+```bash
+cd frontend
+npm install
+npm run dev        # Vite dev server on http://localhost:5173
+```
 
-## Conventions
+The dev server proxies `/v1` → backend `:8080` and **injects `x-user-id: alice`** so you can hit the API without signing in (EventSource can't set headers, so the proxy also covers the SSE stream). So:
 
-- **Same-origin, cookie auth** — never send credentials in the URL; `client.ts` uses `credentials: "include"`. Identity is the backend session cookie.
-- **Server state via TanStack Query; UI state via Zustand.** Per-user prefs persist to `UserConfig` through `/v1/settings/ui` (`api/prefs.ts persistPref()` writes + keeps the query cache in sync; `components/PrefsSync.tsx` hydrates once after login).
-- **i18n every user-facing string** and keep all locales key-parity with `en.ts` (the build enforces it). A few vendored assistant-ui registry strings are intentionally left English.
-- **assistant-ui components are vendored** (copied into `components/assistant-ui/`), so edits live here rather than in `node_modules`; keep changes minimal so they stay close to upstream.
+- Start the backend first (`../backend` or `../scripts/start_all.sh`).
+- Use **`http://localhost:5173`** (a secure context — `crypto.randomUUID` needs it; a raw WSL IP breaks it). The proxied dev identity is `alice`, so seed a `User(id="alice")` or you'll be stuck at `/signin`.
 
-See the repo root `README.md` (run/setup), `ARCHITECTURE.md` (system overview), and `CLAUDE.md` (contributor/agent guide).
+In production identity comes from the `joyjoy` session cookie (no proxy, single origin).
+
+## Build / lint
+
+```bash
+npm run build      # tsc -b && vite build  →  dist/  (baked into the backend image)
+npm run check      # Biome lint + format (write)
+npm run preview    # serve the production build locally
+```
+
+`@` is aliased to `src/` (see `vite.config.ts`).
+
+## Key concepts
+
+- **External-store runtime** (`runtime/JoyjoyRuntimeProvider.tsx`): chat state is owned by the app (zustand + a custom SSE client over `POST /v1/runs`), not by an assistant-ui built-in runtime. The stream carries tokens, tool calls, and HITL approval interrupts.
+- **Tool UIs** (`components/assistant-ui/tool-uis.tsx`): a `TOOL_UIS` map renders specific tool calls inline. Notably `render_ui` → `GenerativeUI` (native `MessagePrimitive.GenerativeUI` component kit) and `render_html` → `HtmlCanvas` (sandboxed `<iframe sandbox="allow-scripts">` + `postMessage` bridge `window.aui.{send,compose,link}`, auto-resized). Specs/HTML persist across reloads via the tool-call args.
+- **Generative-UI toggle**: a per-session button (left of the model picker) in `chat/ModelPicker.tsx`; persisted in localStorage and sent as `generative_ui` on each run so the backend gates the render tools.
+- **Workspace media** (`lib/media.ts`): `workspace:<path>` resolves to `/v1/media?thread_id=…&path=…` (same-origin, cookie-auth).
+- **i18n**: every locale file is typed against `en` (`Resources = typeof en`) — add a key to all 16 (or via a one-shot script) to keep types valid.

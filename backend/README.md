@@ -1,44 +1,81 @@
 # joyjoy backend
 
-FastAPI + **deepagents/LangGraph** engine. A **single process** serves both the React SPA (`frontend/dist`, mounted via `app.frontend()`) and the `/v1` API to many users; **all application data lives in one relational DB** (dev SQLite / prod Postgres, by `APP_ENV`). One `create_deep_agent()` (cached per `(kind, user, model, reasoning)`) backs every chat; isolation is by `User.id` + `thread_id`.
+Multi-tenant **Deep Agents** backend: a single **FastAPI** process that serves the React SPA and the `/v1` JSON/SSE API on one port (`:8080`). One compiled agent per `(run/chat, user, model, reasoning, genui)` is cached in-process; every request carries its own `user_id` + `thread_id` for tenant isolation.
 
-For the system-wide picture see the repo root `ARCHITECTURE.md`; for run/setup see the root `README.md`; for contributor/agent notes see `CLAUDE.md`.
+> Big-picture architecture (data flow, security tiers, deployment) lives in [`../ARCHITECTURE.md`](../ARCHITECTURE.md). This README is the backend dev guide.
 
-## Run & dev (uv-managed venv — no `pip`)
+## Stack
 
-The app reads `../.env` (pydantic `env_file="../.env"`), so **run it from `backend/`**.
-
-```bash
-cd backend
-uv sync                       # create/refresh .venv (dev extras: uv sync --extra dev)
-.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080
-curl -s 127.0.0.1:8080/v1/health
-```
-
-Usually you just run `scripts/restart_backend.sh` (restart) or `scripts/start_all.sh` (whole stack). ⚠️ **`uv sync` prunes anything not in `pyproject.toml`** — add deps there, never via `uv pip install` (an ad-hoc install gets wiped on the next sync). On first boot the app creates tables and loads `app/db/seeds/global_seed.sql` into an empty DB.
-
-- **Lint/format:** `uv run ruff check app && uv run ruff format app` (dev extra).
-- **Checks/tests:** no real pytest suite yet (deps are dev extras). `../scripts/validate_models.py` parses every model spec + resolves `${VAR}` keys. Validate behavior against the live `/v1` API with a real session cookie. **Never `import app.main` from a standalone script** — it opens a DB connection at import and hangs (parse `.env` into `os.environ` yourself).
+- **Python ≥ 3.11**, FastAPI + uvicorn, SSE via `sse-starlette`
+- **Agent engine**: `deepagents` 0.6.11 on `langgraph` ≥1.2 (`langchain-core`, `langchain-mcp-adapters`)
+- **Model providers**: Azure OpenAI, Anthropic (incl. Azure AI Foundry `/anthropic`), AWS Bedrock, Google GenAI
+- **Persistence**: SQLAlchemy 2.0 (async) app DB + LangGraph checkpointer — SQLite (dev) / Postgres (prod, `psycopg`); Alembic migrations
+- **Secrets at rest**: Fernet (`cryptography`); accounts via `bcrypt` + signed session cookie / JWT
 
 ## Layout (`app/`)
 
-- `main.py` — app creation, lifespan/warm-up, `include_router` wiring, `app.frontend()` (SPA mounted last).
-- `routes/` — the `/v1` API, split by concern: `auth chat runs sessions workspace mcp models skills memory settings_ui health` (+ `deps.py` shared deps).
-- `agent.py` — **the core**: `_get_or_build()` compiles + caches the deep agent and invalidates the per-user cache on every write; async model/MCP/skill CRUD + `describe_*`; `build_backend()` chooses sandbox vs host filesystem; MCP load + per-run HITL gating. `agent_common.py` holds shared low-level bits (breaks import cycles).
-- `dbfs.py` — DB→agent bridge: `MemoryBackend` (`/memory/`) + `DbSkillsBackend` (`/skills/{user,global}/`) deepagents backends (async DB, no disk). `memory_store.py`, `skills_store.py` support them.
-- `db/` — `models.py` (13 tables), `engine.py` (async engine + `db_session()`), `crypto.py` (Fernet at rest), `seed.py` + `seeds/global_seed.sql` (single shipped seed). `alembic/` = prod migrations. **Adding a column:** SQLite `create_all` won't ALTER an existing table — dev: wipe `data/joyjoy.db*` or `ALTER TABLE`; prod: Alembic.
-- `runs.py` — SSE runs engine (`/v1/runs` + events) with server-side HITL approval resolution (`Session.auto_approve`).
-- `sandbox.py` / `sandbox_backend.py` / `workspace_sandbox.py` — OpenSandbox layer (gated by `SANDBOX_ENABLED`): lifecycle/dedicated-loop + per-workspace Docker volume / `BaseSandbox` bridge / dock FS facade. Talks to `opensandbox-server` on `:8090`.
-- `workspace.py` / `media.py` — host filesystem dock + media resolver (used when sandbox off; `/v1/workspace/*` and `/v1/media` branch sandbox-vs-host).
-- `config.py` (Settings), `persistence.py` (LangGraph saver+store), `auth.py`, `users.py` (accounts/OTP), `usersettings.py` (UI prefs ↔ `user_configs`), `sessions.py`, `context.py` (`AgentContext`), `prompts.py`, `constants.py`, `enums.py` (`Provider`/`McpStatus` StrEnums), `mcp_runtime.py` (MCP connection building), `textutils.py`.
-- `mcp_servers/` — in-repo MCP servers run as subprocesses: `joyjoy_demo.py`, `workspace_fs/` (file delete/move/mkdir, per-session-scoped).
+```
+main.py        # app assembly + lifespan (env load, DB init/seed, persistence, agent warm-up, SPA mount)
+core/          # config.py (Settings), auth.py, context.py, constants, enums, text/time utils
+db/            # models.py (schema), engine.py, crypto.py (Fernet), seed.py, seeds/*.sql
+agent/         # agent.py (build + per-key cache), prompts.py, middleware.py, runs.py (SSE + HITL), agent_common.py
+routes/        # one APIRouter per concern (see API surface below)
+stores/        # sessions, users, usersettings, skills_store, mcp_runtime, memory_store,
+               #   persistence (checkpointer/store), dbfs (DB→agent-FS bridge)
+workspace/     # workspace.py (per-thread files), media.py (/v1/media; office→PDF via LibreOffice)
+sandbox/       # OpenSandbox integration (opt-in code/shell execution)
+mcp_servers/   # bundled MCP servers (joyjoy_demo.py, workspace_fs)
+```
 
-## Capabilities = global (read-only) + per-user (CRUD)
+## Run (dev)
 
-Skills, MCP servers, models, and memory share one shape, all in the DB: **global** rows (seeded from `global_seed.sql`, read-only) merged with **per-user** rows keyed by `User.id`. Writes to a global id are rejected; a user sees `global ∪ own`. CRUD lives in `agent.py` (`save_/delete_/toggle_user_*`); endpoints under `routes/`.
+```bash
+cd backend
+uv pip install -e .            # installs deps into the active interpreter
+uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+# or: ../scripts/run-backend.sh
+```
 
-## Conventions & gotchas
+Dev defaults (`APP_ENV=dev`): SQLite app DB (`./data/joyjoy.db`) + SQLite checkpointer + a no-auth dev user resolved from the `X-User-Id` header. On first boot the global catalogs (skins/providers/models/skills/MCP) are seeded from `app/db/seeds/global_seed.sql`.
 
-- **Secrets** in `../.env` (gitignored): `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY` (generate-once), model keys, `OPENSANDBOX_API_KEY`, `SANDBOX_ENABLED`. Model/provider secrets are **Fernet-encrypted at rest**; the seed SQL holds only `${VAR}` env-refs; `describe_models` masks keys to the browser. MCP secrets are not stored — use `${VAR}` refs.
-- **MCP stdio env:** the MCP SDK passes no inherited env, so `mcp_runtime`/`agent` inject PATH/HOME/cache + expand `${VAR}`. Avoid bare `npx` (can resolve to Windows npx and hang).
-- After any model/MCP/skill/memory write the per-user agent cache is invalidated — route new writes through the `save_/delete_/toggle_` helpers so this holds.
+Full stack (backend + SPA + jira MCP, WSL): `../scripts/start_all.sh`. Containerized: see [`../ARCHITECTURE.md`](../ARCHITECTURE.md) §6 (`docker compose up --build`).
+
+## Configuration
+
+Settings come from env / `.env` (pydantic-settings; field names map case-insensitively to `UPPER_SNAKE`). Common ones:
+
+| Var | Purpose |
+|-----|---------|
+| `APP_ENV` | `dev` (SQLite, no-auth) or `prod` (Postgres, cookie/JWT auth) |
+| `DATABASE_URL` | Postgres DSN (prod); shared by the app DB and the LangGraph checkpointer |
+| `JWT_SECRET` | signs session cookies / per-user JWTs — **required & stable in prod** |
+| `CREDENTIAL_ENCRYPTION_KEY` | Fernet key for secrets at rest — **generate once; rotating it orphans stored secrets** |
+| `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_ENDPOINT` | base model creds (seeded models reference `${AZURE_OPENAI_API_KEY}`) |
+| `WORKSPACE_ROOT` | agent workspace files root (`/data` volume in prod) |
+| `JOYJOY_INTERRUPT_TOOLS` | extra built-in tools to gate for HITL approval (MCP/plugin tools auto-gate) |
+| `SANDBOX_ENABLED` / `OPENSANDBOX_API_KEY` / `SANDBOX_*` | opt-in code-execution sandbox (off by default) |
+
+Model & MCP secrets are referenced as `${VAR}` in the DB/config and expanded at agent build, so keys stay out of the committed seed. `describe_mcp` returns the original `${VAR}` refs — never the expanded secret.
+
+## API surface (`/v1`, mounted in `main.py`)
+
+`health` · `auth` (signup/login/OTP/me) · `models` (+providers) · `mcp` (servers/tools CRUD) · `skills` (global read-only + user CRUD) · `memory` (AGENTS.md + notes) · `workspace` (file CRUD + `/v1/media`) · `settings_ui` (UI prefs) · `chat` · `runs` (SSE run loop + approvals + `/v1/capabilities`) · `sessions` (per-user sidebar).
+
+Chat runs stream tokens, tool calls, and HITL approval interrupts over SSE; everything else is plain JSON.
+
+## Key concepts
+
+- **Agent cache** (`agent.py:_get_or_build`): key `("run"|"chat", uid, model, effort, genui)`. Tools = per-user MCP tools (cached, workspace-bound) + generative-UI tools `render_ui`/`render_html` (when `genui`) + `load_skill` (sandbox only). These render-tools are **native in-process `StructuredTool`s, not MCP** — the spec/HTML rides in the tool-call args and the frontend renders it.
+- **HITL**: in run mode, `interrupt_on` gates all MCP/plugin tools (+ `JOYJOY_INTERRUPT_TOOLS` + sandbox `execute`); per-thread `auto_approve` can bypass.
+- **DB→agent FS bridge** (`stores/dbfs.py`): serves `/memory/AGENTS.md` and `/skills/*` from the DB into the agent's virtual filesystem.
+- **Middleware** (`agent/middleware.py`): `StripStaleThinkingMiddleware` (fixes multi-turn thinking-block replays) + production guards (call/tool limits, transient retry, context trimming), additive over deepagents' built-ins.
+- **Messages live in the LangGraph checkpointer**, not the relational DB. The relational DB holds accounts, catalogs, per-user skills/MCP/models, and `sessions` metadata.
+
+## Testing & migrations
+
+```bash
+uv pip install -e '.[dev]'
+pytest                # tests/ (asyncio mode)
+ruff check app        # lint
+alembic upgrade head  # DB migrations
+```
