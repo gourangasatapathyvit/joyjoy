@@ -145,10 +145,11 @@ Request shapes:
 ## 6. Deployment & Infrastructure
 
 - **Image**: one multi-stage Dockerfile — Stage 1 `node:22` builds the SPA; Stage 2 `python:3.13-slim` installs the backend (`uv pip install -e .`), copies `frontend/dist`, runs `uvicorn` on `:8080`. Includes `uv`/`uvx` (for uvx MCPs) + headless LibreOffice (office previews).
-- **Compose** (`docker-compose.yml`, network `joyjoy-net`):
-  - `backend` — the app; `APP_ENV=prod`, reads `DATABASE_URL`; volume `workspaces:/data`; healthcheck `GET /v1/health`.
-  - `db` *(profile `localdb`)* — bundled Postgres 16 for local dev only; prod points `DATABASE_URL` at a hosted Postgres (no `depends_on`).
-  - **Sandbox tier** *(profile `sandbox`, opt-in)*: `opensandbox` server + `docker-socket-proxy` (least-privilege daemon access) + `sandbox-image` (build-only). Spawned sandboxes live on the isolated `joyjoy-sandbox-net` (cannot reach backend/DB).
+- **Compose** (`docker-compose.yml`, network `joyjoy-net`): the `backend` service always runs; the other services are gated behind **two optional, independent profiles** that can be enabled together via `COMPOSE_PROFILES=sandbox,localdb` (or singly, or neither):
+  - `backend` *(no profile — always on)* — the app; `APP_ENV=prod`, reads `DATABASE_URL`; volume `workspaces:/data`; healthcheck `GET /v1/health`.
+  - **`localdb` profile** — bundled Postgres 16 (`db` service) for local dev only; without it, prod points `DATABASE_URL` at a hosted Postgres (there is intentionally no `depends_on`).
+  - **`sandbox` profile** — the opt-in code-execution tier: `opensandbox` server + `docker-socket-proxy` (least-privilege daemon access) + `sandbox-image` (build-only). Also set `SANDBOX_ENABLED=true` on the backend. Spawned sandboxes live on the isolated `joyjoy-sandbox-net` (cannot reach backend/DB).
+  - Profiles compose freely: e.g. `COMPOSE_PROFILES=sandbox,localdb docker compose up --build` runs backend + bundled Postgres + the full sandbox tier; unset → backend only (hosted DB, host-workspace mode).
 - **Secrets** via `.env` (compose interpolation): `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY` (generate-once, must stay stable), `AZURE_OPENAI_API_KEY`, `DATABASE_URL`.
 - **Dev (WSL)**: `scripts/start_all.sh` brings up jira MCP (`:9000`) → backend (`:8080`) in order; idempotent. SQLite + no-auth dev user.
 - **CI/CD & monitoring**: not yet codified in-repo (logs via stdout `logging`; healthcheck endpoint exists). *(see Roadmap)*
