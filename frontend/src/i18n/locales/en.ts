@@ -185,6 +185,9 @@ export const en = {
 		medium: "Medium",
 		high: "High",
 		extraHigh: "Extra High",
+		searchPlaceholder: "Search models…",
+		allProviders: "All",
+		noModels: "No models found.",
 	},
 	mcp: {
 		title: "MCP",

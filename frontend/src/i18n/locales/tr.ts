@@ -187,6 +187,9 @@ export const tr: Resources = {
 		medium: "Orta",
 		high: "Yüksek",
 		extraHigh: "Çok yüksek",
+		searchPlaceholder: "Model ara…",
+		allProviders: "Tümü",
+		noModels: "Model bulunamadı.",
 	},
 	mcp: {
 		title: "MCP",

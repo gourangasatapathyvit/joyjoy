@@ -128,6 +128,9 @@ export const de: Resources = {
 		medium: "Mittel",
 		high: "Hoch",
 		extraHigh: "Sehr hoch",
+		searchPlaceholder: "Modelle suchen…",
+		allProviders: "Alle",
+		noModels: "Keine Modelle gefunden.",
 	},
 	auth: {
 		signinTitle: "Bei joyjoy anmelden",

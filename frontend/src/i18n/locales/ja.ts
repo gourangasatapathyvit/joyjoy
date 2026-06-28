@@ -188,6 +188,9 @@ export const ja: Resources = {
 		medium: "中",
 		high: "高",
 		extraHigh: "最高",
+		searchPlaceholder: "モデルを検索…",
+		allProviders: "すべて",
+		noModels: "モデルが見つかりません。",
 	},
 	mcp: {
 		title: "MCP",

@@ -190,6 +190,9 @@ export const hu: Resources = {
 		medium: "Közepes",
 		high: "Magas",
 		extraHigh: "Nagyon magas",
+		searchPlaceholder: "Modellek keresése…",
+		allProviders: "Összes",
+		noModels: "Nincs találat.",
 	},
 	mcp: {
 		title: "MCP",

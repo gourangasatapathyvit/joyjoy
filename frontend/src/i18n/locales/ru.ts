@@ -190,6 +190,9 @@ export const ru: Resources = {
 		medium: "Среднее",
 		high: "Высокое",
 		extraHigh: "Очень высокое",
+		searchPlaceholder: "Поиск моделей…",
+		allProviders: "Все",
+		noModels: "Модели не найдены.",
 	},
 	mcp: {
 		title: "MCP",

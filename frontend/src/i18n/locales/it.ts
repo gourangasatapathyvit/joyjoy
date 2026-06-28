@@ -130,6 +130,9 @@ export const it: Resources = {
 		medium: "Medio",
 		high: "Alto",
 		extraHigh: "Molto alto",
+		searchPlaceholder: "Cerca modelli…",
+		allProviders: "Tutti",
+		noModels: "Nessun modello trovato.",
 	},
 	auth: {
 		signinTitle: "Accedi a joyjoy",

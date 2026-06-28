@@ -190,6 +190,9 @@ export const pt: Resources = {
 		medium: "Médio",
 		high: "Alto",
 		extraHigh: "Muito alto",
+		searchPlaceholder: "Pesquisar modelos…",
+		allProviders: "Todos",
+		noModels: "Nenhum modelo encontrado.",
 	},
 	mcp: {
 		title: "MCP",

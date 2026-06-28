@@ -188,6 +188,9 @@ export const af: Resources = {
 		medium: "Medium",
 		high: "Hoog",
 		extraHigh: "Ekstra hoog",
+		searchPlaceholder: "Soek modelle…",
+		allProviders: "Almal",
+		noModels: "Geen modelle gevind nie.",
 	},
 	mcp: {
 		title: "MCP",

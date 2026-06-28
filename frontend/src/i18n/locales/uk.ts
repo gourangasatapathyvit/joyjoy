@@ -190,6 +190,9 @@ export const uk: Resources = {
 		medium: "Середнє",
 		high: "Високе",
 		extraHigh: "Дуже високе",
+		searchPlaceholder: "Пошук моделей…",
+		allProviders: "Усі",
+		noModels: "Моделі не знайдено.",
 	},
 	mcp: {
 		title: "MCP",

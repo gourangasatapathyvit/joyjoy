@@ -184,6 +184,9 @@ export const ko: Resources = {
 		medium: "중간",
 		high: "높음",
 		extraHigh: "매우 높음",
+		searchPlaceholder: "모델 검색…",
+		allProviders: "전체",
+		noModels: "모델을 찾을 수 없습니다.",
 	},
 	mcp: {
 		title: "MCP",

@@ -191,6 +191,9 @@ export const ga: Resources = {
 		medium: "Meánach",
 		high: "Ard",
 		extraHigh: "An-ard",
+		searchPlaceholder: "Cuardaigh múnlaí…",
+		allProviders: "Gach ceann",
+		noModels: "Níor aimsíodh aon mhúnla.",
 	},
 	mcp: {
 		title: "MCP",

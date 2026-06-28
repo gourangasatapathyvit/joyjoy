@@ -183,6 +183,9 @@ export const zhHant: Resources = {
 		medium: "中",
 		high: "高",
 		extraHigh: "極高",
+		searchPlaceholder: "搜尋模型…",
+		allProviders: "全部",
+		noModels: "找不到模型。",
 	},
 	mcp: {
 		title: "MCP",
