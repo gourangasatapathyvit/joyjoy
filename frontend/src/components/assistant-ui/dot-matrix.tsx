@@ -93,7 +93,16 @@ type StateConfig = {
 };
 
 const STATES = {
-	idle: { color: "text-muted-foreground", base: 0.85 },
+	idle: {
+		color: "text-muted-foreground",
+		base: 0.85,
+		// Gentle diagonal "breathing" wave so the connected indicator stays alive.
+		blink: (_i, row, col) => ({
+			duration: 1.8,
+			delay: -(row + col) * 0.12,
+			lo: 0.4,
+		}),
+	},
 	loading: {
 		blink: (i) => ({
 			duration: 0.9 + hash(i, 2, 700),
@@ -184,7 +193,12 @@ const STATES = {
 	info: { color: "text-blue-500", glyph: INFO },
 	paused: { color: "text-muted-foreground", glyph: PAUSE },
 	stopped: { color: "text-muted-foreground", glyph: STOP },
-	offline: { color: "text-muted-foreground", base: 0.7 },
+	offline: {
+		color: "text-muted-foreground",
+		base: 0.7,
+		// Slow uniform pulse — present but clearly "disconnected".
+		blink: () => ({ duration: 1.6, delay: 0, lo: 0.25 }),
+	},
 } satisfies Record<string, StateConfig>;
 
 export type DotMatrixState = keyof typeof STATES;
