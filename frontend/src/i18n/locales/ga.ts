@@ -311,6 +311,11 @@ export const ga: Resources = {
 		},
 		working: "Tá an cúntóir ag obair",
 	},
+	connection: {
+		connecting: "Ag nascadh…",
+		connected: "Nasctha",
+		offline: "As líne",
+	},
 	language: {
 		label: "Teanga",
 		switchTo: "Athraigh teanga",

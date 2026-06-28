@@ -311,6 +311,11 @@ export const hu: Resources = {
 		},
 		working: "Az asszisztens dolgozik",
 	},
+	connection: {
+		connecting: "Csatlakozás…",
+		connected: "Csatlakozva",
+		offline: "Offline",
+	},
 	language: {
 		label: "Nyelv",
 		switchTo: "Nyelv váltása",

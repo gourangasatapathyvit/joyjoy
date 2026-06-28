@@ -306,6 +306,11 @@ export const tr: Resources = {
 		},
 		working: "Asistan çalışıyor",
 	},
+	connection: {
+		connecting: "Bağlanıyor…",
+		connected: "Bağlandı",
+		offline: "Çevrimdışı",
+	},
 	language: {
 		label: "Dil",
 		switchTo: "Dili değiştir",

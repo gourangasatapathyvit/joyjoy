@@ -311,6 +311,11 @@ export const it: Resources = {
 		},
 		working: "L'assistente sta lavorando",
 	},
+	connection: {
+		connecting: "Connessione…",
+		connected: "Connesso",
+		offline: "Offline",
+	},
 	language: {
 		label: "Lingua",
 		switchTo: "Cambia lingua",

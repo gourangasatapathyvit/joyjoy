@@ -308,6 +308,11 @@ export const ja: Resources = {
 		},
 		working: "アシスタントが作業中です",
 	},
+	connection: {
+		connecting: "接続中…",
+		connected: "接続済み",
+		offline: "オフライン",
+	},
 	language: {
 		label: "言語",
 		switchTo: "言語を変更",

@@ -219,7 +219,12 @@ function DotMatrix({
 			data-slot="dot-matrix"
 			data-state={state}
 			role="status"
-			className={cn("inline-block size-4 shrink-0", config.color, className)}
+			// Dots use the active skin's primary color by default (--primary, set per
+			// data-skin: Gold/Ares/Poseidon/Sisyphus/Mono) so the matrix follows the
+			// chosen skin. Callers override per-instance via className (twMerge wins) —
+			// e.g. the connection indicator (status colors) or the error box
+			// (destructive). The per-state `config.color` is intentionally NOT applied.
+			className={cn("text-primary inline-block size-4 shrink-0", className)}
 			{...props}
 		>
 			<span className="sr-only">{label ?? state}</span>

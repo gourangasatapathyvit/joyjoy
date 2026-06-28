@@ -304,6 +304,11 @@ export const en = {
 		},
 		working: "Assistant is working",
 	},
+	connection: {
+		connecting: "Connecting…",
+		connected: "Connected",
+		offline: "Offline",
+	},
 	language: {
 		label: "Language",
 		switchTo: "Change language",

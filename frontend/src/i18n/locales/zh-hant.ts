@@ -300,6 +300,11 @@ export const zhHant: Resources = {
 		},
 		working: "助手正在處理",
 	},
+	connection: {
+		connecting: "連線中…",
+		connected: "已連線",
+		offline: "離線",
+	},
 	language: {
 		label: "語言",
 		switchTo: "變更語言",

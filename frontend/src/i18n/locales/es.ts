@@ -311,6 +311,11 @@ export const es: Resources = {
 		},
 		working: "El asistente está trabajando",
 	},
+	connection: {
+		connecting: "Conectando…",
+		connected: "Conectado",
+		offline: "Sin conexión",
+	},
 	language: {
 		label: "Idioma",
 		switchTo: "Cambiar idioma",

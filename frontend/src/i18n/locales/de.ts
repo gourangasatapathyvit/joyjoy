@@ -310,6 +310,11 @@ export const de: Resources = {
 		},
 		working: "Assistent arbeitet",
 	},
+	connection: {
+		connecting: "Verbinde…",
+		connected: "Verbunden",
+		offline: "Offline",
+	},
 	language: {
 		label: "Sprache",
 		switchTo: "Sprache ändern",

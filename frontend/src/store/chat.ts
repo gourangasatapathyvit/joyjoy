@@ -103,9 +103,14 @@ interface ChatState {
 	// Citations keyed by assistant message id, so each turn keeps its own Sources
 	// footer (live id during a run; backend message id after reload).
 	sourcesByMessage: Record<string, Source[]>;
+	// Bumped once each time a run completes successfully — drives a brief
+	// "success" dot-matrix flash near the composer (the per-message status can't,
+	// since the streaming message remounts as already-complete).
+	successTick: number;
 	setUsage: (usage: TokenUsage | null) => void;
 	setSourcesForMessage: (messageId: string, sources: Source[]) => void;
 	setSourcesMap: (map: Record<string, Source[]>) => void;
+	bumpSuccess: () => void;
 	setModel: (model: string) => void;
 	setReasoningEffort: (effort: ReasoningEffort) => void;
 	// User-driven toggle: reflect immediately AND persist on the current session.
@@ -133,12 +138,14 @@ export const useChatStore = create<ChatState>((set) => ({
 	autoApproveDefault: false,
 	usage: null,
 	sourcesByMessage: {},
+	successTick: 0,
 	setUsage: (usage) => set({ usage }),
 	setSourcesForMessage: (messageId, sources) =>
 		set((s) => ({
 			sourcesByMessage: { ...s.sourcesByMessage, [messageId]: sources },
 		})),
 	setSourcesMap: (sourcesByMessage) => set({ sourcesByMessage }),
+	bumpSuccess: () => set((s) => ({ successTick: s.successTick + 1 })),
 	// The picker's choice is remembered as the user's default (server-persisted).
 	setModel: (model) => {
 		set({ model });

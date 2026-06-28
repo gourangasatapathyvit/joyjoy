@@ -402,12 +402,20 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 
 			return new Promise<void>((resolve) => {
 				let settled = false;
+				// Terminal outcome for the success flash: set on an explicit failure so
+				// finish() (the single convergence point for every end path) can flash
+				// "success" for any normal completion that wasn't failed or stopped.
+				let runFailed = false;
 				const finish = () => {
 					if (settled) return;
 					settled = true;
 					setIsRunning(false);
 					// A run may have created/renamed the session — refresh the sidebar.
 					queryClient.invalidateQueries({ queryKey: ["sessions"] });
+					// Brief "success" dot-matrix flash near the composer on a clean end
+					// (not failed, not stopped/superseded).
+					if (!runFailed && !handle.cancelled)
+						useChatStore.getState().bumpSuccess();
 					if (activeRunRef.current?.assistantId === assistantId)
 						activeRunRef.current = null;
 					resolve();
@@ -493,22 +501,28 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 									finish();
 									break;
 								case "run.failed":
+									runFailed = true;
 									appendText(`\n\n_[error: ${ev.error ?? "run failed"}]_`);
 									es.close();
 									finish();
 									break;
 								case "run.cancelled":
+									runFailed = true;
 									es.close();
 									finish();
 									break;
 							}
 						};
 						es.onerror = () => {
+							// In this deployment a normal run ends with the server closing the
+							// SSE stream (→ onerror). finish() flashes success for a clean end;
+							// genuine failures arrive as run.failed first (setting runFailed).
 							es.close();
 							finish();
 						};
 					})
 					.catch((err: unknown) => {
+						runFailed = true;
 						appendText(`\n\n_[error: ${String(err)}]_`);
 						finish();
 					});

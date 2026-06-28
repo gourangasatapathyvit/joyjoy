@@ -300,6 +300,11 @@ export const zh: Resources = {
 		},
 		working: "助手正在处理",
 	},
+	connection: {
+		connecting: "连接中…",
+		connected: "已连接",
+		offline: "离线",
+	},
 	language: {
 		label: "语言",
 		switchTo: "更改语言",

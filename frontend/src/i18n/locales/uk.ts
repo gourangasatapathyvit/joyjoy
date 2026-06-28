@@ -310,6 +310,11 @@ export const uk: Resources = {
 		},
 		working: "Асистент працює",
 	},
+	connection: {
+		connecting: "Підключення…",
+		connected: "Підключено",
+		offline: "Не в мережі",
+	},
 	language: {
 		label: "Мова",
 		switchTo: "Змінити мову",

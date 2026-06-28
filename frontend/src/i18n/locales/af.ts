@@ -308,6 +308,11 @@ export const af: Resources = {
 		},
 		working: "Assistent werk",
 	},
+	connection: {
+		connecting: "Verbind…",
+		connected: "Verbind",
+		offline: "Vanlyn",
+	},
 	language: {
 		label: "Taal",
 		switchTo: "Verander taal",

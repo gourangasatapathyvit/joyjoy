@@ -21,7 +21,6 @@ import {
 	ChevronRightIcon,
 	CopyIcon,
 	DownloadIcon,
-	Loader2Icon,
 	MicIcon,
 	MoreHorizontalIcon,
 	PencilIcon,
@@ -36,6 +35,8 @@ import {
 	type PropsWithChildren,
 	type ReactNode,
 	useContext,
+	useEffect,
+	useRef,
 	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -76,6 +77,7 @@ import { ContextBadge, TurnSources } from "@/components/assistant-ui/turn-info";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useApprovals } from "@/runtime/JoyjoyRuntimeProvider";
+import { useChatStore } from "@/store/chat";
 import { useSettingsStore } from "@/store/settings";
 
 // Tool-call group that auto-expands while a HITL approval is pending in the
@@ -191,7 +193,7 @@ const ThreadRoot: FC<{ isEmpty: boolean }> = ({ isEmpty }) => {
 					{/* Loading a saved conversation (sidebar tap) — built-in thread.isLoading */}
 					<AuiIf condition={(s) => s.thread.isLoading}>
 						<div className="flex flex-1 items-center justify-center gap-2 py-16 text-muted-foreground">
-							<Loader2Icon className="size-5 animate-spin" />
+							<DotMatrix state="loading" className="size-5" />
 							<span className="text-sm">{t("common.loading")}</span>
 						</div>
 					</AuiIf>
@@ -329,6 +331,8 @@ const ComposerAction: FC = () => {
 		<div className="aui-composer-action-wrapper relative flex items-center justify-between">
 			<ComposerAddAttachment />
 			<div className="flex items-center gap-1.5">
+				{/* Brief success flash after each completed run, then the context badge. */}
+				<RunSuccessFlash />
 				{/* Context Display: token/context-fill badge, left of voice input. */}
 				<ContextBadge />
 				<AuiIf condition={(s) => s.thread.capabilities.dictation}>
@@ -363,7 +367,7 @@ const ComposerAction: FC = () => {
 								/>
 							}
 						>
-							<SquareIcon className="aui-composer-stop-dictation-icon size-3.5 animate-pulse fill-current" />
+							<DotMatrix state="listening" className="size-4" />
 						</ComposerPrimitive.StopDictation>
 					</AuiIf>
 				</AuiIf>
@@ -407,7 +411,8 @@ const ComposerAction: FC = () => {
 const MessageError: FC = () => {
 	return (
 		<MessagePrimitive.Error>
-			<ErrorPrimitive.Root className="aui-message-error-root border-destructive bg-destructive/10 text-destructive dark:bg-destructive/5 mt-2 rounded-md border p-3 text-sm dark:text-red-200">
+			<ErrorPrimitive.Root className="aui-message-error-root border-destructive bg-destructive/10 text-destructive dark:bg-destructive/5 mt-2 flex items-start gap-2 rounded-md border p-3 text-sm dark:text-red-200">
+				<DotMatrix state="error" className="text-destructive mt-0.5 size-4" />
 				<ErrorPrimitive.Message className="aui-message-error-message line-clamp-2" />
 			</ErrorPrimitive.Root>
 		</MessagePrimitive.Error>
@@ -529,8 +534,11 @@ const AssistantMessage: FC = () => {
 
 			<div
 				data-slot="aui_assistant-message-footer"
-				className={cn("ms-2 flex items-center", ACTION_BAR_HEIGHT)}
+				className={cn("ms-2 flex items-center gap-1.5", ACTION_BAR_HEIGHT)}
 			>
+				<StreamingIndicator />
+				<MessageStatusMatrix />
+				<SpeakingIndicator />
 				<BranchPicker />
 				<AssistantActionBar />
 			</div>
@@ -585,6 +593,78 @@ const WorkingIndicator: FC = () => {
 	return (
 		<DotMatrix state={state} label={t("chat.working")} className="size-5" />
 	);
+};
+
+// A small "streaming" matrix shown in the footer while the answer text is still
+// being produced (status running with text already present) — the action bar is
+// hidden during a run, so this is the live signal once content starts flowing.
+const StreamingIndicator: FC = () => {
+	const streaming = useAuiState((s) => {
+		if (s.message.status?.type !== "running") return false;
+		const parts = s.message.content as unknown as ReadonlyArray<{
+			type: string;
+		}>;
+		return parts.some((p) => p.type === "text");
+	});
+	if (!streaming) return null;
+	return <DotMatrix state="streaming" className="size-4" label="streaming" />;
+};
+
+// Terminal-state marker for a finished turn that didn't simply succeed: a run the
+// user stopped (stopped), a truncated/filtered answer (warning), or a failure
+// (error). Maps the assistant message's incomplete reason to a matrix glyph.
+const STATUS_MATRIX: Record<string, DotMatrixState> = {
+	cancelled: "stopped",
+	length: "warning",
+	"content-filter": "warning",
+	other: "warning",
+	error: "error",
+};
+
+const MessageStatusMatrix: FC = () => {
+	const reason = useAuiState((s) => {
+		const st = s.message.status as
+			| { type?: string; reason?: string }
+			| undefined;
+		return st?.type === "incomplete" ? st.reason : undefined;
+	});
+	if (!reason) return null;
+	const state = STATUS_MATRIX[reason] ?? "warning";
+	return <DotMatrix state={state} className="size-4" label={state} />;
+};
+
+// "speaking" while this message is being read aloud (Web Speech TTS). Gated on
+// assistant-ui's per-message speech state so it only animates during playback.
+const SpeakingIndicator: FC = () => {
+	const speaking = useAuiState(
+		(s) => (s.message as { speech?: unknown }).speech != null,
+	);
+	if (!speaking) return null;
+	return (
+		<DotMatrix
+			state="speaking"
+			className="text-muted-foreground size-4"
+			label="speaking"
+		/>
+	);
+};
+
+// A brief "success" flash near the composer each time a run completes cleanly,
+// driven by the run-lifecycle `successTick`. (A per-message status flash can't
+// do this reliably — the streaming message remounts as already-complete.)
+const RunSuccessFlash: FC = () => {
+	const tick = useChatStore((s) => s.successTick);
+	const [show, setShow] = useState(false);
+	const seen = useRef(tick);
+	useEffect(() => {
+		if (tick === seen.current) return;
+		seen.current = tick;
+		setShow(true);
+		const id = setTimeout(() => setShow(false), 2500);
+		return () => clearTimeout(id);
+	}, [tick]);
+	if (!show) return null;
+	return <DotMatrix state="success" className="size-4" label="success" />;
 };
 
 const AssistantActionBar: FC = () => {

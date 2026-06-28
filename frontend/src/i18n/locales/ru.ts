@@ -310,6 +310,11 @@ export const ru: Resources = {
 		},
 		working: "Ассистент работает",
 	},
+	connection: {
+		connecting: "Подключение…",
+		connected: "Подключено",
+		offline: "Не в сети",
+	},
 	language: {
 		label: "Язык",
 		switchTo: "Сменить язык",

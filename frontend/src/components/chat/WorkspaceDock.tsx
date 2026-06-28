@@ -23,6 +23,7 @@ import {
 	useWorkspaceTree,
 	workspaceApi,
 } from "@/api/workspace";
+import { DownloadButton } from "@/components/chat/DownloadButton";
 import {
 	formatSize,
 	isImageFile,
@@ -159,10 +160,9 @@ function TreeNode({
 						)}
 						<span className="truncate">{node.name}</span>
 					</button>
-					<a
-						href={workspaceApi.downloadUrl(ctx.threadId, node.path)}
-						download
-						onClick={(e) => e.stopPropagation()}
+					<DownloadButton
+						url={workspaceApi.downloadUrl(ctx.threadId, node.path)}
+						filename={node.type === "dir" ? `${node.name}.zip` : node.name}
 						title={
 							node.type === "dir"
 								? `${t("common.download")} (.zip)`
@@ -171,7 +171,7 @@ function TreeNode({
 						className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-primary group-hover:opacity-100"
 					>
 						<Download className="size-3" />
-					</a>
+					</DownloadButton>
 					<button
 						type="button"
 						onClick={() => ctx.onStartRename(node.path)}

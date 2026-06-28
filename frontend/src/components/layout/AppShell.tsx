@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { useUiSettings, useUpdateUiSettings } from "@/api/usersettings";
 import { WorkspaceDock } from "@/components/chat/WorkspaceDock";
+import { ConnectionStatus } from "@/components/layout/ConnectionStatus";
 import { PrefsSync } from "@/components/PrefsSync";
 import { orderTabs, type RailTab } from "@/lib/nav";
 import { cn } from "@/lib/utils";
@@ -132,6 +133,7 @@ export function AppShell() {
 					</SortableContext>
 				</DndContext>
 				<div className="flex-1" />
+				<ConnectionStatus />
 				<button
 					type="button"
 					onClick={toggleWorkspace}

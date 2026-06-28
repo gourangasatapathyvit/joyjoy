@@ -302,6 +302,11 @@ export const ko: Resources = {
 		},
 		working: "어시스턴트가 작업 중입니다",
 	},
+	connection: {
+		connecting: "연결 중…",
+		connected: "연결됨",
+		offline: "오프라인",
+	},
 	language: {
 		label: "언어",
 		switchTo: "언어 변경",
