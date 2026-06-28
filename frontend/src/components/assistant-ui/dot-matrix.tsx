@@ -93,7 +93,7 @@ type StateConfig = {
 };
 
 const STATES = {
-	idle: { color: "text-muted-foreground", base: 0.3 },
+	idle: { color: "text-muted-foreground", base: 0.85 },
 	loading: {
 		blink: (i) => ({
 			duration: 0.9 + hash(i, 2, 700),
@@ -184,7 +184,7 @@ const STATES = {
 	info: { color: "text-blue-500", glyph: INFO },
 	paused: { color: "text-muted-foreground", glyph: PAUSE },
 	stopped: { color: "text-muted-foreground", glyph: STOP },
-	offline: { color: "text-muted-foreground", base: 0.15 },
+	offline: { color: "text-muted-foreground", base: 0.7 },
 } satisfies Record<string, StateConfig>;
 
 export type DotMatrixState = keyof typeof STATES;

@@ -27,7 +27,7 @@ export function ConnectionStatus() {
 		<div title={label} className="flex size-9 items-center justify-center">
 			<DotMatrix
 				state={status.state}
-				className={cn("size-4", status.color)}
+				className={cn("size-5", status.color)}
 				label={label}
 			/>
 		</div>
