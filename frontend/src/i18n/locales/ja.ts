@@ -191,6 +191,7 @@ export const ja: Resources = {
 		searchPlaceholder: "モデルを検索…",
 		allProviders: "すべて",
 		noModels: "モデルが見つかりません。",
+		genui: "生成 UI",
 	},
 	mcp: {
 		title: "MCP",

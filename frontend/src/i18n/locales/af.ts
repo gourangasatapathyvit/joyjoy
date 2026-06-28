@@ -191,6 +191,7 @@ export const af: Resources = {
 		searchPlaceholder: "Soek modelle…",
 		allProviders: "Almal",
 		noModels: "Geen modelle gevind nie.",
+		genui: "Generatiewe UI",
 	},
 	mcp: {
 		title: "MCP",

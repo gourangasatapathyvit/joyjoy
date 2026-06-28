@@ -194,6 +194,7 @@ export const ga: Resources = {
 		searchPlaceholder: "Cuardaigh múnlaí…",
 		allProviders: "Gach ceann",
 		noModels: "Níor aimsíodh aon mhúnla.",
+		genui: "Comhéadan giniúnach",
 	},
 	mcp: {
 		title: "MCP",

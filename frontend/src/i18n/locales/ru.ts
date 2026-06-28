@@ -193,6 +193,7 @@ export const ru: Resources = {
 		searchPlaceholder: "Поиск моделей…",
 		allProviders: "Все",
 		noModels: "Модели не найдены.",
+		genui: "Генеративный UI",
 	},
 	mcp: {
 		title: "MCP",

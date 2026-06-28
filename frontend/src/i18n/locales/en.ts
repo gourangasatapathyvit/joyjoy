@@ -188,6 +188,7 @@ export const en = {
 		searchPlaceholder: "Search models…",
 		allProviders: "All",
 		noModels: "No models found.",
+		genui: "Generative UI",
 	},
 	mcp: {
 		title: "MCP",

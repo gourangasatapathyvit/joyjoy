@@ -187,6 +187,7 @@ export const ko: Resources = {
 		searchPlaceholder: "모델 검색…",
 		allProviders: "전체",
 		noModels: "모델을 찾을 수 없습니다.",
+		genui: "생성형 UI",
 	},
 	mcp: {
 		title: "MCP",

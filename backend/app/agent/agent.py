@@ -61,6 +61,7 @@ from app.core.enums import Provider
 from app.agent.prompts import (
     DEFAULT_SYSTEM_PROMPT,
     LOAD_SKILL_TOOL_DESCRIPTION,
+    RENDER_UI_TOOL_DESCRIPTION,
     SANDBOX_PROMPT_SUFFIX,
 )
 from app.core.textutils import safe_segment
@@ -332,6 +333,28 @@ def _make_load_skill_tool(settings: Settings, uid: str):
         coroutine=_load,
         name="load_skill",
         description=LOAD_SKILL_TOOL_DESCRIPTION,
+    )
+
+
+def _make_render_ui_tool():
+    """A ``render_ui`` tool: the model passes a JSON component-tree ``spec`` and the
+    frontend renders it (generative UI). The call itself is a no-op server-side —
+    runs.py intercepts the tool call and streams the spec as a ``generative_ui``
+    event (and suppresses the tool card)."""
+
+    async def _render(spec: dict) -> str:
+        n = 0
+        try:
+            root = (spec or {}).get("root")
+            n = len(root) if isinstance(root, list) else (1 if root else 0)
+        except Exception:
+            n = 0
+        return f"UI rendered ({n} root node{'s' if n != 1 else ''})."
+
+    return StructuredTool.from_function(
+        coroutine=_render,
+        name="render_ui",
+        description=RENDER_UI_TOOL_DESCRIPTION,
     )
 
 
@@ -631,14 +654,16 @@ async def _system_prompt_for(user_id, settings: Settings | None = None) -> str:
     return prompt
 
 
-async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run_mode, reasoning=None):
+async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run_mode, reasoning=None, genui=True):
     uid = str(user_id or DEFAULT_USER_ID)
     mid = await resolve_model(settings, model_id, uid)
     # Reasoning is per-request: bake the (normalized, support-gated) effort into the
     # cache key so a thinking-enabled model is a distinct compiled agent.
     spec = (await merged_model_specs(settings, uid)).get(mid) or {}
     effort = normalize_reasoning_effort(reasoning) if model_supports_reasoning(spec) else None
-    key = ("run" if run_mode else "chat", uid, mid, effort)
+    # genui is part of the key: when off, the generative-UI tools aren't compiled in,
+    # so the agent literally can't render UI for that run.
+    key = ("run" if run_mode else "chat", uid, mid, effort, genui)
     agent = cache_get(key)
     if agent is not None:
         return agent
@@ -652,6 +677,8 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
         user_blob_put(uid, _MCP_BLOB, mcp_tools)
     mcp_tools = _bind_session_workspace(mcp_tools)  # inject per-thread workspace_id
     tools = list(mcp_tools)
+    if genui:
+        tools.append(_make_render_ui_tool())  # generative UI (render_ui)
     if sandbox.is_enabled(settings):
         tools.append(_make_load_skill_tool(settings, uid))  # materialize skills into the sandbox
     system_prompt = await _system_prompt_for(uid, settings)
@@ -696,9 +723,10 @@ async def get_agent(settings, checkpointer, store, model_id=None, user_id=DEFAUL
     return await _get_or_build(settings, checkpointer, store, model_id, user_id, run_mode=False, reasoning=reasoning)
 
 
-async def get_run_agent(settings, checkpointer, store, model_id=None, user_id=DEFAULT_USER_ID, reasoning=None):
-    """Runs-API agent (MCP/plugin tools gated for HITL approval)."""
-    return await _get_or_build(settings, checkpointer, store, model_id, user_id, run_mode=True, reasoning=reasoning)
+async def get_run_agent(settings, checkpointer, store, model_id=None, user_id=DEFAULT_USER_ID, reasoning=None, genui=True):
+    """Runs-API agent (MCP/plugin tools gated for HITL approval). `genui` controls
+    whether the generative-UI tools are compiled in (per-session toggle)."""
+    return await _get_or_build(settings, checkpointer, store, model_id, user_id, run_mode=True, reasoning=reasoning, genui=genui)
 
 
 # ----------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import { LayoutDashboard } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useModels, useModelsConfig } from "@/api/queries";
@@ -68,6 +69,8 @@ export function ModelPicker() {
 	const setEffort = useChatStore((s) => s.setReasoningEffort);
 	const autoApprove = useChatStore((s) => s.autoApprove);
 	const setAutoApprove = useChatStore((s) => s.setAutoApprove);
+	const genuiEnabled = useChatStore((s) => s.genuiEnabled);
+	const setGenuiEnabled = useChatStore((s) => s.setGenuiEnabled);
 
 	// null = show every provider; otherwise restrict the list to one provider.
 	const [providerFilter, setProviderFilter] = useState<string | null>(null);
@@ -113,6 +116,21 @@ export function ModelPicker() {
 
 	return (
 		<div className="flex items-center gap-2">
+			<button
+				type="button"
+				onClick={() => setGenuiEnabled(!genuiEnabled)}
+				aria-pressed={genuiEnabled}
+				title={t("model.genui")}
+				aria-label={t("model.genui")}
+				className={cn(
+					"focus-visible:ring-ring/50 inline-flex size-8 shrink-0 items-center justify-center rounded-md border transition-colors outline-none focus-visible:ring-2",
+					genuiEnabled
+						? "bg-primary/10 text-primary border-transparent"
+						: "text-muted-foreground hover:bg-accent border-border/60",
+				)}
+			>
+				<LayoutDashboard className="size-4" strokeWidth={1.75} />
+			</button>
 			<ModelSelector.Root
 				models={options}
 				value={model}

@@ -32,6 +32,17 @@ const readConversationsOpen = (): boolean => {
 	}
 };
 
+// Generative-UI toggle: defaults ON; only an explicit "0" disables it. Sent with
+// each run so the backend compiles the render-UI tools in only when enabled.
+const GENUI_KEY = "joyjoy:genuiEnabled";
+const readGenuiEnabled = (): boolean => {
+	try {
+		return localStorage.getItem(GENUI_KEY) !== "0";
+	} catch {
+		return true;
+	}
+};
+
 const clampWidth = (w: number) =>
 	Math.min(WORKSPACE_DOCK.maxWidth, Math.max(WORKSPACE_DOCK.minWidth, w));
 
@@ -107,9 +118,13 @@ interface ChatState {
 	// "success" dot-matrix flash near the composer (the per-message status can't,
 	// since the streaming message remounts as already-complete).
 	successTick: number;
+	// Per-session generative-UI toggle (header control). When off, runs are sent
+	// with generative_ui=false and the backend omits the render-UI tools.
+	genuiEnabled: boolean;
 	setUsage: (usage: TokenUsage | null) => void;
 	setSourcesForMessage: (messageId: string, sources: Source[]) => void;
 	setSourcesMap: (map: Record<string, Source[]>) => void;
+	setGenuiEnabled: (on: boolean) => void;
 	bumpSuccess: () => void;
 	setModel: (model: string) => void;
 	setReasoningEffort: (effort: ReasoningEffort) => void;
@@ -139,12 +154,21 @@ export const useChatStore = create<ChatState>((set) => ({
 	usage: null,
 	sourcesByMessage: {},
 	successTick: 0,
+	genuiEnabled: readGenuiEnabled(),
 	setUsage: (usage) => set({ usage }),
 	setSourcesForMessage: (messageId, sources) =>
 		set((s) => ({
 			sourcesByMessage: { ...s.sourcesByMessage, [messageId]: sources },
 		})),
 	setSourcesMap: (sourcesByMessage) => set({ sourcesByMessage }),
+	setGenuiEnabled: (genuiEnabled) => {
+		set({ genuiEnabled });
+		try {
+			localStorage.setItem(GENUI_KEY, genuiEnabled ? "1" : "0");
+		} catch {
+			// localStorage unavailable — keep in-memory only
+		}
+	},
 	bumpSuccess: () => set((s) => ({ successTick: s.successTick + 1 })),
 	// The picker's choice is remembered as the user's default (server-persisted).
 	setModel: (model) => {
@@ -173,7 +197,12 @@ export const useChatStore = create<ChatState>((set) => ({
 	// starting a chat just switches the active thread id.
 	selectThread: (threadId) => {
 		persistThreadId(threadId);
-		set({ threadId, freshThread: false, usage: null, sourcesByMessage: {} });
+		set({
+			threadId,
+			freshThread: false,
+			usage: null,
+			sourcesByMessage: {},
+		});
 	},
 	newChat: () => {
 		const threadId = newThreadId();

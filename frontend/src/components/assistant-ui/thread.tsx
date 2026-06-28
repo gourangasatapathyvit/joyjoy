@@ -419,6 +419,22 @@ const MessageError: FC = () => {
 	);
 };
 
+// render_ui (and render_html) are tool calls whose UI IS the whole output — render
+// them STANDALONE, never folded into the collapsible "N tool calls" group. This
+// mirrors assistant-ui's native "standalone-tool-call" treatment of its built-in
+// generative-UI tool (our tools live in a manual registry, so we ungroup by name).
+const STANDALONE_UI_TOOLS = new Set(["render_ui", "render_html"]);
+const baseGroupBy = groupPartByType({
+	reasoning: ["group-chainOfThought", "group-reasoning"],
+	"tool-call": ["group-chainOfThought", "group-tool"],
+	"standalone-tool-call": [],
+});
+const partsGroupBy = ((part, context) =>
+	part.type === "tool-call" &&
+	STANDALONE_UI_TOOLS.has((part as { toolName?: string }).toolName ?? "")
+		? []
+		: baseGroupBy(part, context)) as typeof baseGroupBy;
+
 const AssistantMessage: FC = () => {
 	const {
 		ToolFallback: ToolFallbackComponent = ToolFallback,
@@ -449,13 +465,7 @@ const AssistantMessage: FC = () => {
 				// [contain-intrinsic-size:auto_24px] fixes issue #4104, don't change without checking for regressions
 				className="text-foreground px-2 leading-relaxed wrap-break-word [contain-intrinsic-size:auto_24px] [content-visibility:auto]"
 			>
-				<MessagePrimitive.GroupedParts
-					groupBy={groupPartByType({
-						reasoning: ["group-chainOfThought", "group-reasoning"],
-						"tool-call": ["group-chainOfThought", "group-tool"],
-						"standalone-tool-call": [],
-					})}
-				>
+				<MessagePrimitive.GroupedParts groupBy={partsGroupBy}>
 					{({ part, children }) => {
 						switch (part.type) {
 							case "group-chainOfThought":

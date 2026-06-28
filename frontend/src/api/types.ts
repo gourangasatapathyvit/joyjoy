@@ -106,6 +106,9 @@ export interface CreateRunRequest {
 	reasoning_effort?: string;
 	thread_id?: string;
 	auto_approve?: boolean;
+	// Per-session generative-UI toggle. When false, the backend omits the
+	// render-UI tools so the agent can't produce UI for this run. Default true.
+	generative_ui?: boolean;
 	// Edit/regenerate: number of trailing user turns this run replaces in the
 	// thread history (0 = plain append). The backend prunes them from the
 	// checkpoint before appending this message.

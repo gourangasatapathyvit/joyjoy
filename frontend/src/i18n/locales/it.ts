@@ -133,6 +133,7 @@ export const it: Resources = {
 		searchPlaceholder: "Cerca modelli…",
 		allProviders: "Tutti",
 		noModels: "Nessun modello trovato.",
+		genui: "UI generativa",
 	},
 	auth: {
 		signinTitle: "Accedi a joyjoy",

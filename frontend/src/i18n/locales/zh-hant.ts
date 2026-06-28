@@ -186,6 +186,7 @@ export const zhHant: Resources = {
 		searchPlaceholder: "搜尋模型…",
 		allProviders: "全部",
 		noModels: "找不到模型。",
+		genui: "生成式 UI",
 	},
 	mcp: {
 		title: "MCP",

@@ -193,6 +193,7 @@ export const hu: Resources = {
 		searchPlaceholder: "Modellek keresése…",
 		allProviders: "Összes",
 		noModels: "Nincs találat.",
+		genui: "Generatív felület",
 	},
 	mcp: {
 		title: "MCP",

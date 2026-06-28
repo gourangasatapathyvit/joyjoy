@@ -193,6 +193,7 @@ export const uk: Resources = {
 		searchPlaceholder: "Пошук моделей…",
 		allProviders: "Усі",
 		noModels: "Моделі не знайдено.",
+		genui: "Генеративний UI",
 	},
 	mcp: {
 		title: "MCP",

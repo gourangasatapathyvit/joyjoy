@@ -132,6 +132,7 @@ export const fr: Resources = {
 		searchPlaceholder: "Rechercher des modèles…",
 		allProviders: "Tous",
 		noModels: "Aucun modèle trouvé.",
+		genui: "UI générative",
 	},
 	auth: {
 		signinTitle: "Se connecter à joyjoy",

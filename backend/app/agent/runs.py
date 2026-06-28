@@ -271,6 +271,8 @@ async def _drive(run: _Run) -> None:
                 await _emit(run, "sources", sources=src_list, message_id=run.answer_id)
             # Persist usage (thread-level) + sources (keyed by this answer's message
             # id) so the badge and per-message Sources footers repopulate on reload.
+            # (render_ui is a normal tool call → its spec persists in message history,
+            # reconstructed inline by the frontend; no extra persistence needed.)
             if run.last_usage is not None or src_list:
                 from app.stores import sessions as _sessions
 

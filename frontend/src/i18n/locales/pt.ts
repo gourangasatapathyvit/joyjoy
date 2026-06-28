@@ -193,6 +193,7 @@ export const pt: Resources = {
 		searchPlaceholder: "Pesquisar modelos…",
 		allProviders: "Todos",
 		noModels: "Nenhum modelo encontrado.",
+		genui: "IU generativa",
 	},
 	mcp: {
 		title: "MCP",

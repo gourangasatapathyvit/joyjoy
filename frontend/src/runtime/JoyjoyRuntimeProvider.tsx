@@ -282,6 +282,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 				reasoningEffort,
 				threadId: activeThreadId,
 				autoApprove,
+				genuiEnabled,
 			} = useChatStore.getState();
 
 			const appendText = (delta: string) =>
@@ -436,6 +437,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 						reasoningEffort === "off" ? undefined : reasoningEffort,
 					thread_id: activeThreadId,
 					auto_approve: autoApprove,
+					generative_ui: genuiEnabled,
 					replace_turns: replaceTurns,
 				})
 					.then(({ run_id }) => {

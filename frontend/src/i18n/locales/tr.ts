@@ -190,6 +190,7 @@ export const tr: Resources = {
 		searchPlaceholder: "Model ara…",
 		allProviders: "Tümü",
 		noModels: "Model bulunamadı.",
+		genui: "Üretken arayüz",
 	},
 	mcp: {
 		title: "MCP",

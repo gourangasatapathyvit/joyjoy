@@ -8,6 +8,7 @@
 // the shared `ToolApprovalControls`, meaning HITL gating is preserved verbatim.
 
 import type {
+	GenerativeUISpec,
 	ToolCallMessagePartComponent,
 	ToolCallMessagePartProps,
 	ToolCallMessagePartStatus,
@@ -15,6 +16,7 @@ import type {
 import { useMemo, useState } from "react";
 import { computeLineDiff, diffStats } from "@/lib/diff";
 import { cn } from "@/lib/utils";
+import { GenerativeUI } from "./generative-ui";
 import { ToolApprovalControls, useToolNeedsAction } from "./tool-approval";
 import {
 	ToolFallbackContent,
@@ -553,7 +555,17 @@ const FetchContentToolUI: ToolCallMessagePartComponent = (part) => {
  * switch, falling back to the generic `ToolFallback` for anything not listed.
  * (The generic fallback itself now renders structured JSON results as tables,
  * so unlisted MCP tools already display readably.) */
+// render_ui: agent-emitted generative UI. Renders the spec inline at the tool's
+// position in the turn (no tool-card chrome) — the rendered UI IS the output. The
+// spec lives in the tool-call args, so it persists across reloads with history.
+function RenderUiToolUI(part: ToolCallMessagePartProps) {
+	const spec = (part.args as { spec?: GenerativeUISpec } | undefined)?.spec;
+	if (!spec || typeof spec !== "object") return null;
+	return <GenerativeUI spec={spec} />;
+}
+
 export const TOOL_UIS: Record<string, ToolCallMessagePartComponent> = {
+	render_ui: RenderUiToolUI,
 	write_todos: TodoChecklistUI,
 	task: SubagentToolUI,
 	fetch_content: FetchContentToolUI,
