@@ -1,5 +1,12 @@
 # joyjoy backend
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/branding/svg/joyjoy-dark.svg">
+    <img src="../docs/branding/png/joyjoy-primary.png" alt="joyjoy" width="280">
+  </picture>
+</p>
+
 Multi-tenant **Deep Agents** backend: a single **FastAPI** process that serves the React SPA and the `/v1` JSON/SSE API on one port (`:8080`). One compiled agent per `(run/chat, user, model, reasoning, genui)` is cached in-process; every request carries its own `user_id` + `thread_id` for tenant isolation.
 
 > Big-picture architecture (data flow, security tiers, deployment) lives in [`../ARCHITECTURE.md`](../ARCHITECTURE.md). This README is the backend dev guide.
