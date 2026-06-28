@@ -5,6 +5,7 @@
   </picture>
 </p>
 
+
 # joyjoy
 
 A multi-tenant **Deep Agents** platform. A single **FastAPI** process serves a **React SPA** and a **`/v1` JSON/SSE API** on one port (`:8080`). Each user gets a private, isolated agent workspace, long-term memory, skills, and MCP tools, with optional human-in-the-loop approvals and an opt-in code-execution sandbox.
