@@ -1,18 +1,12 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useModels, useModelsConfig } from "@/api/queries";
 import type { ListModelsResponse, ReasoningEffort } from "@/api/types";
 import {
 	type ModelOption,
 	ModelSelector,
+	type ModelSelectorEffortOption,
 } from "@/components/assistant-ui/model-selector";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/store/chat";
@@ -20,7 +14,8 @@ import { useChatStore } from "@/store/chat";
 // A row from GET /v1/models — carries the provider used for grouping/filtering.
 type ModelRow = ListModelsResponse["data"][number];
 
-// Reasoning-effort values → i18n key suffix (under `model.*`).
+// Reasoning-effort values → i18n key suffix (under `model.*`). These become the
+// toggle row inside the model selector for reasoning-capable models.
 const EFFORTS: { value: ReasoningEffort; key: string }[] = [
 	{ value: "off", key: "off" },
 	{ value: "minimal", key: "minimal" },
@@ -57,10 +52,10 @@ function FilterChip({
 	);
 }
 
-// Model + reasoning-effort selectors, wired to the Zustand store the chat
-// runtime reads at send time. The model selector is assistant-ui's Model
-// Selector (searchable cmdk popover) with provider filter chips + per-provider
-// groups; effort stays a separate select (disabled for non-reasoning models).
+// Single model+effort control, wired to the Zustand store the chat runtime
+// reads at send time. assistant-ui's Model Selector (searchable cmdk popover)
+// provides provider filter chips + per-provider groups; reasoning effort is the
+// built-in Effort toggle row (shown only for reasoning-capable models).
 export function ModelPicker() {
 	const { t } = useTranslation();
 	const { data } = useModels();
@@ -77,21 +72,24 @@ export function ModelPicker() {
 	// null = show every provider; otherwise restrict the list to one provider.
 	const [providerFilter, setProviderFilter] = useState<string | null>(null);
 
-	const supportsReasoning =
-		models.find((m) => m.id === model)?.supports_reasoning ?? true;
-
 	const labelFor = (id: string) =>
 		providers.find((p) => p.id === id)?.label ?? id;
+
+	// The reasoning levels offered for any reasoning-capable model.
+	const effortOptions = useMemo<ModelSelectorEffortOption[]>(
+		() => EFFORTS.map((e) => ({ id: e.value, name: t(`model.${e.key}`) })),
+		[t],
+	);
 
 	const toOption = (m: ModelRow): ModelOption => ({
 		id: m.id,
 		name: m.id,
-		// Searchable by provider label + a "reasoning" hint, beyond id/name.
-		keywords: [
-			labelFor(m.provider ?? "other"),
-			m.provider ?? "other",
-			m.supports_reasoning ? "reasoning" : "",
-		].filter(Boolean),
+		// Searchable by provider label, beyond id/name.
+		keywords: [labelFor(m.provider ?? "other"), m.provider ?? "other"].filter(
+			Boolean,
+		),
+		// Reasoning models get the effort toggle row; others omit it.
+		...(m.supports_reasoning ? { efforts: effortOptions } : {}),
 	});
 
 	// All options drive Root (selected-model resolution + cmdk value seeding).
@@ -119,10 +117,10 @@ export function ModelPicker() {
 				models={options}
 				value={model}
 				onValueChange={(v) => v && setModel(v)}
+				effort={effort}
+				onEffortChange={(v) => setEffort(v as ReasoningEffort)}
 			>
-				<ModelSelector.Trigger size="sm" className="w-[180px]">
-					<ModelSelector.Value placeholder={t("model.selectModel")} />
-				</ModelSelector.Trigger>
+				<ModelSelector.Trigger size="sm" className="w-[210px]" />
 				<ModelSelector.Content className="w-[300px]">
 					{groupKeys.length > 1 && (
 						<div className="flex flex-wrap items-center gap-1 border-b px-2 py-2">
@@ -154,24 +152,9 @@ export function ModelPicker() {
 							</ModelSelector.Group>
 						))}
 					</ModelSelector.List>
+					<ModelSelector.Effort label={t("model.reasoning")} />
 				</ModelSelector.Content>
 			</ModelSelector.Root>
-			<Select
-				value={effort}
-				onValueChange={(v) => v && setEffort(v as ReasoningEffort)}
-				disabled={!supportsReasoning}
-			>
-				<SelectTrigger size="sm" className="w-[150px] text-xs">
-					<SelectValue placeholder={t("model.reasoning")} />
-				</SelectTrigger>
-				<SelectContent>
-					{EFFORTS.map((e) => (
-						<SelectItem key={e.value} value={e.value} className="text-xs">
-							{t(`model.${e.key}`)}
-						</SelectItem>
-					))}
-				</SelectContent>
-			</Select>
 			<label
 				htmlFor="auto-approve-switch"
 				className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"
