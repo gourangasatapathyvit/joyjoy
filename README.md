@@ -1,68 +1,74 @@
-<p align="center">
-  <img src="docs/branding/png/joyjoy-primary.png" alt="joyjoy" width="380">
-</p>
-
 # joyjoy
 
-Multi-tenant **Deep Agents** assistant: a **single FastAPI process** that serves both the **React SPA** and the `/v1` API to many users, with **all application data in one relational database** and optional **sandboxed code execution**.
+A multi-tenant **Deep Agents** platform. A single **FastAPI** process serves a **React SPA** and a **`/v1` JSON/SSE API** on one port (`:8080`). Each user gets a private, isolated agent workspace, long-term memory, skills, and MCP tools, with optional human-in-the-loop approvals and an opt-in code-execution sandbox.
 
-- **One process, many users** — per-user isolation via the authenticated identity (`User.id`) + LangGraph thread ids; one `create_deep_agent()` backs every chat.
-- **Dev = SQLite, Prod = Postgres** — flip with the `APP_ENV` env var; *same code*, the DB URL is derived from it.
-- **No file-based CRUD stores** — accounts, skins, providers, models, MCP servers, skills, sessions, and per-user config/memory all live in the DB. Chat *messages* stay in LangGraph's checkpointer. Provider secrets are **Fernet-encrypted at rest**.
-- **React SPA** (Vite + React 19 + TypeScript, assistant-ui, Tailwind v4, shadcn, TanStack Query, i18n) is built to `frontend/dist` and **served by the backend** — no separate UI server.
-- **Sandboxed execution (optional)** — when `SANDBOX_ENABLED=true`, the agent's file CRUD + code/shell runs inside a per-`(user, thread)` **OpenSandbox** container (durable Docker volume per chat) instead of on the host. The bundled `joyjoy/sandbox-fat` image is multi-language: **Python, Node.js, Java (JDK 17), Go, Rust, C/C++** + Playwright/browsers + data/media/doc tooling (pandas, ffmpeg, LibreOffice, …).
-- **Capabilities = global ∪ per-user** — skills, MCP servers, models, and memory each ship as read-only global catalogs merged with each user's own (full CRUD).
-- **Human-in-the-loop tools** — MCP tools and code `execute` are gated for approval in chat, with an opt-in per-chat auto-approve.
-
-See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the system overview and **[CLAUDE.md](./CLAUDE.md)** for the contributor/agent guide.
-
-## Layout
-
-- `backend/` — FastAPI + deepagents engine (also serves the SPA). `app/db/` (13 SQLAlchemy models, async engine, Fernet, seeds), `app/agent.py` (agent build/cache + CRUD), `app/routes/` (the `/v1` API), `app/dbfs.py` (DB→agent bridge), `app/sandbox*.py` (OpenSandbox), `alembic/` (migrations). See [backend/README.md](./backend/README.md).
-- `frontend/` — the React SPA (built to `frontend/dist`, served by the backend). See [frontend/README.md](./frontend/README.md).
-- `backend/app/db/seeds/global_seed.sql` — the **single** seed for all shipped/global data (skins, providers, base models, MCP, skills + files); loaded into an empty DB on first boot. Model keys are `${AZURE_OPENAI_API_KEY}` env-refs in the SQL (real key in `.env`).
-- `sandbox-image/` — Dockerfile for the multi-language `joyjoy/sandbox-fat` execution image (built automatically by `start_all.sh` if missing).
-- `scripts/` — `start_all.sh` (one-command full stack), `serve.sh` (build SPA + run backend), `restart_backend.sh`.
-- `data/` — dev SQLite DBs + per-user host workspace files (gitignored).
-- `docs/branding/` — brand kit: logos, favicons, brand guide.
-
-## Run on any machine (dev)
-
-**Prerequisites (install once):** [Docker](https://docs.docker.com/engine/install/) (running), [`uv`](https://docs.astral.sh/uv/), and Node 22 (e.g. via [`nvm`](https://github.com/nvm-sh/nvm)). On Windows, run everything inside WSL2.
-
-```bash
-git clone <repo> joyjoy && cd joyjoy
-cp .env.example .env        # then fill keys: a model API key, OPENSANDBOX_API_KEY,
-                            # JWT_SECRET, CREDENTIAL_ENCRYPTION_KEY
-bash scripts/start_all.sh   # → open http://localhost:8080  (sign up, then log in)
+```
+React 19 SPA  ──HTTPS (cookie auth)──►  FastAPI  ──►  deepagents + LangGraph
+(assistant-ui)   POST /v1/runs (SSE)     (:8080)       │
+                                                       ├─ app DB (SQLite dev / Postgres prod)
+                                                       ├─ LangGraph checkpointer (chat history)
+                                                       ├─ per-user workspace files
+                                                       └─ model providers · MCP servers · sandbox
 ```
 
-`start_all.sh` is **idempotent and self-bootstrapping** — on first run it `uv sync`s the backend, `npm install`s the frontend, builds the sandbox image, builds the SPA, then starts everything (re-runs skip what's already done):
+## What it does
 
-| Service | Port | Notes |
-|---|---|---|
-| Backend (SPA + `/v1` API) | `:8080` | one FastAPI process; the **FE has no separate server** |
-| OpenSandbox server | `:8090` | code/shell execution layer (needs Docker; gated by `SANDBOX_ENABLED`) |
-| jira MCP (mcp-atlassian) | `:9000` | optional — skipped unless `JIRA_MCP_DIR` exists |
+- **Multi-tenant agents** — one compiled agent per `(user, model, reasoning, genui)`, cached in-process; per-request `user_id` + `thread_id` isolation.
+- **Bring your models** — Azure OpenAI, Anthropic (incl. Azure AI Foundry `/anthropic`), AWS Bedrock, Google GenAI; global catalog + per-user additions.
+- **Skills & MCP tools** — global (read-only) + per-user, managed from the UI; all MCP/plugin tool calls auto-gate for human approval (HITL).
+- **Per-user memory & workspace** — durable `AGENTS.md` memory and a real per-thread file workspace (downloadable, inline media previews).
+- **Generative UI** — agents can emit rich UI: `render_ui` (JSON component kit) and `render_html` (sandboxed HTML canvas), toggleable per session.
+- **Opt-in sandbox** — per-session isolated containers for code/shell execution.
 
-The only things the script can't do for you are the **system prerequisites** above and the **`.env`** secrets. Paths are derived at runtime, so the repo can live anywhere.
-
-**Other scripts:** `scripts/serve.sh` rebuilds the SPA and restarts only the backend (no sandbox/jira); `scripts/restart_backend.sh` restarts the backend to pick up `app/` changes. To iterate on the UI with hot-reload: `cd frontend && npm run dev` (Vite on `:5173`, proxies the API).
-
-> **Sandbox is optional.** Leave `SANDBOX_ENABLED` unset/false for a pure SQLite dev run with **zero external services** — the agent then uses the host filesystem (`data/workspaces/<uid>/…`) instead of a container (no Docker/OpenSandbox needed).
-
-On first boot the backend creates the tables and seeds the shipped catalogs (skins, providers, base models, global MCP servers, global skills). When not signed in, dev falls back to a seeded **dev user** so the agent works without login.
-
-**Models** are managed in the UI under **Settings → Providers** (Azure OpenAI, Azure AI Foundry/Claude, Bedrock, OpenAI-compatible, Gemini) — keys are Fernet-encrypted at rest and masked in the UI. **Skills**, **MCP**, and **Memory** have their own tabs (global = read-only; per-user = full CRUD).
-
-## Prod (Postgres)
-
-Set `APP_ENV=prod` + `DATABASE_URL=postgresql://…` (and `CREDENTIAL_ENCRYPTION_KEY`, `JWT_SECRET` — generate-once, keep stable). The app DB and the LangGraph checkpointer share one Postgres database via disjoint tables.
-
-**Containerized (Postgres + app, no sandbox):** the repo ships a `docker-compose.yml`. Set `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY`, and `AZURE_OPENAI_API_KEY` in `.env`, then:
+## Quick start (Docker)
 
 ```bash
-docker compose up -d --build      # → http://localhost:8080
+# 1. set required secrets in .env (compose reads it):
+#    JWT_SECRET, CREDENTIAL_ENCRYPTION_KEY  (generate once, keep stable)
+#    AZURE_OPENAI_API_KEY                   (base model key)
+#    DATABASE_URL                           (prod Postgres) — or use the localdb profile below
+# 2. build + run
+docker compose up --build
+# 3. open http://localhost:8080  → sign up / log in
 ```
 
-This brings up Postgres + the app (schema + seed auto-load on first boot). It does **not** include the OpenSandbox execution layer — use `scripts/start_all.sh` for that.
+On first boot the app creates the schema and seeds the global catalogs (skins, providers, models, skills, MCP) from `backend/app/db/seeds/global_seed.sql`. No secret is stored in the seed — model keys are `${VAR}` refs resolved at runtime.
+
+**Optional compose profiles** (independent; combine via `COMPOSE_PROFILES=sandbox,localdb`):
+- `localdb` — bundled Postgres 16 for local dev (otherwise point `DATABASE_URL` at a hosted DB).
+- `sandbox` — the code-execution tier (also set `SANDBOX_ENABLED=true`). See [`ARCHITECTURE.md`](./ARCHITECTURE.md) §6.
+
+```bash
+COMPOSE_PROFILES=sandbox,localdb docker compose up --build   # bash / WSL
+```
+
+## Quick start (local dev)
+
+```bash
+# backend  (SQLite + no-auth dev user)
+cd backend && uv pip install -e . && uvicorn app.main:app --port 8080 --reload
+
+# frontend (Vite on :5173, proxies /v1 → :8080 as user "alice")
+cd frontend && npm install && npm run dev
+```
+
+Or bring up the whole dev stack in WSL with `scripts/start_all.sh` (jira MCP → backend → SPA, idempotent).
+
+## Repository layout
+
+```
+backend/    FastAPI + deepagents + LangGraph   → see backend/README.md
+frontend/   React 19 + Vite SPA (assistant-ui) → see frontend/README.md
+scripts/    start_all.sh, run_atlassian_wsl.sh, install_{bedrock,gemini}.sh, run-backend.sh …
+docs/       branding + notes
+Dockerfile            multi-stage: build SPA → run backend (serves both)
+docker-compose.yml    backend + optional localdb / sandbox profiles
+sandbox.toml          OpenSandbox server config (runtime/egress/network hardening)
+ARCHITECTURE.md       full architecture (data flow, security, deployment)
+```
+
+## Documentation
+
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)** — system design: components, data stores, integrations, deployment, security, roadmap.
+- **[backend/README.md](./backend/README.md)** — backend dev guide (run, config, API surface, key concepts).
+- **[frontend/README.md](./frontend/README.md)** — frontend dev guide (run, build, runtime, generative UI).
