@@ -308,6 +308,7 @@ export const de: Resources = {
 			reasoning: "Denkprozess",
 			total: "Gesamt",
 		},
+		working: "Assistent arbeitet",
 	},
 	language: {
 		label: "Sprache",

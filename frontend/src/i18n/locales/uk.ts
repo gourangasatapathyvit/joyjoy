@@ -308,6 +308,7 @@ export const uk: Resources = {
 			reasoning: "Міркування",
 			total: "Усього",
 		},
+		working: "Асистент працює",
 	},
 	language: {
 		label: "Мова",

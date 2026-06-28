@@ -309,6 +309,7 @@ export const hu: Resources = {
 			reasoning: "Érvelés",
 			total: "Összesen",
 		},
+		working: "Az asszisztens dolgozik",
 	},
 	language: {
 		label: "Nyelv",

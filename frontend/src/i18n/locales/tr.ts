@@ -304,6 +304,7 @@ export const tr: Resources = {
 			reasoning: "Akıl yürütme",
 			total: "Toplam",
 		},
+		working: "Asistan çalışıyor",
 	},
 	language: {
 		label: "Dil",

@@ -300,6 +300,7 @@ export const ko: Resources = {
 			reasoning: "추론",
 			total: "합계",
 		},
+		working: "어시스턴트가 작업 중입니다",
 	},
 	language: {
 		label: "언어",

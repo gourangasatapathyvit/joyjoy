@@ -46,6 +46,10 @@ import {
 	UserMessageAttachments,
 } from "@/components/assistant-ui/attachment";
 import { ComposerTriggers } from "@/components/assistant-ui/composer-triggers";
+import {
+	DotMatrix,
+	type DotMatrixState,
+} from "@/components/assistant-ui/dot-matrix";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import { MediaFile, MediaImage } from "@/components/assistant-ui/media-part";
 import {
@@ -511,15 +515,7 @@ const AssistantMessage: FC = () => {
 							case "data":
 								return part.dataRendererUI;
 							case "indicator":
-								return (
-									<span
-										data-slot="aui_assistant-message-indicator"
-										className="animate-pulse font-sans"
-										aria-label="Assistant is working"
-									>
-										{"●"}
-									</span>
-								);
+								return <WorkingIndicator />;
 							default:
 								return null;
 						}
@@ -539,6 +535,55 @@ const AssistantMessage: FC = () => {
 				<AssistantActionBar />
 			</div>
 		</MessagePrimitive.Root>
+	);
+};
+
+// Map a running tool's name to the dot-matrix pattern that best fits the work:
+// network/lookup tools sweep ("searching"), filesystem reads ripple ("syncing"),
+// writes stream up ("uploading"), and code/exec twinkle ("loading").
+const TOOL_STATE: { re: RegExp; state: DotMatrixState }[] = [
+	{
+		re: /fetch|search|web|browse|crawl|tavily|duckduckgo|http/i,
+		state: "searching",
+	},
+	{ re: /^(read_file|ls|glob|grep|load_skill)$/i, state: "syncing" },
+	{ re: /write|edit/i, state: "uploading" },
+	{ re: /execute|run|code|bash|python|shell/i, state: "loading" },
+];
+
+function toolToState(name: string): DotMatrixState {
+	for (const { re, state } of TOOL_STATE) if (re.test(name)) return state;
+	return "loading";
+}
+
+// The assistant's "working" placeholder (shown while a turn runs before/between
+// content). Replaces the old pulsing ● with assistant-ui's dot-matrix, driving
+// its pattern from the live run state: a waiting ellipsis when a HITL approval
+// is pending, a tool-specific pattern while a tool runs, else the thinking
+// ripple.
+const WorkingIndicator: FC = () => {
+	const { t } = useTranslation();
+	const status = useAuiState(
+		(s) => s.message.status?.type as string | undefined,
+	);
+	const runningTool = useAuiState((s) => {
+		const parts = s.message.content as unknown as ReadonlyArray<{
+			type: string;
+			toolName?: string;
+			status?: { type?: string };
+		}>;
+		return parts.find(
+			(p) => p.type === "tool-call" && p.status?.type === "running",
+		)?.toolName;
+	});
+	const state: DotMatrixState =
+		status === "requires-action"
+			? "waiting"
+			: runningTool
+				? toolToState(runningTool)
+				: "thinking";
+	return (
+		<DotMatrix state={state} label={t("chat.working")} className="size-5" />
 	);
 };
 

@@ -307,6 +307,7 @@ export const pt: Resources = {
 			reasoning: "Raciocínio",
 			total: "Total",
 		},
+		working: "O assistente está trabalhando",
 	},
 	language: {
 		label: "Idioma",

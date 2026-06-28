@@ -306,6 +306,7 @@ export const ja: Resources = {
 			reasoning: "推論",
 			total: "合計",
 		},
+		working: "アシスタントが作業中です",
 	},
 	language: {
 		label: "言語",

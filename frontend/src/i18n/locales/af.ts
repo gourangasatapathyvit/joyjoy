@@ -306,6 +306,7 @@ export const af: Resources = {
 			reasoning: "Redenering",
 			total: "Totaal",
 		},
+		working: "Assistent werk",
 	},
 	language: {
 		label: "Taal",

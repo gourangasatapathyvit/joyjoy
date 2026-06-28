@@ -298,6 +298,7 @@ export const zhHant: Resources = {
 			reasoning: "推理",
 			total: "總計",
 		},
+		working: "助手正在處理",
 	},
 	language: {
 		label: "語言",

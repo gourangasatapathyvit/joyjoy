@@ -308,6 +308,7 @@ export const ru: Resources = {
 			reasoning: "Рассуждение",
 			total: "Всего",
 		},
+		working: "Ассистент работает",
 	},
 	language: {
 		label: "Язык",

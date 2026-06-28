@@ -309,6 +309,7 @@ export const ga: Resources = {
 			reasoning: "Réasúnaíocht",
 			total: "Iomlán",
 		},
+		working: "Tá an cúntóir ag obair",
 	},
 	language: {
 		label: "Teanga",

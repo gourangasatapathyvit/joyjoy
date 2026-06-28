@@ -302,6 +302,7 @@ export const en = {
 			reasoning: "Reasoning",
 			total: "Total",
 		},
+		working: "Assistant is working",
 	},
 	language: {
 		label: "Language",
