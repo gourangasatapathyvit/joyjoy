@@ -1,5 +1,12 @@
 # joyjoy frontend
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/branding/svg/joyjoy-dark.svg">
+    <img src="docs/branding/png/joyjoy-primary.png" alt="joyjoy" width="280">
+  </picture>
+</p>
+
 The joyjoy web client: a **React 19 + Vite** single-page app built on **assistant-ui** (external-store runtime). In production it's compiled to `dist/` and served by the FastAPI backend on the same origin as the `/v1` API (`:8080`) — there is no separate web server.
 
 > Big-picture architecture lives in [`../ARCHITECTURE.md`](../ARCHITECTURE.md); the API it talks to is in [`../backend/README.md`](../backend/README.md). This README is the frontend dev guide.
