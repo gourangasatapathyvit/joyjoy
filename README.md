@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/branding/svg/joyjoy-dark.svg">
-    <img src="docs/branding/svg/joyjoy-primary.svg" alt="joyjoy" width="280">
+    <img src="docs/branding/png/joyjoy-primary.png" alt="joyjoy" width="280">
   </picture>
 </p>
 
