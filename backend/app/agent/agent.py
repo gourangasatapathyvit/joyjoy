@@ -339,9 +339,10 @@ def _make_load_skill_tool(settings: Settings, uid: str):
 
 def _make_render_ui_tool():
     """A ``render_ui`` tool: the model passes a JSON component-tree ``spec`` and the
-    frontend renders it (generative UI). The call itself is a no-op server-side —
-    runs.py intercepts the tool call and streams the spec as a ``generative_ui``
-    event (and suppresses the tool card)."""
+    frontend renders it (generative UI). The call itself is a no-op server-side — it
+    flows as a normal tool call; the ``spec`` rides in the tool-call ``args`` and the
+    frontend's tool UI (``TOOL_UIS["render_ui"]`` → ``GenerativeUI``) renders it
+    inline. Specs persist across reloads via the tool-call args."""
 
     async def _render(spec: dict) -> str:
         n = 0
@@ -362,8 +363,9 @@ def _make_render_ui_tool():
 def _make_render_html_tool():
     """A ``render_html`` tool: the model passes a self-contained HTML/CSS/JS string
     and the frontend renders it in a sandboxed iframe (the "HTML canvas" — full
-    flexibility). No-op server-side; runs.py streams the call and the frontend's
-    tool UI renders the markup."""
+    flexibility). No-op server-side; it flows as a normal tool call, the ``html``
+    rides in the tool-call ``args``, and the frontend's tool UI
+    (``TOOL_UIS["render_html"]`` → ``HtmlCanvas``) renders the markup inline."""
 
     async def _render(html: str) -> str:
         return f"HTML canvas rendered ({len(html or '')} chars)."

@@ -89,7 +89,9 @@ export function HtmlCanvas({ html }: { html: string }) {
 			sandbox="allow-scripts"
 			srcDoc={srcDoc}
 			className="bg-muted/30 my-1 w-full rounded-lg border"
-			style={{ height }}
+			// content-box so the reported content height IS the iframe viewport
+			// height (border-box would subtract the 1px border → 2px overflow → scrollbar).
+			style={{ height, boxSizing: "content-box" }}
 		/>
 	);
 }
