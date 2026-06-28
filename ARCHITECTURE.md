@@ -1,157 +1,209 @@
-# Architecture Overview
+# ARCHITECTURE.md
 
-This document gives a high-level, "bird's-eye" view of **joyjoy** so contributors and agents can navigate and contribute quickly. It deliberately avoids low-level detail (which goes stale) — for exact APIs read the code; for dev/run specifics see `README.md` and `CLAUDE.md`. Keep it updated as the architecture evolves.
+> Living architecture overview for **joyjoy** — a multi-tenant Deep Agents platform.
+> Format follows the [architecture.md](https://architecture.md/) template (11 sections).
+> Keep this file in sync as the codebase evolves.
 
-**One-line summary:** a single FastAPI process serves a React SPA *and* a `/v1` API to many users; one shared Deep Agent (deepagents + LangGraph) backs every chat; all application data lives in one relational DB; agent code/file execution optionally runs in a per-`(user, thread)` OpenSandbox container.
+joyjoy is a **single FastAPI process** that serves a **React SPA** and a **`/v1` JSON/SSE API** on one port (`:8080`). Each user gets a private, isolated agent workspace, long-term memory, skills, and MCP tools. One compiled agent per `(run/chat, user, model, reasoning, genui)` is cached in-process; every request carries its own `user_id` + `thread_id` for tenant isolation.
+
+---
 
 ## 1. Project Structure
 
 ```
 joyjoy/
-├── backend/                     # FastAPI + deepagents engine (also serves the SPA)
-│   ├── app/
-│   │   ├── main.py              # app creation, lifespan, router wiring, app.frontend(SPA)
-│   │   ├── agent.py             # core: build/cache deep agents, model+MCP+skill CRUD (async)
-│   │   ├── prompts.py           # system prompts (triple-quoted)  ·  constants.py (DEFAULT_USER_ID, caps)
-│   │   ├── config.py            # pydantic Settings (APP_ENV-driven dev/prod)  ·  persistence.py (LG saver+store)
-│   │   ├── auth.py users.py usersettings.py sessions.py   # identity, accounts/OTP, prefs, session registry
-│   │   ├── context.py runs.py   # AgentContext  ·  SSE runs engine + HITL approvals
-│   │   ├── dbfs.py              # DB→agent bridge: MemoryBackend + DbSkillsBackend (deepagents backends)
-│   │   ├── sandbox.py sandbox_backend.py workspace_sandbox.py   # OpenSandbox lifecycle / backend / dock FS
-│   │   ├── workspace.py media.py                                # host filesystem dock + media resolver
-│   │   ├── routes/             # API split by concern: auth chat runs sessions workspace mcp models skills memory settings_ui health
-│   │   └── db/                 # models.py (13 tables), engine.py, crypto.py (Fernet), seeds/global_seed.sql
-│   ├── alembic/                # prod DB migrations
-│   └── pyproject.toml          # uv-managed deps (no pip)
-├── frontend/                    # React 19 + Vite SPA (built to frontend/dist, served by backend)
-│   └── src/  (api/ runtime/ components/assistant-ui/ components/chat/ routes/ i18n/ store/ lib/)
-├── sandbox-image/Dockerfile     # multi-language joyjoy/sandbox-fat:<N> execution image
-├── scripts/                     # start_all.sh (full stack), serve.sh, restart_backend.sh, validate_models.py
-├── data/                        # dev SQLite DBs + host workspaces (gitignored)
-├── docs/                        # branding kit, etc.
-├── sandbox.toml docker-compose.yml .env(.example)
-└── README.md  CLAUDE.md  ARCHITECTURE.md
+├── Dockerfile                 # multi-stage: node:22 builds SPA → python:3.13-slim runs uvicorn + serves dist
+├── docker-compose.yml         # backend(:8080) + optional localdb (profile) + optional sandbox (profile)
+├── sandbox.toml               # OpenSandbox server config (runtime/egress/network hardening)
+├── ARCHITECTURE.md  CLAUDE.md  README.md
+├── scripts/                   # start_all.sh, run_atlassian_wsl.sh, install_{bedrock,gemini}.sh, run-backend.sh …
+├── data/workspaces/           # dev agent workspace files (prod → /data volume)
+│
+├── backend/                   # FastAPI + deepagents + LangGraph (Python 3.11+)
+│   ├── pyproject.toml         # deps: deepagents, langgraph, langchain-*, fastapi, sqlalchemy, psycopg, alembic …
+│   ├── alembic/               # DB migrations (baseline)
+│   ├── static/                # brand assets / favicons served at /static
+│   ├── mcp_servers/           # bundled MCP servers (joyjoy_demo.py, workspace_fs)
+│   └── app/
+│       ├── main.py            # app assembly + lifespan (env load, DB init/seed, persistence, agent warm-up, SPA mount)
+│       ├── core/              # config.py (Settings), auth.py, context.py, constants, enums, text/time utils
+│       ├── db/                # models.py (SQLAlchemy schema), engine.py, crypto.py (Fernet), seed.py, seeds/*.sql
+│       ├── agent/             # agent.py (build+cache), prompts.py, middleware.py, runs.py (SSE+HITL), agent_common.py
+│       ├── routes/            # one APIRouter per concern: auth, models, mcp, skills, memory, workspace,
+│       │                      #   settings_ui, chat, runs, sessions, health (+ deps.py)
+│       ├── stores/            # sessions, users, usersettings, skills_store, mcp_runtime, memory_store,
+│       │                      #   persistence (checkpointer/store), dbfs (DB→agent-FS bridge)
+│       ├── workspace/         # workspace.py (per-thread files), media.py (/v1/media; office→PDF)
+│       └── sandbox/           # OpenSandbox integration (opt-in code/shell execution)
+│
+└── frontend/                  # React 19 + Vite 8 SPA (assistant-ui external store)
+    ├── package.json           # assistant-ui, tailwind v4, zustand, tanstack-query, react-router 7, biome
+    └── src/
+        ├── main.tsx  App.tsx  providers.tsx
+        ├── runtime/           # JoyjoyRuntimeProvider.tsx (external-store runtime + custom SSE), workspaceAttachment.ts
+        ├── routes/            # ChatPage, SettingsPage, McpPanel, SkillsPanel, MemoryPanel, ProvidersPanel, AuthPage
+        ├── components/
+        │   ├── assistant-ui/  # thread, tool-uis, generative-ui, html-canvas, reasoning, media-part, dot-matrix …
+        │   ├── chat/          # ConversationSidebar, ModelPicker, WorkspaceDock, DownloadButton
+        │   ├── layout/        # AppShell, PanelLayout, ConnectionStatus
+        │   ├── memory/ skills/ settings/ auth/ ui/(shadcn)
+        ├── store/             # zustand: chat.ts, settings.ts
+        ├── api/               # client.ts, queries.ts (TanStack), sessions, auth, workspace, types …
+        └── i18n/              # config + 16 locale files (strict Resources = typeof en)
 ```
+
+---
 
 ## 2. High-Level System Diagram
 
 ```
-                          ┌────────────────────────────────────────────┐
-   Browser (SPA, same     │   FastAPI process  (:8080, single origin)   │
-   origin, cookie auth)   │                                            │
-        │  /v1/* + SSE     │   app.frontend()  →  serves frontend/dist   │
-        └─────────────────▶   /v1 API  ──▶  one create_deep_agent()     │
-                          │        (deepagents + LangGraph)             │
-                          └───┬───────────┬────────────┬──────────┬─────┘
-        relational app DB ◀───┘           │            │          │
-   (SQLite dev / Postgres prod;           │            │          └─▶ Model provider APIs
-    accounts, skills, mcp, models,        │            │             (Azure OpenAI, Anthropic/
-    sessions, config, memory)             │            │              Foundry, Bedrock, OpenAI-
-                                          │            │              compat, Gemini)
-   LangGraph checkpointer + store ◀───────┘            │
-   (chat messages; /memories cross-thread)             │
-                                                       ▼
-                            MCP servers (HTTP/stdio): jira :9000, web-search,
-                            joyjoy-demo, workspace-fs  ─ tools gated for HITL approval
-                                                       │
-   OpenSandbox server :8090  (Docker) ◀───────────────┘  when SANDBOX_ENABLED:
-        └─ per-(user,thread) container + durable Docker volume per workspace
-           = where the agent's file CRUD + code/shell actually run
+                         ┌──────────────────────────────────────────────┐
+  Browser (SPA)          │            joyjoy backend  (:8080)            │
+  React 19 + assistant-ui│                                               │
+  external-store runtime │  FastAPI app (single process, many users)     │
+        │  HTTPS          │   ├─ /static, /favicon, SPA (app.frontend()) │
+        │  cookie auth    │   ├─ /v1/* routers (auth, models, mcp,       │
+        ├────────────────►│   │     skills, memory, workspace, settings, │
+        │  POST /v1/runs  │   │     chat, runs, sessions, health)        │
+        │◄──── SSE ───────│   └─ Agent engine (deepagents + LangGraph)   │
+                          │        • per-(user,model,…) compiled-agent   │
+                          │          cache  • HITL interrupt_on gating   │
+                          └───────┬───────────────┬──────────────┬───────┘
+                                  │               │              │
+                       ┌──────────▼──┐   ┌────────▼───────┐  ┌───▼─────────────┐
+                       │ Relational  │   │  LangGraph     │  │ Workspace files │
+                       │ app DB      │   │  checkpointer  │  │ WORKSPACE_ROOT  │
+                       │ (SQLite/PG) │   │  (chat history)│  │  /data volume   │
+                       └─────────────┘   └────────────────┘  └─────────────────┘
+                                  │
+              ┌───────────────────┼─────────────────────┬───────────────────┐
+        Model providers      MCP servers          SMTP (OTP)      OpenSandbox (opt-in)
+     (Azure/Anthropic/        (stdio/http;                        per-session containers
+      Bedrock/Google)      jira, web-search, …)                   on isolated network
 ```
 
-Key boundaries: the **browser is same-origin** (no separate UI server); **all app state is in the relational DB** (the only other persistence is LangGraph's checkpointer/store and, in sandbox mode, the per-workspace Docker volume); **MCP + sandbox are out-of-process**, reached over HTTP/stdio.
+Request shapes:
+- **Chat/runs**: `POST /v1/runs` → agent streams tokens, tool calls, and approval interrupts back over **SSE** (`sse-starlette`). The SPA's `JoyjoyRuntimeProvider` is an assistant-ui **external-store** runtime fed by this custom SSE stream.
+- **Everything else** (settings, skills, MCP CRUD, memory, workspace files, sessions) is plain JSON over `/v1/*`.
+
+---
 
 ## 3. Core Components
 
-### 3.1. Frontend
-- **Name:** joyjoy SPA.
-- **Description:** the entire UI — chat (assistant-ui), per-conversation workspace dock, and Settings/Skills/MCP/Memory tabs. Talks to `/v1/*` same-origin with `credentials:"include"`; chat streams via SSE (`/v1/runs/{id}/events`) and renders HITL tool-approval cards inline.
-- **Technologies:** React 19, TypeScript, Vite, assistant-ui, Tailwind v4, shadcn, TanStack Query, react-i18next, Zustand.
-- **Deployment:** built to `frontend/dist` and served by the backend — **no separate frontend server**.
+### Backend — FastAPI app (`backend/app/main.py`)
+- **Description**: Owns app creation + lifespan (load `.env` → resolve encryption key → `init_db` → `seed_all` → open persistence → warm the default agent → start the sandbox reaper). Mounts one `APIRouter` per concern and serves the built SPA via `app.frontend()` (FastAPI ≥0.138) with `fallback="auto"` for client-side routes.
+- **Technologies**: FastAPI, uvicorn, CORS middleware.
+- **Deployment**: single container, `uvicorn app.main:app` on `:8080`.
 
-### 3.2. Backend Services
+### Agent engine (`backend/app/agent/`)
+- **Description**: `agent.py` builds and **caches** a compiled deepagents graph keyed `("run"|"chat", uid, model, effort, genui)`. Tools assembled per build = per-user MCP tools (cached, workspace-bound) + generative-UI tools (`render_ui`, `render_html` — gated by `genui`) + `load_skill` (sandbox only). `runs.py` drives the SSE run loop and **HITL approvals** (`interrupt_on` gates all MCP/plugin tools + configured built-ins + sandbox `execute`). `middleware.py` adds a thinking-block fix (`StripStaleThinkingMiddleware`) + production guards (call/tool limits, transient retry, context trimming) on top of deepagents' built-ins. Long-term memory (`AGENTS.md`) is injected by deepagents' `MemoryMiddleware`.
+- **Technologies**: deepagents 0.6.11, langgraph ≥1.2, langchain-core, langchain-mcp-adapters.
 
-#### 3.2.1. joyjoy backend (the single process)
-- **Name:** FastAPI app (`backend/app`).
-- **Description:** serves the SPA **and** the `/v1` API, runs the Deep Agent engine, owns all DB access, identity/auth, the runs/HITL engine, and the workspace dock. One `create_deep_agent()` is compiled+cached per `(kind, user_id, model, reasoning)`; per-user isolation is by `User.id` + `thread_id`.
-- **Technologies:** Python 3.11+, FastAPI, deepagents (==0.6.11), LangGraph, SQLAlchemy (async), pydantic-settings, uvicorn, uv-managed venv.
-- **Deployment:** one uvicorn process on `:8080` (dev script or `docker-compose`).
+### HTTP routers (`backend/app/routes/`)
+- `auth` (signup/login/OTP/me), `models` (+providers), `mcp` (servers/tools CRUD), `skills` (global RO + user CRUD), `memory` (AGENTS.md + notes), `workspace` (file CRUD + raw), `settings_ui` (UI prefs), `chat`, `runs` (SSE + approvals + `/v1/capabilities`), `sessions` (per-user sidebar), `health`.
 
-#### 3.2.2. OpenSandbox server (execution layer)
-- **Name:** `opensandbox-server` (`:8090`, separate process via `uvx`).
-- **Description:** control plane that provisions per-`(user, thread)` containers (Docker runtime) where the agent's file ops + code/shell run. The backend talks to it via the `opensandbox` SDK; durability is a Docker named volume per workspace. Gated by `SANDBOX_ENABLED` (off → host filesystem instead).
-- **Technologies:** OpenSandbox (FastAPI control plane + in-container `execd`), Docker, the multi-language `joyjoy/sandbox-fat` image.
+### Stores (`backend/app/stores/`)
+- DB-backed accessors + the **DB→agent filesystem bridge** (`dbfs.py`: serves `/memory/AGENTS.md`, `/skills/*` from the DB into the agent's virtual FS). `persistence.py` opens the LangGraph checkpointer + store (SQLite dev / Postgres prod, pooled).
 
-#### 3.2.3. MCP tool servers
-- **Name:** jira (mcp-atlassian, `:9000`), web-search (DuckDuckGo via uvx), joyjoy-demo, workspace-fs.
-- **Description:** out-of-process tool providers (HTTP or stdio) loaded per-user; every MCP tool is gated for HITL approval in the runs API.
+### Workspace + media (`backend/app/workspace/`)
+- Real agent files live under `WORKSPACE_ROOT/<uid>/workspace/<thread>`. `media.py` serves `/v1/media` (same-origin, cookie-auth) and renders office docs → PDF via headless LibreOffice for inline previews. Generative-UI `workspace:<path>` refs resolve here.
+
+### Frontend SPA (`frontend/src/`)
+- **Description**: assistant-ui **external-store** runtime over a custom SSE client; routes for chat + settings panels (MCP, Skills, Memory, Providers); zustand stores for chat/UI state; TanStack Query for server cache; 16-locale i18n. Generative UI: `render_ui` → native `MessagePrimitive.GenerativeUI` component kit; `render_html` → sandboxed iframe HTML canvas with a `postMessage` bridge.
+- **Technologies**: React 19, Vite 8, TypeScript, @assistant-ui/react, Tailwind v4 + shadcn/radix, zustand, @tanstack/react-query, react-router 7, i18next, Biome.
+- **Deployment**: built to `frontend/dist`, copied into the backend image and served by FastAPI (no separate web server in prod). Dev: Vite on `:5173`.
+
+---
 
 ## 4. Data Stores
 
-### 4.1. Relational application DB
-- **Type:** SQLite (dev, `data/joyjoy.db`) / PostgreSQL (prod) — selected by `APP_ENV`.
-- **Purpose:** **all application data** — no file-based stores. Provider secrets are Fernet-encrypted at rest.
-- **Key tables (13):** `users`, `password_resets`, `skins`, `global_providers`, `global_models`, `global_mcps`, `global_skills`, `user_configs`, `user_models`, `user_skills`, `user_mcps`, `skill_files`, `sessions`. The capability pattern = **global (shipped, read-only) merged with per-user (CRUD)**; global rows seed from `backend/app/db/seeds/global_seed.sql`.
+| Store | Dev | Prod | Holds |
+|-------|-----|------|-------|
+| **Relational app DB** (SQLAlchemy 2.0 async) | SQLite `./data/joyjoy.db` | Postgres (`DATABASE_URL`) | Accounts, config, catalogs, per-user skills/MCP/models, sessions |
+| **LangGraph checkpointer** | SqliteSaver | PostgresSaver (same PG) | **Chat message history** + run state (the only place messages live) |
+| **Workspace files** | `./data/...` | `/data` Docker volume (`WORKSPACE_ROOT`) | Agent's real files per `<uid>/workspace/<thread>` — only on-disk app state in prod |
+| **OpenSandbox volumes** (opt-in) | — | docker named volume per `workspace_id` | Durable per-session sandbox FS when `SANDBOX_ENABLED` |
 
-### 4.2. LangGraph checkpointer + store
-- **Type:** SQLite (`data/dev_checkpoints.sqlite`, `data/dev_store.sqlite`) / Postgres (disjoint tables in the same prod DB).
-- **Purpose:** the **checkpointer** holds chat message history per thread; the **store** backs the agent's dynamic `/memories/` cross-thread scratch files (namespaced per user).
+**Relational schema** (`backend/app/db/models.py`) — surrogate string-UUID PKs:
+- **Accounts**: `users`, `password_resets`.
+- **Global catalogs** (seeded on first boot from `app/db/seeds/global_seed.sql`, read-only in UI): `skins`, `global_providers`, `global_models`, `global_skills`, `global_mcps`, `skill_files`.
+- **Per-user**: `user_configs` (theme/skin/locale/default model/memory `agents_md`/auto-approve default…), `user_models`, `user_skills`, `user_mcps`.
+- **Conversations**: `sessions` (`thread_id` PK = LangGraph thread; `user_id`, `title`, `default_model`, `reasoning`, `auto_approve`, `pinned`, `workspace_path`, `forked_from`, `meta` = usage+sources telemetry).
+- **Secrets at rest**: secret fields inside `settings` JSON columns are **Fernet-encrypted** (`db/crypto.py`, `CREDENTIAL_ENCRYPTION_KEY`).
+- **Migrations**: Alembic.
 
-### 4.3. Agent workspace files
-- **Sandbox ON:** a **durable Docker named volume per workspace** (`joyjoy-ws-<id>`), mounted at `/workspace`; outlives the ephemeral container.
-- **Sandbox OFF:** host dir `WORKSPACE_ROOT/<uid>/workspace/<workspace_id>` (`.env`: `WORKSPACE_ROOT=…/data/workspaces`). The **only** on-disk app state in host mode.
+---
 
 ## 5. External Integrations / APIs
 
-- **Model providers** — Azure OpenAI, Anthropic (+ Azure AI Foundry `/anthropic` Claude), AWS Bedrock, OpenAI-compatible (OpenAI/OpenRouter/DeepSeek/Groq/local via `base_url`), Google Gemini. **Integration:** provider-specific LangChain SDKs; keys Fernet-encrypted in the DB, managed in Settings→Providers.
-- **MCP servers** — jira/Atlassian, DuckDuckGo web-search, workspace-fs (file delete/move/mkdir), joyjoy-demo. **Integration:** Model Context Protocol over HTTP/stdio (`langchain-mcp-adapters`); secrets passed as `${VAR}` refs, never stored.
-- **OpenSandbox** — code/shell/file execution. **Integration:** `opensandbox` SDK → server on `:8090`.
-- **SMTP (optional)** — password-reset OTP email; unset in dev logs the OTP instead.
+- **Model providers** (LangChain SDKs; dispatched by `provider` in each model spec): Azure OpenAI, Anthropic (incl. Azure AI Foundry `/anthropic` Claude endpoint), AWS Bedrock (`langchain-aws`/boto3), Google GenAI. Catalog = `global_models` + per-user `user_models`; keys referenced as `${VAR}` and expanded at build (kept out of the DB seed).
+- **MCP servers** (`langchain-mcp-adapters`, stdio + streamable-http): configured in `global_mcps` + `user_mcps`. Examples: `joyjoy_demo` (demo `joyjoy_ping`), `jira` (mcp-atlassian over http), `web-search` (DuckDuckGo via `uvx`). `${VAR}` expansion in command/args/url/headers/env; stdio servers get PATH/HOME/cache injected. **All MCP/plugin tools auto-gate for HITL approval.** `describe_mcp` returns the original `${VAR}` refs — never the expanded secret.
+- **SMTP** (optional): password-reset OTP email; when unset, the OTP is logged (dev).
+
+---
 
 ## 6. Deployment & Infrastructure
 
-- **Dev:** WSL2 + Docker; `bash scripts/start_all.sh` (self-bootstrapping: `uv sync`, `npm install`, build sandbox image, build SPA, start sandbox+jira+backend).
-- **Containerized:** `docker-compose.yml` brings up Postgres + the app (`docker compose up --build`, `:8080`); schema + seed auto-load on first boot. (Compose does **not** include the OpenSandbox layer.)
-- **Prod:** `APP_ENV=prod` + `DATABASE_URL=postgresql://…`; the app DB and LangGraph checkpointer share one Postgres database via disjoint tables. Agent files = the only on-disk state (point `WORKSPACE_ROOT` at a shared mount for multi-node).
-- **CI/CD:** none committed yet.
-- **Monitoring/Logging:** stdout logs (`/tmp/joyjoy_*.log` in dev); no APM wired.
+- **Image**: one multi-stage Dockerfile — Stage 1 `node:22` builds the SPA; Stage 2 `python:3.13-slim` installs the backend (`uv pip install -e .`), copies `frontend/dist`, runs `uvicorn` on `:8080`. Includes `uv`/`uvx` (for uvx MCPs) + headless LibreOffice (office previews).
+- **Compose** (`docker-compose.yml`, network `joyjoy-net`):
+  - `backend` — the app; `APP_ENV=prod`, reads `DATABASE_URL`; volume `workspaces:/data`; healthcheck `GET /v1/health`.
+  - `db` *(profile `localdb`)* — bundled Postgres 16 for local dev only; prod points `DATABASE_URL` at a hosted Postgres (no `depends_on`).
+  - **Sandbox tier** *(profile `sandbox`, opt-in)*: `opensandbox` server + `docker-socket-proxy` (least-privilege daemon access) + `sandbox-image` (build-only). Spawned sandboxes live on the isolated `joyjoy-sandbox-net` (cannot reach backend/DB).
+- **Secrets** via `.env` (compose interpolation): `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY` (generate-once, must stay stable), `AZURE_OPENAI_API_KEY`, `DATABASE_URL`.
+- **Dev (WSL)**: `scripts/start_all.sh` brings up jira MCP (`:9000`) → backend (`:8080`) in order; idempotent. SQLite + no-auth dev user.
+- **CI/CD & monitoring**: not yet codified in-repo (logs via stdout `logging`; healthcheck endpoint exists). *(see Roadmap)*
+
+---
 
 ## 7. Security Considerations
 
-- **Authentication:** username/password accounts (bcrypt) → **httpOnly signed-JWT session cookie** (`sub = User.id`); also accepts a bearer JWT / `X-User-Id` (the header is only trusted in dev or behind a configured `GATEWAY_API_KEY`). Password reset via hashed, expiring, single-use OTP.
-- **Authorization:** per-user data keyed by `User.id` with owner checks; **global catalogs are read-only** (writes to a global id are rejected); a user's effective capabilities = global ∪ their own.
-- **Encryption:** TLS in transit (at the deploy tier); **Fernet (AES) at rest** for model/provider secrets (`CREDENTIAL_ENCRYPTION_KEY`, generate-once). The seed SQL carries only `${VAR}` env-refs — no plaintext secret committed; `describe_models` masks keys to the browser.
-- **Execution isolation:** agent code runs in OpenSandbox containers (Docker; gVisor/runsc is the prod-hardening step), per-`(user, thread)`, with egress controls available.
-- **Tool safety:** all MCP tools (+ `execute`) are **HITL-gated** in the runs API; users opt into per-chat auto-approve (`Session.auto_approve` / account default).
+- **Authentication**: username/password accounts (**bcrypt** hashes) + a **signed session cookie** (`joyjoy_session`, 30-day TTL); per-user **JWT** for direct/programmatic clients; password reset via hashed OTP. Dev-only no-auth fallback resolves the tenant from the `X-User-Id` header — **ignored in prod** (cookie/JWT only).
+- **Multi-tenant isolation**: `User.id` (uuid) is the identity threaded through every per-user FK (CASCADE on delete); sessions, skills, MCP, models, workspace files, and memory are all user-scoped; `/v1/sessions` is filtered by owner.
+- **Secrets**: Fernet-encrypted at rest; decrypted model/MCP keys live in **process memory only**; MCP descriptions never leak expanded `${VAR}` secrets.
+- **HITL approvals**: in `run_mode`, `interrupt_on` gates **all** MCP/plugin tools (+ any `JOYJOY_INTERRUPT_TOOLS` built-ins + sandbox `execute`); the SPA shows an approval card; per-thread `auto_approve` (seeded from the account default) can bypass it.
+- **Code execution sandbox** (opt-in, layered): isolated container per session; daemon access via filtering proxy (no raw `docker.sock`); sandboxes on a network with no route to backend/DB; runtime/egress hardening in `sandbox.toml` (gVisor/kata, AppArmor, nft egress).
+- **Generative-UI HTML canvas**: agent-authored HTML runs in a **sandboxed `<iframe sandbox="allow-scripts">`** (no `allow-same-origin` → opaque origin, no cookies/DOM/workspace access), strict CSP (`default-src 'none'`), talking to the app only through a source-validated `postMessage` bridge (`window.aui.{send,compose,link}`).
+
+---
 
 ## 8. Development & Testing Environment
 
-- **Local setup:** see `README.md` / `CLAUDE.md`. Prereqs: Docker, `uv`, Node 22 (WSL2 on Windows). One command: `bash scripts/start_all.sh`.
-- **Lint/format:** backend `ruff` (`uv run ruff check/format app`); frontend `biome` + `tsc` (`npx biome check src`, `npx tsc --noEmit`) — both must be clean before `npm run build`. i18n locales must be key-parity with `en.ts`.
-- **Testing:** no substantive pytest suite yet (deps present as dev extras). `scripts/validate_models.py` is the main standalone check (model specs + `${VAR}` resolution); behavior is validated against the live `/v1` API with a real session cookie. Never `import app.main` from a standalone script (it opens a DB connection at import).
+- **Backend**: Python ≥3.11, `uv` for deps; run `uvicorn app.main:app` (or `scripts/run-backend.sh`). Tests: `pytest` (asyncio mode) in `backend/tests`. Lint: `ruff`. Migrations: `alembic`.
+- **Frontend**: Node 22; `npm run dev` (Vite `:5173`), `npm run build` (`tsc -b && vite build`), `npm run check` (Biome lint+format). Strict TypeScript.
+- **Dev defaults**: `APP_ENV=dev` → SQLite app DB + SQLite checkpointer + no-auth dev user. Browse via Vite `:5173` (proxy injects `X-User-Id`) or the baked SPA on `:8080`.
+- **Full local stack**: `docker compose --profile localdb up --build` (bundled Postgres), or `scripts/start_all.sh` in WSL.
+
+---
 
 ## 9. Future Considerations / Roadmap
 
-- **gVisor/runsc** runtime for the sandbox (prod hardening; currently `runc`).
-- **Multi-node:** the in-process `_RUNS`/HITL approval registry and the single-process workspace assume one node — needs a shared store + shared workspace mount to scale out.
-- **Migrations discipline:** dev relies on `create_all` (which won't ALTER existing tables) + ad-hoc `ALTER`; prod schema changes must go through Alembic.
-- **Test suite:** add real pytest/httpx coverage for `/v1` + the agent CRUD paths.
+- **Sandbox prod hardening**: finalize gVisor (`runsc`) runtime config; the OpenSandbox-in-compose networking is a scaffold and needs per-host validation (the proven dev path runs the server on the host).
+- **Node-based MCPs in WSL**: bare `npx` resolves to Windows `npx` (CMD/UNC failures) — prefer `uvx`/Python MCP servers until a Linux Node is installed.
+- **CI/CD + observability**: no pipeline or metrics/tracing stack codified yet (only stdout logging + `/v1/health`).
+- **Multi-node**: workspace files must move to a shared mount (point `WORKSPACE_ROOT` at NFS/EFS/SMB); checkpointer already Postgres-backed.
+
+---
 
 ## 10. Project Identification
 
-- **Project Name:** joyjoy
-- **Repository:** local at `~/joyjoy` (WSL); private/internal.
-- **Primary Contact:** Gouranga Satapathy (gouranga.satapathy@sapiens.com)
-- **Date of Last Update:** 2026-06-24
+- **Name**: joyjoy — multi-tenant Deep Agents platform.
+- **Repository**: local working tree at `~/joyjoy` (WSL). Backend `joyjoy-backend`, frontend `frontend`.
+- **Primary entry points**: `backend/app/main.py` (API + SPA), `frontend/src/main.tsx` (SPA).
+- **Runtime port**: `:8080` (single origin for SPA + `/v1` API).
+- **Last updated**: 2026-06-28.
+
+---
 
 ## 11. Glossary / Acronyms
 
-- **Deep Agent / deepagents:** the agent framework (filesystem/skills/memory middleware over LangGraph) compiled via `create_deep_agent()`.
-- **LangGraph checkpointer / store:** persistence for chat message state (checkpointer) and cross-thread agent memory (store).
-- **MCP (Model Context Protocol):** standard for out-of-process tool servers; loaded via `langchain-mcp-adapters`.
-- **HITL:** Human-In-The-Loop tool approval — gated tools pause for an approve/deny decision.
-- **OpenSandbox / execd / fat image:** the container execution layer; `execd` is the in-container daemon; `joyjoy/sandbox-fat:<N>` is the multi-language image (Python/Node/Java/Go/Rust/C/C++ + browser/data/doc tooling).
-- **workspace_id / thread_id:** a chat's identity; the workspace_id keys its files (host dir or Docker volume); forks share a workspace.
-- **SPA:** the React single-page app, served by the backend from `frontend/dist`.
-- **Fernet:** symmetric encryption (cryptography lib) used for secrets-at-rest.
-- **APP_ENV:** `dev` (SQLite) vs `prod` (Postgres) selector.
+- **Deep Agent / deepagents**: the agent framework (planning + filesystem + memory + skills + subagents) built on LangGraph; joyjoy compiles one per `(user, model, …)`.
+- **LangGraph**: stateful agent runtime; its **checkpointer** persists chat/run state (here = the message store).
+- **MCP** (Model Context Protocol): standard for external tool servers (stdio/http) loaded via `langchain-mcp-adapters`.
+- **HITL**: Human-In-The-Loop — tool-call approval gating (`interrupt_on` + approval cards; per-thread `auto_approve`).
+- **Skill**: a Markdown (`SKILL.md`) capability bundle (+ files); global (read-only) or per-user; materialized into the agent's FS.
+- **Skin**: a named UI theme/accent set (global catalog) selectable per user.
+- **Workspace**: a thread's on-disk file area (`WORKSPACE_ROOT/<uid>/workspace/<thread>`); surfaced in the UI dock and via `/v1/media`.
+- **OpenSandbox**: opt-in per-session container providing isolated code/shell execution and a durable volume.
+- **Generative UI**: agent-emitted rich UI — `render_ui` (JSON component kit, native assistant-ui renderer) and `render_html` (sandboxed HTML-canvas iframe). Gated per session by the `genui` flag.
+- **External-store runtime**: assistant-ui mode where chat state is owned by the app (zustand + custom SSE) rather than a built-in runtime.
+```
