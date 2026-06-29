@@ -73,6 +73,17 @@ services:
       SANDBOX_USE_SERVER_PROXY: ${SANDBOX_USE_SERVER_PROXY:-true}
       OPENSANDBOX_API_KEY: ${OPENSANDBOX_API_KEY:-}
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-joyjoy/sandbox-fat:4}
+      # ---- Observability (off unless set in .env) ----
+      METRICS_ENABLED: ${METRICS_ENABLED:-false}
+      TRACING_ENABLED: ${TRACING_ENABLED:-false}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-joyjoy-backend}
+      # Tracing transport (A) Langfuse callback — native per-user/session:
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse-web:3000}
+      # Tracing transport (B) OTLP fallback (used only if no LANGFUSE_* keys):
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
     ports:
       - "${PORT:-8080}:8080"
     volumes:
