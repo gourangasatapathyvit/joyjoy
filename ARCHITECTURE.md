@@ -149,7 +149,8 @@ Request shapes:
   - `backend` *(no profile — always on)* — the app; `APP_ENV=prod`, reads `DATABASE_URL`; volume `workspaces:/data`; healthcheck `GET /v1/health`.
   - **`localdb` profile** — bundled Postgres 16 (`db` service) for local dev only; without it, prod points `DATABASE_URL` at a hosted Postgres (there is intentionally no `depends_on`).
   - **`sandbox` profile** — the opt-in code-execution tier: `opensandbox` server + `docker-socket-proxy` (least-privilege daemon access) + `sandbox-image` (build-only). Also set `SANDBOX_ENABLED=true` on the backend. Spawned sandboxes live on the isolated `joyjoy-sandbox-net` (cannot reach backend/DB).
-  - Profiles compose freely: e.g. `COMPOSE_PROFILES=sandbox,localdb docker compose up --build` runs backend + bundled Postgres + the full sandbox tier; unset → backend only (hosted DB, host-workspace mode).
+  - **`observability` profile** — opt-in metrics + tracing stack (see §7a): self-hosted **Langfuse** (`langfuse-web`/`-worker` + `-postgres`/`-clickhouse`/`-redis`/`-minio`) for traces, and **Prometheus** + **Grafana** for metrics (config under `observability/`). Turn the backend on with `METRICS_ENABLED=true` / `TRACING_ENABLED=true`.
+  - Profiles compose freely: e.g. `COMPOSE_PROFILES=sandbox,localdb,observability docker compose up --build` runs backend + bundled Postgres + the sandbox tier + the observability stack; unset → backend only (hosted DB, host-workspace mode).
 - **Secrets** via `.env` (compose interpolation): `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY` (generate-once, must stay stable), `AZURE_OPENAI_API_KEY`, `DATABASE_URL`.
 - **Dev (WSL)**: `scripts/start_all.sh` brings up jira MCP (`:9000`) → backend (`:8080`) in order; idempotent. SQLite + no-auth dev user.
 - **CI/CD & monitoring**: not yet codified in-repo (logs via stdout `logging`; healthcheck endpoint exists). *(see Roadmap)*
@@ -167,6 +168,25 @@ Request shapes:
 
 ---
 
+## 7a. Observability
+
+Two independent, env-gated layers — both off by default, both no-ops unless enabled. Wiring lives in `app/core/observability.py`; the backing stack ships as the `observability` compose profile (see §6).
+
+**Tracing → self-hosted Langfuse, attributed per-user + per-session.** deepagents runs on LangChain, so its native tracer captures every graph node / LLM call / tool call with **no code**. `setup_tracing()` picks one of two transports by what's configured:
+- **(A) Langfuse LangChain callback — preferred** (when `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` are set). `trace_config()` stamps each run's metadata with `langfuse_user_id` (the tenant) and `langfuse_session_id` (the thread = the chat), which the handler maps to Langfuse's **native User + Session fields** → real per-user analytics and per-session (session-label) grouping/replay. The handler is attached per run via `langchain_callbacks()`.
+- **(B) OTLP bridge — fallback** (when no Langfuse keys, but `OTEL_EXPORTER_OTLP_ENDPOINT` is set): LangSmith's OTEL export → any OTLP collector (Tempo/Jaeger too). Vendor-neutral, but user/thread arrive as generic metadata, not native fields. Requires `opentelemetry-sdk` + the OTLP HTTP exporter.
+- One toggle: `TRACING_ENABLED=true`. The `observability` profile headless-bootstraps the Langfuse project with the same keys (`LANGFUSE_INIT_*`), so per-user/session tracing works on first boot with no manual key-copy.
+
+> **Granularity:** per-user and per-session live in **tracing** (Langfuse User/Session), NOT in metric labels — Prometheus labels stay bounded (model/tool/decision) to avoid cardinality blow-up.
+
+**Metrics → Prometheus + Grafana.** `METRICS_ENABLED=true` exposes `/metrics` and instruments:
+- HTTP (pure-ASGI `RequestMetricsMiddleware`, so SSE isn't buffered): request count + latency by method/templated-path/status.
+- Agent runs (in `runs.py`): runs total/errors, end-to-end latency, active-runs gauge, token totals (from `usage_metadata`), HITL approval decisions.
+- LLM/tool calls (a `PrometheusCallbackHandler` attached per run via the run config): call counts + latencies, tool errors.
+- Label cardinality is bounded on purpose (`model`/`tool`/`decision` are small sets); per-user/thread detail lives in traces, never metric labels. Prometheus scrapes `backend:8080/metrics` (`observability/prometheus.yml`); Grafana auto-provisions the datasource (`observability/grafana/`).
+
+---
+
 ## 8. Development & Testing Environment
 
 - **Backend**: Python ≥3.11, `uv` for deps; run `uvicorn app.main:app` (or `scripts/run-backend.sh`). Tests: `pytest` (asyncio mode) in `backend/tests`. Lint: `ruff`. Migrations: `alembic`.
@@ -180,7 +200,8 @@ Request shapes:
 
 - **Sandbox prod hardening**: finalize gVisor (`runsc`) runtime config; the OpenSandbox-in-compose networking is a scaffold and needs per-host validation (the proven dev path runs the server on the host).
 - **Node-based MCPs in WSL**: bare `npx` resolves to Windows `npx` (CMD/UNC failures) — prefer `uvx`/Python MCP servers until a Linux Node is installed.
-- **CI/CD + observability**: no pipeline or metrics/tracing stack codified yet (only stdout logging + `/v1/health`).
+- **Observability**: DONE — opt-in metrics (Prometheus + Grafana) and tracing (self-hosted Langfuse over OTLP) ship as the `observability` compose profile (see §7a). Still possible: pre-built Grafana dashboards + alerting rules.
+- **CI/CD**: no pipeline codified yet (deferred). Natural next step: GitHub Actions running backend `ruff`+`pytest` and frontend `biome`+`tsc`+`vite build`, optionally building/pushing the image.
 - **Multi-node**: workspace files must move to a shared mount (point `WORKSPACE_ROOT` at NFS/EFS/SMB); checkpointer already Postgres-backed.
 
 ---

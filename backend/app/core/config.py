@@ -152,6 +152,15 @@ class Settings(BaseSettings):
     # ---- Credentials table encryption (prod) ----
     credential_encryption_key: str = ""
 
+    # ---- Observability (metrics + tracing; both optional, off by default) ----
+    # Metrics: expose Prometheus metrics at /metrics + instrument runs/HTTP.
+    metrics_enabled: bool = False
+    # Tracing: route LangChain/LangGraph traces to an OTLP collector (Langfuse) via
+    # LangSmith's OTEL bridge. Requires OTEL_EXPORTER_OTLP_ENDPOINT (+ _HEADERS) set;
+    # see app/core/observability.setup_tracing. The OTLP env vars are standard.
+    tracing_enabled: bool = False
+    otel_service_name: str = "joyjoy-backend"
+
     # ---------- derived ----------
     @property
     def is_prod(self) -> bool:

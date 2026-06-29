@@ -61,6 +61,8 @@ Settings come from env / `.env` (pydantic-settings; field names map case-insensi
 | `WORKSPACE_ROOT` | agent workspace files root (`/data` volume in prod) |
 | `JOYJOY_INTERRUPT_TOOLS` | extra built-in tools to gate for HITL approval (MCP/plugin tools auto-gate) |
 | `SANDBOX_ENABLED` / `OPENSANDBOX_API_KEY` / `SANDBOX_*` | opt-in code-execution sandbox (off by default) |
+| `METRICS_ENABLED` | expose Prometheus `/metrics` + instrument runs/HTTP (off by default) |
+| `TRACING_ENABLED` / `OTEL_EXPORTER_OTLP_*` | route LangChain traces to OTLP/Langfuse (off by default) |
 
 Model & MCP secrets are referenced as `${VAR}` in the DB/config and expanded at agent build, so keys stay out of the committed seed. `describe_mcp` returns the original `${VAR}` refs — never the expanded secret.
 
@@ -77,6 +79,7 @@ Chat runs stream tokens, tool calls, and HITL approval interrupts over SSE; ever
 - **DB→agent FS bridge** (`stores/dbfs.py`): serves `/memory/AGENTS.md` and `/skills/*` from the DB into the agent's virtual filesystem.
 - **Middleware** (`agent/middleware.py`): `StripStaleThinkingMiddleware` (fixes multi-turn thinking-block replays) + production guards (call/tool limits, transient retry, context trimming), additive over deepagents' built-ins.
 - **Messages live in the LangGraph checkpointer**, not the relational DB. The relational DB holds accounts, catalogs, per-user skills/MCP/models, and `sessions` metadata.
+- **Observability** (`app/core/observability.py`, both opt-in): tracing is pure env-var (LangChain → OTLP → self-hosted Langfuse via LangSmith's OTEL bridge); metrics are a Prometheus registry at `/metrics` fed by an ASGI middleware + a per-run `PrometheusCallbackHandler` + `record_*` calls in the run loop. Backing stack = the `observability` compose profile. See ARCHITECTURE.md §7a.
 
 ## Testing & migrations
 

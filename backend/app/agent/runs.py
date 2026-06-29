@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 import uuid
 
 from langchain_core.messages import (
@@ -31,6 +32,7 @@ from langgraph.types import Command
 
 from app.workspace import media as media_mod
 from app.agent.agent import _content_to_text, reasoning_text_from_message
+from app.core import observability as obs
 from app.core.context import AgentContext
 
 logger = logging.getLogger("joyjoy.runs")
@@ -38,11 +40,13 @@ logger = logging.getLogger("joyjoy.runs")
 
 class _Run:
     def __init__(self, run_id: str, agent, ctx: AgentContext, text: str, auto_approve: bool = False,
-                 replace_turns: int = 0):
+                 replace_turns: int = 0, model: str = "unknown"):
         self.run_id = run_id
         self.agent = agent
         self.ctx = ctx
         self.text = text
+        # Model id for metric labels + trace metadata.
+        self.model = model or "unknown"
         # Per-thread HITL policy captured at run start: when true, gated tools are
         # approved server-side (no approval.request emitted, no client round-trip).
         self.auto_approve = auto_approve
@@ -148,9 +152,18 @@ def _fmt(args) -> str:
 _reasoning_from_msg = reasoning_text_from_message
 
 
+def _run_cfg(run: _Run) -> dict:
+    """Base thread/user config + (when enabled) trace metadata and a Prometheus
+    callback so this run's LLM/tool activity is traced and measured."""
+    cfg = _config(run.ctx)
+    cfg.update(obs.trace_config(run.ctx, run.model))
+    cfg["callbacks"] = obs.langchain_callbacks(run.model)
+    return cfg
+
+
 async def _stream_segment(run: _Run, agent_input):
     """Run one astream segment. Returns ('interrupt', hitl) | ('done', None) | ('cancelled', None)."""
-    cfg = _config(run.ctx)
+    cfg = _run_cfg(run)
     try:
         it = run.agent.astream(agent_input, config=cfg, context=run.ctx, stream_mode=["messages", "updates"])
     except TypeError:
@@ -206,6 +219,8 @@ async def _stream_segment(run: _Run, agent_input):
                                 "reasoning_tokens": otd.get("reasoning"),
                             }
                             run.last_usage = {k: v for k, v in usage.items() if v is not None}
+                            obs.record_tokens(run.model, input_tokens=um.get("input_tokens"),
+                                              output_tokens=um.get("output_tokens"))
                             await _emit(run, "usage", **run.last_usage)
                         for tc in (getattr(m, "tool_calls", None) or []):
                             _collect_tool_sources(run, tc.get("name"), tc.get("args"))
@@ -230,6 +245,9 @@ async def _drive(run: _Run) -> None:
     if run.replace_turns > 0:
         await _truncate_trailing_turns(run, run.replace_turns)
     agent_input = {"messages": [HumanMessage(run.text)]}
+    obs.record_run_start(run.model)
+    _t0 = time.monotonic()
+    _errored = False
     try:
         while True:
             status, val = await _stream_segment(run, agent_input)
@@ -243,6 +261,8 @@ async def _drive(run: _Run) -> None:
                 # a card. Tools still streamed their started/completed events above, so
                 # the calls remain visible; we just skip the human round-trip.
                 if run.auto_approve:
+                    for _ in action_requests:
+                        obs.record_approval("auto_approve")
                     agent_input = Command(resume={"decisions": [{"type": "approve"} for _ in action_requests]})
                     continue
                 futs: list[asyncio.Future] = []
@@ -285,16 +305,18 @@ async def _drive(run: _Run) -> None:
             await _emit(run, "run.completed", output=run.final_text)
             return
     except Exception as exc:  # noqa: BLE001 - surface to the event stream
+        _errored = True
         logger.exception("run %s failed", run.run_id)
         await _emit(run, "run.failed", error=str(exc))
     finally:
+        obs.record_run_end(run.model, time.monotonic() - _t0, error=_errored)
         await run.queue.put({"event": "__end__"})
 
 
 async def start_run(agent, ctx: AgentContext, text: str, *, auto_approve: bool = False,
-                    replace_turns: int = 0) -> str:
+                    replace_turns: int = 0, model: str = "unknown") -> str:
     run_id = "run-" + uuid.uuid4().hex
-    run = _Run(run_id, agent, ctx, text, auto_approve=auto_approve, replace_turns=replace_turns)
+    run = _Run(run_id, agent, ctx, text, auto_approve=auto_approve, replace_turns=replace_turns, model=model)
     _RUNS[run_id] = run
     run.task = asyncio.create_task(_drive(run))
     return run_id
@@ -324,6 +346,7 @@ def respond_approval(run_id: str, approval_id: str, choice: str) -> bool:
         return False
     reject = str(choice or "").strip().lower() in ("reject", "deny", "denied", "no", "decline")
     decision = {"type": "reject"} if reject else {"type": "approve"}
+    obs.record_approval("reject" if reject else "approve")
     try:
         fut.get_loop().call_soon_threadsafe(fut.set_result, decision)
     except Exception:

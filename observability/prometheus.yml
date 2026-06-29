@@ -1,0 +1,16 @@
+# Prometheus scrape config for the joyjoy `observability` compose profile.
+# Mounted at /etc/prometheus/prometheus.yml. The backend exposes /metrics only
+# when METRICS_ENABLED=true.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: joyjoy-backend
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["backend:8080"]   # the joyjoy backend service on joyjoy-net
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

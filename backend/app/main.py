@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from app.sandbox import sandbox
 from app.stores import users as users_mod
 from app.agent.agent import get_agent
+from app.core import observability as obs
 from app.core.config import get_settings
 from app.core.constants import DEFAULT_USER_ID
 from app.db import ensure_encryption_key, init_db, seed_all
@@ -95,6 +96,11 @@ def _inject_runtime_path_vars() -> None:
 async def lifespan(app: FastAPI):
     _load_env_file_into_environ()
     _inject_runtime_path_vars()
+    # Observability (both no-ops unless enabled): set up tracing env (LangChain →
+    # OTLP → Langfuse) before any agent runs, and init the Prometheus registry.
+    obs.setup_tracing(settings)
+    if settings.metrics_enabled:
+        obs.init_metrics()
     # App relational DB: resolve the encryption key (generate+persist on first
     # run), create tables, seed the global catalogs. Dev → SQLite, prod → Postgres.
     ensure_encryption_key(settings)
@@ -124,6 +130,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Prometheus: register the metrics registry + HTTP request middleware + /metrics
+# (all gated on METRICS_ENABLED; the middleware is pure-ASGI so SSE is unaffected).
+if settings.metrics_enabled:
+    from fastapi.responses import Response
+
+    obs.init_metrics()
+    app.add_middleware(obs.RequestMetricsMiddleware)
+
+    @app.get("/metrics", include_in_schema=False)
+    async def _metrics():
+        body, content_type = obs.render_metrics()
+        return Response(content=body, media_type=content_type)
 
 # joyjoy branding: serve the favicon + brand assets for anyone hitting the API in a browser
 # (e.g. /docs). Files live in backend/static (copied from the joyjoy brand kit).

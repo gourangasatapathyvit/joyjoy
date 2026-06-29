@@ -66,7 +66,7 @@ async def create_run(request: Request):
     ws_id = await sessions_mod.workspace_id_for(user_id, thread_id)
     ctx = AgentContext(user_id=user_id, thread_id=thread_id, workspace_id=ws_id)
     agent = await get_run_agent(settings, request.app.state.checkpointer, request.app.state.store, model, user_id, reasoning=reasoning, genui=genui)
-    run_id = await runs_mod.start_run(agent, ctx, text, auto_approve=auto_approve, replace_turns=replace_turns)
+    run_id = await runs_mod.start_run(agent, ctx, text, auto_approve=auto_approve, replace_turns=replace_turns, model=model)
     logger.info("run start id=%s user=%s thread=%s ws=%s model=%s reasoning=%s auto_approve=%s", run_id, user_id, thread_id, ws_id, model, reasoning, auto_approve)
     try:
         await sessions_mod.record_session(

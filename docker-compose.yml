@@ -175,6 +175,146 @@ services:
     # "sh: Syntax error: && unexpected" and the server never starts. One line, no folding.
     command: ["sh", "-c", "pip install --no-cache-dir uv && uvx --from opensandbox-server opensandbox-server --config /app/sandbox.toml"]
 
+  # ──────────────────────────────────────────────────────────────────────────
+  # Observability — OPT-IN. Enable with: COMPOSE_PROFILES=observability
+  # (combine: COMPOSE_PROFILES=sandbox,localdb,observability). Two stacks:
+  #   • Tracing  → self-hosted Langfuse (web+worker+postgres+clickhouse+redis+minio).
+  #     Turn the backend on with TRACING_ENABLED=true + OTEL_EXPORTER_OTLP_ENDPOINT=
+  #     http://langfuse-web:3000/api/public/otel + OTEL_EXPORTER_OTLP_HEADERS Basic auth.
+  #   • Metrics  → Prometheus scrapes the backend's /metrics (METRICS_ENABLED=true);
+  #     Grafana visualizes it. All on joyjoy-net so the backend reaches langfuse-web.
+  # First run: create a Langfuse org/project in the UI (:3000), copy its public/secret
+  # keys into OTEL_EXPORTER_OTLP_HEADERS, then restart the backend.
+  # ──────────────────────────────────────────────────────────────────────────
+  langfuse-postgres:
+    profiles: ["observability"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse}
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  langfuse-clickhouse:
+    profiles: ["observability"]
+    image: clickhouse/clickhouse-server:24.3
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+    volumes:
+      - langfuse-clickhouse:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  langfuse-redis:
+    profiles: ["observability"]
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${LANGFUSE_REDIS_PASSWORD:-redis}"]
+
+  langfuse-minio:
+    profiles: ["observability"]
+    image: minio/minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+    volumes:
+      - langfuse-minio:/data
+
+  # Shared Langfuse env (worker + web). YAML anchor to avoid duplication.
+  langfuse-worker:
+    profiles: ["observability"]
+    image: langfuse/langfuse-worker:3
+    restart: unless-stopped
+    depends_on:
+      langfuse-postgres: {condition: service_healthy}
+      langfuse-clickhouse: {condition: service_healthy}
+      langfuse-redis: {condition: service_started}
+      langfuse-minio: {condition: service_started}
+    environment: &langfuse-env
+      DATABASE_URL: postgresql://postgres:${LANGFUSE_DB_PASSWORD:-langfuse}@langfuse-postgres:5432/langfuse
+      # Dev defaults so the opt-in profile runs out-of-the-box; OVERRIDE in prod via
+      # .env (these can't be :? required — compose interpolates all services even when
+      # this profile is off, which would break a plain `docker compose up`).
+      SALT: ${LANGFUSE_SALT:-joyjoy-dev-langfuse-salt}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_CONNECTION_STRING: redis://default:${LANGFUSE_REDIS_PASSWORD:-redis}@langfuse-redis:6379
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+
+  langfuse-web:
+    profiles: ["observability"]
+    image: langfuse/langfuse:3
+    restart: unless-stopped
+    depends_on:
+      langfuse-postgres: {condition: service_healthy}
+      langfuse-clickhouse: {condition: service_healthy}
+      langfuse-redis: {condition: service_started}
+      langfuse-minio: {condition: service_started}
+    ports:
+      - "${LANGFUSE_PORT:-3000}:3000"
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_URL: ${LANGFUSE_NEXTAUTH_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-joyjoy-dev-nextauth-secret}
+      # Headless bootstrap: create the org/project/user with EXACTLY the keys the
+      # backend uses (LANGFUSE_PUBLIC_KEY/SECRET_KEY) so per-user/session tracing
+      # works on first boot with no manual UI step. UI login = the init user below.
+      LANGFUSE_INIT_ORG_ID: joyjoy
+      LANGFUSE_INIT_PROJECT_ID: joyjoy
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-joyjoy-dev}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-joyjoy-dev}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-admin@joyjoy.local}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-joyjoyadmin}
+      LANGFUSE_INIT_USER_NAME: joyjoy admin
+
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+
 networks:
   # App plane: backend ↔ opensandbox ↔ (db / socket-proxy). Pinned to a FIXED name
   # (not the implicit "<project>_default", which changes with the directory) so it's
@@ -193,3 +333,9 @@ volumes:
   pgdata:            # used only by the `db` service (localdb profile / DB_HOSTER=0)
   workspaces:
   opensandbox-state:
+  # observability profile
+  langfuse-pgdata:
+  langfuse-clickhouse:
+  langfuse-minio:
+  prometheus-data:
+  grafana-data:

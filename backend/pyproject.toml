@@ -33,6 +33,11 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0",  # relational app DB (users/skills/mcp/models/config/sessions)
     "alembic>=1.13",  # DB migrations
     "cryptography>=42",  # Fernet encryption for secrets at rest
+    # Observability (optional features, gated by METRICS_ENABLED / TRACING_ENABLED)
+    "prometheus-client>=0.20",  # /metrics + agent/HTTP instrumentation
+    "langfuse>=3",  # tracing → self-hosted Langfuse (native per-user/per-session via LangChain callback)
+    "opentelemetry-sdk>=1.25",  # tracing → OTLP fallback (langsmith[otel] bridge)
+    "opentelemetry-exporter-otlp-proto-http>=1.25",
 ]
 
 [project.optional-dependencies]
