@@ -1,0 +1,13 @@
+# Grafana auto-loads dashboards from /etc/grafana/dashboards (mounted from
+# observability/grafana/dashboards) for the observability profile.
+apiVersion: 1
+providers:
+  - name: joyjoy
+    orgId: 1
+    folder: joyjoy
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false

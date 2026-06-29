@@ -200,7 +200,7 @@ Two independent, env-gated layers — both off by default, both no-ops unless en
 
 - **Sandbox prod hardening**: finalize gVisor (`runsc`) runtime config; the OpenSandbox-in-compose networking is a scaffold and needs per-host validation (the proven dev path runs the server on the host).
 - **Node-based MCPs in WSL**: bare `npx` resolves to Windows `npx` (CMD/UNC failures) — prefer `uvx`/Python MCP servers until a Linux Node is installed.
-- **Observability**: DONE — opt-in metrics (Prometheus + Grafana) and tracing (self-hosted Langfuse over OTLP) ship as the `observability` compose profile (see §7a). Still possible: pre-built Grafana dashboards + alerting rules.
+- **Observability**: DONE — opt-in metrics (Prometheus + Grafana, with a provisioned **joyjoy — Overview** dashboard) and tracing (self-hosted Langfuse, native per-user/session) ship as the `observability` compose profile (see §7a). Still possible: Grafana alerting rules.
 - **CI/CD**: no pipeline codified yet (deferred). Natural next step: GitHub Actions running backend `ruff`+`pytest` and frontend `biome`+`tsc`+`vite build`, optionally building/pushing the image.
 - **Multi-node**: workspace files must move to a shared mount (point `WORKSPACE_ROOT` at NFS/EFS/SMB); checkpointer already Postgres-backed.
 

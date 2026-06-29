@@ -238,7 +238,10 @@ services:
     profiles: ["observability"]
     image: minio/minio
     restart: unless-stopped
-    command: ["server", "/data", "--console-address", ":9001"]
+    # Pre-create the langfuse bucket dir before starting (Langfuse v3 stages OTEL
+    # ingestion events in S3; without the bucket, ingestion 500s with NoSuchBucket).
+    entrypoint: ["sh", "-c"]
+    command: ["mkdir -p /data/langfuse && minio server /data --console-address ':9001'"]
     environment:
       MINIO_ROOT_USER: minio
       MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:-miniosecret}
@@ -322,6 +325,7 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/etc/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
       - "${GRAFANA_PORT:-3001}:3000"

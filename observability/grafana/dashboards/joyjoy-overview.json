@@ -1,0 +1,143 @@
+{
+  "uid": "joyjoy-overview",
+  "title": "joyjoy — Overview",
+  "tags": ["joyjoy"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": {"from": "now-1h", "to": "now"},
+  "refresh": "10s",
+  "timezone": "browser",
+  "templating": {"list": []},
+  "annotations": {"list": []},
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Active runs",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "none", "color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "orange", "value": 8}, {"color": "red", "value": 16}]}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value", "graphMode": "area", "textMode": "auto"},
+      "targets": [{"refId": "A", "expr": "sum(joyjoy_agent_active_runs)", "datasource": {"type": "prometheus", "uid": "prometheus"}}]
+    },
+    {
+      "id": 2, "type": "stat", "title": "Runs / min",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 2, "color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "blue", "value": null}]}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value", "graphMode": "area"},
+      "targets": [{"refId": "A", "expr": "sum(rate(joyjoy_agent_runs_total[5m])) * 60", "datasource": {"type": "prometheus", "uid": "prometheus"}}]
+    },
+    {
+      "id": 3, "type": "stat", "title": "Run errors / min",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 2, "color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.01}]}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value", "graphMode": "area"},
+      "targets": [{"refId": "A", "expr": "sum(rate(joyjoy_agent_run_errors_total[5m])) * 60", "datasource": {"type": "prometheus", "uid": "prometheus"}}]
+    },
+    {
+      "id": 4, "type": "stat", "title": "Tokens / min",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 0, "color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "purple", "value": null}]}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value", "graphMode": "area"},
+      "targets": [{"refId": "A", "expr": "sum(rate(joyjoy_llm_tokens_total[5m])) * 60", "datasource": {"type": "prometheus", "uid": "prometheus"}}]
+    },
+
+    {
+      "id": 5, "type": "timeseries", "title": "Agent run rate (by model)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [{"refId": "A", "expr": "sum by (model) (rate(joyjoy_agent_runs_total[5m]))", "legendFormat": "{{model}}", "datasource": {"type": "prometheus", "uid": "prometheus"}}]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Agent run latency (p50 / p95)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(joyjoy_agent_run_duration_seconds_bucket[5m])))", "legendFormat": "p50", "datasource": {"type": "prometheus", "uid": "prometheus"}},
+        {"refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(joyjoy_agent_run_duration_seconds_bucket[5m])))", "legendFormat": "p95", "datasource": {"type": "prometheus", "uid": "prometheus"}}
+      ]
+    },
+
+    {
+      "id": 7, "type": "timeseries", "title": "LLM call rate (by model)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [{"refId": "A", "expr": "sum by (model) (rate(joyjoy_llm_calls_total[5m]))", "legendFormat": "{{model}}", "datasource": {"type": "prometheus", "uid": "prometheus"}}]
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "LLM call latency p95 (by model)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le, model) (rate(joyjoy_llm_call_duration_seconds_bucket[5m])))", "legendFormat": "{{model}}", "datasource": {"type": "prometheus", "uid": "prometheus"}}]
+    },
+
+    {
+      "id": 9, "type": "timeseries", "title": "Token rate (by kind)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+      "fieldConfig": {"defaults": {"unit": "none", "custom": {"drawStyle": "line", "fillOpacity": 20, "stacking": {"mode": "normal"}, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [{"refId": "A", "expr": "sum by (kind) (rate(joyjoy_llm_tokens_total[5m]))", "legendFormat": "{{kind}}", "datasource": {"type": "prometheus", "uid": "prometheus"}}]
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Tool call rate (by tool)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [{"refId": "A", "expr": "sum by (tool) (rate(joyjoy_tool_calls_total[5m]))", "legendFormat": "{{tool}}", "datasource": {"type": "prometheus", "uid": "prometheus"}}]
+    },
+
+    {
+      "id": 11, "type": "timeseries", "title": "Tool errors (by tool)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 28},
+      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [{"refId": "A", "expr": "sum by (tool) (rate(joyjoy_tool_errors_total[5m]))", "legendFormat": "{{tool}}", "datasource": {"type": "prometheus", "uid": "prometheus"}}]
+    },
+    {
+      "id": 12, "type": "timeseries", "title": "HITL approvals (by decision)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 28},
+      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "fillOpacity": 20, "stacking": {"mode": "normal"}, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [{"refId": "A", "expr": "sum by (decision) (rate(joyjoy_tool_approvals_total[5m]))", "legendFormat": "{{decision}}", "datasource": {"type": "prometheus", "uid": "prometheus"}}]
+    },
+    {
+      "id": 13, "type": "timeseries", "title": "Active runs (over time)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 28},
+      "fieldConfig": {"defaults": {"unit": "none", "custom": {"drawStyle": "line", "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [{"refId": "A", "expr": "sum(joyjoy_agent_active_runs)", "legendFormat": "active", "datasource": {"type": "prometheus", "uid": "prometheus"}}]
+    },
+
+    {
+      "id": 14, "type": "timeseries", "title": "HTTP request rate (by status)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36},
+      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "fillOpacity": 20, "stacking": {"mode": "normal"}, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [{"refId": "A", "expr": "sum by (status) (rate(joyjoy_http_requests_total[5m]))", "legendFormat": "{{status}}", "datasource": {"type": "prometheus", "uid": "prometheus"}}]
+    },
+    {
+      "id": 15, "type": "timeseries", "title": "HTTP latency p95 (by path)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36},
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le, path) (rate(joyjoy_http_request_duration_seconds_bucket[5m])))", "legendFormat": "{{path}}", "datasource": {"type": "prometheus", "uid": "prometheus"}}]
+    }
+  ]
+}
