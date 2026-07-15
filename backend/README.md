@@ -15,7 +15,7 @@ Multi-tenant **Deep Agents** backend: a single **FastAPI** process that serves t
 
 - **Python ≥ 3.11**, FastAPI + uvicorn, SSE via `sse-starlette`
 - **Agent engine**: `deepagents` 0.6.11 on `langgraph` ≥1.2 (`langchain-core`, `langchain-mcp-adapters`)
-- **Model providers**: Azure OpenAI, Anthropic (incl. Azure AI Foundry `/anthropic`), AWS Bedrock, Google GenAI
+- **Model providers**: Azure OpenAI, Anthropic (incl. Azure AI Foundry `/anthropic`), AWS Bedrock, Google GenAI, NVIDIA NIM (`langchain-nvidia-ai-endpoints`), or any OpenAI-compatible endpoint (OpenRouter, DeepSeek, Groq, local servers, …)
 - **Persistence**: SQLAlchemy 2.0 (async) app DB + LangGraph checkpointer — SQLite (dev) / Postgres (prod, `psycopg`); Alembic migrations
 - **Secrets at rest**: Fernet (`cryptography`); accounts via `bcrypt` + signed session cookie / JWT
 
@@ -81,7 +81,7 @@ Chat runs stream tokens, tool calls, and HITL approval interrupts over SSE; ever
 - **Middleware** (`agent/middleware.py`): `StripStaleThinkingMiddleware` (fixes multi-turn thinking-block replays) + production guards (call/tool limits, transient retry, context trimming), additive over deepagents' built-ins.
 - **Messages live in the LangGraph checkpointer**, not the relational DB. The relational DB holds accounts, catalogs, per-user skills/MCP/models, and `sessions` metadata.
 - **Observability** (`app/core/observability.py`, both opt-in): tracing is pure env-var (LangChain → OTLP → self-hosted Langfuse via LangSmith's OTEL bridge); metrics are a Prometheus registry at `/metrics` fed by an ASGI middleware + a per-run `PrometheusCallbackHandler` + `record_*` calls in the run loop. Backing stack = the `observability` compose profile. See ARCHITECTURE.md §7a.
-- **Model discovery** (`agent.py`: `discover_models`, `save_user_models_bulk`, `_composite_model_id`): the Providers tab can fetch a provider's live model catalog instead of hand-typing an id (per-provider adapters for Azure OpenAI, Anthropic, Bedrock, OpenAI-compatible endpoints, and Gemini), then bulk-save a selection. Per-user model ids are `{provider}:{raw_id}` composites so the same base name can exist under multiple providers without colliding with a global (bare-id) model.
+- **Model discovery** (`agent.py`: `discover_models`, `save_user_models_bulk`, `_composite_model_id`): the Providers tab can fetch a provider's live model catalog instead of hand-typing an id (per-provider adapters for Azure OpenAI, Anthropic, Bedrock, OpenAI-compatible endpoints, Gemini, and NVIDIA NIM), then bulk-save a selection. Per-user model ids are `{provider}:{raw_id}` composites so the same base name can exist under multiple providers without colliding with a global (bare-id) model. NVIDIA's adapter (`_discover_nvidia`) is the odd one out — it calls `ChatNVIDIA.get_available_models()` for real per-model `supports_tools`/`supports_thinking` flags instead of guessing capabilities from the id string; prefer this pattern (a provider's own LangChain package) over the generic OpenAI-compatible bucket whenever one exists.
 
 ## Testing & migrations
 
