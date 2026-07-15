@@ -188,10 +188,14 @@ export const af: Resources = {
 		capabilities: "Vermoëns",
 		xaiOauthLogin: "Meld aan met xAI",
 		xaiOauthStarting: "Begin…",
-		xaiOauthInstructions: "Besoek hierdie skakel en voer die kode in om te magtig:",
+		xaiOauthInstructions:
+			"Besoek hierdie skakel en voer die kode in om te magtig:",
 		xaiOauthWaiting: "Wag vir magtiging…",
 		xaiOauthSuccess: "Aangemeld — haal jou modelle op…",
 		xaiOauthFailed: "xAI-aanmelding het misluk",
+		xaiUseOauth: "Gebruik eerder OAuth-aanmelding",
+		xaiUseOauthHint:
+			"Meld aan met 'n SuperGrok- / X Premium+-intekening in plaas van 'n API-sleutel.",
 	},
 	model: {
 		selectModel: "Kies model",

@@ -188,10 +188,14 @@ export const ja: Resources = {
 		capabilities: "機能",
 		xaiOauthLogin: "xAI でログイン",
 		xaiOauthStarting: "開始中…",
-		xaiOauthInstructions: "このリンクにアクセスし、コードを入力して承認してください：",
+		xaiOauthInstructions:
+			"このリンクにアクセスし、コードを入力して承認してください：",
 		xaiOauthWaiting: "承認を待っています…",
 		xaiOauthSuccess: "ログインしました — モデルを取得中…",
 		xaiOauthFailed: "xAI へのログインに失敗しました",
+		xaiUseOauth: "代わりに OAuth ログインを使用",
+		xaiUseOauthHint:
+			"API キーの代わりに SuperGrok / X Premium+ のサブスクリプションでログインします。",
 	},
 	model: {
 		selectModel: "モデルを選択",

@@ -187,6 +187,9 @@ export const zh: Resources = {
 		xaiOauthWaiting: "等待授权…",
 		xaiOauthSuccess: "已登录 — 正在获取您的模型…",
 		xaiOauthFailed: "xAI 登录失败",
+		xaiUseOauth: "改用 OAuth 登录",
+		xaiUseOauthHint:
+			"使用 SuperGrok / X Premium+ 订阅登录，而不是使用 API 密钥。",
 	},
 	model: {
 		selectModel: "选择模型",

@@ -189,6 +189,9 @@ export const en = {
 		xaiOauthWaiting: "Waiting for authorization…",
 		xaiOauthSuccess: "Logged in — fetching your models…",
 		xaiOauthFailed: "xAI login failed",
+		xaiUseOauth: "Use OAuth login instead",
+		xaiUseOauthHint:
+			"Log in with a SuperGrok / X Premium+ subscription instead of an API key.",
 	},
 	model: {
 		selectModel: "Select model",

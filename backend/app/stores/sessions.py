@@ -296,8 +296,9 @@ async def get_thread_meta(thread_id: str) -> dict:
 
 def _serialize_message(m: Any) -> dict | None:
     """Convert a stored LangChain BaseMessage (or raw dict) to a wire dict the
-    frontend can rebuild: {role, content, tool_calls?, tool_call_id?, name?, media?}."""
-    from app.agent.agent import _content_to_text  # local import avoids any import cycle
+    frontend can rebuild: {role, content, reasoning?, tool_calls?, tool_call_id?, name?, media?}."""
+    # Local import avoids any import cycle.
+    from app.agent.agent import _content_to_text, reasoning_text_from_message
 
     role_map = {"human": "user", "ai": "assistant", "tool": "tool", "system": "system"}
     mtype = getattr(m, "type", None)
@@ -310,6 +311,13 @@ def _serialize_message(m: Any) -> dict | None:
         # the Sources footer persisted in session.meta) to the right turn on reload.
         if getattr(m, "id", None):
             out["id"] = m.id
+        # The checkpointed AIMessage still carries its reasoning/thinking blocks —
+        # extract them the same way the live SSE stream does, so the collapsible
+        # Reasoning box survives a reload instead of only existing during the run.
+        if mtype == "ai":
+            rtxt = reasoning_text_from_message(m)
+            if rtxt:
+                out["reasoning"] = rtxt
         tcs = getattr(m, "tool_calls", None)
         if tcs:
             out["tool_calls"] = [

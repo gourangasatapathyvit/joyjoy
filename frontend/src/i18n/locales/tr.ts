@@ -187,10 +187,14 @@ export const tr: Resources = {
 		capabilities: "Yetenekler",
 		xaiOauthLogin: "xAI ile giriş yap",
 		xaiOauthStarting: "Başlatılıyor…",
-		xaiOauthInstructions: "Bu bağlantıyı ziyaret edin ve yetkilendirmek için kodu girin:",
+		xaiOauthInstructions:
+			"Bu bağlantıyı ziyaret edin ve yetkilendirmek için kodu girin:",
 		xaiOauthWaiting: "Yetkilendirme bekleniyor…",
 		xaiOauthSuccess: "Giriş yapıldı — modelleriniz alınıyor…",
 		xaiOauthFailed: "xAI girişi başarısız oldu",
+		xaiUseOauth: "Bunun yerine OAuth girişini kullan",
+		xaiUseOauthHint:
+			"API anahtarı yerine SuperGrok / X Premium+ aboneliğiyle giriş yapın.",
 	},
 	model: {
 		selectModel: "Model seç",

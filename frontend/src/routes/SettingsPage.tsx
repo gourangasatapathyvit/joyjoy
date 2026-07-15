@@ -25,7 +25,8 @@ const SECTIONS: Section[] = [
 // other's last-open tab. A genuinely fresh visit (no persisted section for
 // this user) lands on the first tab; any later visit restores whichever tab
 // that same user had open last.
-const sectionKeyFor = (username: string) => `${STORAGE_KEYS.settingsSection}:${username}`;
+const sectionKeyFor = (username: string) =>
+	`${STORAGE_KEYS.settingsSection}:${username}`;
 
 const readSection = (username: string): Section => {
 	try {

@@ -264,13 +264,29 @@ function ReasoningText({
 		const scrollEl = scrollRef.current;
 		const contentEl = contentRef.current;
 		if (!scrollEl || !contentEl) return;
+		// While streaming, every new token resizes the content and re-pins to the
+		// bottom — with no gating, that fights any attempt to scroll up and read
+		// earlier lines mid-stream (the box "feels" unscrollable even though
+		// overflow-y is set correctly). Mirror the main thread viewport's own
+		// isAtBottom gating: once the user scrolls away from the bottom, stop
+		// re-pinning until they scroll back down themselves.
+		let userScrolledAway = false;
 		const pin = () => {
+			if (userScrolledAway) return;
 			scrollEl.scrollTop = scrollEl.scrollHeight;
 		};
+		const onScroll = () => {
+			userScrolledAway =
+				scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight >= 4;
+		};
 		pin();
+		scrollEl.addEventListener("scroll", onScroll, { passive: true });
 		const observer = new ResizeObserver(pin);
 		observer.observe(contentEl);
-		return () => observer.disconnect();
+		return () => {
+			observer.disconnect();
+			scrollEl.removeEventListener("scroll", onScroll);
+		};
 	}, [isPreview]);
 
 	return (
@@ -278,7 +294,7 @@ function ReasoningText({
 			ref={scrollRef}
 			data-slot="reasoning-text"
 			className={cn(
-				"aui-reasoning-text relative z-0 max-h-64 overflow-y-auto ps-6 pt-2 pb-2 leading-relaxed",
+				"aui-reasoning-text relative z-0 max-h-64 overflow-y-auto overscroll-contain ps-6 pt-2 pb-2 leading-relaxed",
 				"transform-gpu transition-[transform,opacity]",
 				"group-data-[state=open]/collapsible-content:animate-in",
 				"group-data-[state=closed]/collapsible-content:animate-out",

@@ -1,5 +1,5 @@
 import { Check, ChevronDown, Plus, Search } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	useDiscoverModels,
@@ -39,6 +39,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { NEW_ITEM } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
@@ -88,12 +89,19 @@ function DiscoveredRow({
 				)}
 			</span>
 			{caps.slice(0, 2).map((c) => (
-				<Badge key={c} variant="outline" className="hidden shrink-0 text-[9px] sm:inline-flex">
+				<Badge
+					key={c}
+					variant="outline"
+					className="hidden shrink-0 text-[9px] sm:inline-flex"
+				>
 					{c}
 				</Badge>
 			))}
 			{caps.length > 2 && (
-				<Badge variant="outline" className="hidden shrink-0 text-[9px] sm:inline-flex">
+				<Badge
+					variant="outline"
+					className="hidden shrink-0 text-[9px] sm:inline-flex"
+				>
 					+{caps.length - 2}
 				</Badge>
 			)}
@@ -122,6 +130,15 @@ function XaiOauthLogin({
 		"idle",
 	);
 	const [err, setErr] = useState<string | null>(null);
+	// The poll effect below intentionally keys off only [phase, data?.device_code] —
+	// it must NOT restart (and re-register a fresh setInterval) every time the
+	// parent re-renders and hands down a new `onAuthenticated` closure, or every
+	// poll cycle would be cut short. Refs give the effect the latest callback/t
+	// without needing either in its dependency list.
+	const onAuthenticatedRef = useRef(onAuthenticated);
+	onAuthenticatedRef.current = onAuthenticated;
+	const tRef = useRef(t);
+	tRef.current = t;
 
 	const begin = () => {
 		setErr(null);
@@ -130,19 +147,20 @@ function XaiOauthLogin({
 		start.mutate(undefined, {
 			onSuccess: (res) => {
 				if (!res.ok || !res.device_code) {
-					setErr(res.error ?? t("providers.xaiOauthFailed"));
+					setErr(res.error ?? tRef.current("providers.xaiOauthFailed"));
 					setPhase("error");
 					return;
 				}
 				setData(res);
 			},
 			onError: () => {
-				setErr(t("providers.xaiOauthFailed"));
+				setErr(tRef.current("providers.xaiOauthFailed"));
 				setPhase("error");
 			},
 		});
 	};
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: onAuthenticatedRef.current/tRef.current are refs (see their declaration above) read deliberately so this effect does NOT restart the setInterval on every parent re-render.
 	useEffect(() => {
 		if (phase !== "waiting" || !data?.device_code) return;
 		const ms = Math.max(1, data.interval ?? 5) * 1000;
@@ -154,7 +172,7 @@ function XaiOauthLogin({
 					if (res.status === "complete" && res.access_token) {
 						clearInterval(id);
 						setPhase("done");
-						onAuthenticated({
+						onAuthenticatedRef.current({
 							access_token: res.access_token,
 							refresh_token: res.refresh_token,
 							expires_at: res.expires_in
@@ -163,7 +181,7 @@ function XaiOauthLogin({
 						});
 					} else if (res.status === "expired" || res.status === "error") {
 						clearInterval(id);
-						setErr(res.error ?? t("providers.xaiOauthFailed"));
+						setErr(res.error ?? tRef.current("providers.xaiOauthFailed"));
 						setPhase("error");
 					}
 				},
@@ -173,8 +191,7 @@ function XaiOauthLogin({
 			cancelled = true;
 			clearInterval(id);
 		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [phase, data?.device_code]);
+	}, [phase, data?.device_code, poll]);
 
 	if (phase === "done") {
 		return (
@@ -240,10 +257,26 @@ function ProviderModelDialog({
 	const { save, saveBulk } = useModelMutations();
 	const discover = useDiscoverModels();
 	const editing = !!initial;
+	// "xai_oauth" isn't its own selectable dropdown row — it's the same "xAI (Grok)"
+	// entry as "xai" with a mode toggle, so an existing OAuth model normalizes its
+	// dropdown selection to "xai" here and flips the toggle on instead.
 	const [provider, setProvider] = useState<string>(
-		initial?.provider ?? providers[0]?.id ?? "azure_openai",
+		initial?.provider === "xai_oauth"
+			? "xai"
+			: (initial?.provider ?? providers[0]?.id ?? "azure_openai"),
 	);
-	const schema = providers.find((p) => p.id === provider) ?? providers[0];
+	const [xaiOauthMode, setXaiOauthMode] = useState(
+		initial?.provider === "xai_oauth",
+	);
+	// The dropdown only ever holds "xai"; the toggle decides which underlying
+	// provider (and therefore which schema/fields/auth_flow) actually gets saved.
+	const effectiveProvider =
+		provider === "xai" && xaiOauthMode ? "xai_oauth" : provider;
+	// Dropdown options hide "xai_oauth" — it's reached via the toggle, not a
+	// second list entry.
+	const providerOptions = providers.filter((p) => p.id !== "xai_oauth");
+	const schema =
+		providers.find((p) => p.id === effectiveProvider) ?? providers[0];
 	const [values, setValues] = useState<Record<string, string>>(() => {
 		const v: Record<string, string> = {};
 		if (initial) {
@@ -271,7 +304,9 @@ function ProviderModelDialog({
 	const [manualOpen, setManualOpen] = useState(false);
 	// Edit-mode only: the discovered entry the user picked to switch this model to,
 	// carried through to save so its label/capabilities update alongside deployment.
-	const [switchedModel, setSwitchedModel] = useState<DiscoveredModel | null>(null);
+	const [switchedModel, setSwitchedModel] = useState<DiscoveredModel | null>(
+		null,
+	);
 	// xai_oauth add-mode only: the refresh_token/expiry from a completed device-code
 	// login, carried through to the final save-bulk call (the access_token itself
 	// rides in `values.api_key`, same field a typed API key would use).
@@ -288,7 +323,7 @@ function ProviderModelDialog({
 		(f) => f.key !== "id" && f.key !== "deployment",
 	);
 	const credEntry = () => {
-		const entry: Record<string, unknown> = { provider };
+		const entry: Record<string, unknown> = { provider: effectiveProvider };
 		for (const f of credFields) {
 			const v = (values[f.key] ?? "").trim();
 			if (v) entry[f.key] = v;
@@ -332,7 +367,7 @@ function ProviderModelDialog({
 		setDiscovered(null);
 		setSelected(new Set());
 		discover.mutate(
-			{ provider, api_key: tokens.access_token },
+			{ provider: effectiveProvider, api_key: tokens.access_token },
 			{
 				onSuccess: (res) =>
 					res.ok && res.models
@@ -364,8 +399,10 @@ function ProviderModelDialog({
 		// xai_oauth: the access_token is already in `values.api_key` (credEntry picks
 		// it up like any other credential field), but the refresh_token/expiry aren't
 		// part of the provider's visible field schema — carry them separately.
-		if (oauthTokens?.refresh_token) entry.xai_refresh_token = oauthTokens.refresh_token;
-		if (oauthTokens?.expires_at) entry.xai_token_expires_at = oauthTokens.expires_at;
+		if (oauthTokens?.refresh_token)
+			entry.xai_refresh_token = oauthTokens.refresh_token;
+		if (oauthTokens?.expires_at)
+			entry.xai_token_expires_at = oauthTokens.expires_at;
 		entry.ids = [...selected];
 		const labels: Record<string, string> = {};
 		const capabilities: Record<string, string[]> = {};
@@ -398,7 +435,7 @@ function ProviderModelDialog({
 
 	// Manual entry (edit mode, or the add-mode fallback): the classic full form.
 	const onSaveManual = () => {
-		const entry: Record<string, unknown> = { provider };
+		const entry: Record<string, unknown> = { provider: effectiveProvider };
 		for (const f of schema?.fields ?? []) {
 			const val = (values[f.key] ?? "").trim();
 			if (val) entry[f.key] = val;
@@ -469,7 +506,14 @@ function ProviderModelDialog({
 				<div className="space-y-3">
 					<div className="space-y-1.5">
 						<Label htmlFor="prov">{t("providers.provider")}</Label>
-						<Select value={provider} onValueChange={(v) => v && setProvider(v)}>
+						<Select
+							value={provider}
+							onValueChange={(v) => {
+								if (!v) return;
+								setProvider(v);
+								if (v !== "xai") setXaiOauthMode(false);
+							}}
+						>
 							<SelectTrigger id="prov" className="w-full">
 								<SelectValue />
 							</SelectTrigger>
@@ -480,7 +524,7 @@ function ProviderModelDialog({
 							    mode, where the selected provider often isn't first). Anchoring below
 							    the trigger instead keeps it in the same place every time. */}
 							<SelectContent alignItemWithTrigger={false}>
-								{providers.map((p) => (
+								{providerOptions.map((p) => (
 									<SelectItem key={p.id} value={p.id}>
 										{p.label}
 									</SelectItem>
@@ -488,6 +532,28 @@ function ProviderModelDialog({
 							</SelectContent>
 						</Select>
 					</div>
+
+					{/* xAI's OAuth device-code login is a mode of the same provider, not a
+					    separate catalog entry — toggling it swaps the schema/fields (and, in
+					    add-mode, the credential-form vs. login-widget view) without a second
+					    "xAI Grok OAuth" row in the dropdown. */}
+					{provider === "xai" && (
+						<div className="flex items-center justify-between gap-3 rounded-md border p-3">
+							<div className="space-y-0.5">
+								<Label htmlFor="xai-oauth-toggle">
+									{t("providers.xaiUseOauth")}
+								</Label>
+								<p className="text-xs text-muted-foreground">
+									{t("providers.xaiUseOauthHint")}
+								</p>
+							</div>
+							<Switch
+								id="xai-oauth-toggle"
+								checked={xaiOauthMode}
+								onCheckedChange={setXaiOauthMode}
+							/>
+						</div>
+					)}
 
 					{editing ? (
 						// ── Edit: classic full form + optional fetch-and-switch ────────

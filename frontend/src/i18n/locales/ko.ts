@@ -188,6 +188,9 @@ export const ko: Resources = {
 		xaiOauthWaiting: "승인 대기 중…",
 		xaiOauthSuccess: "로그인됨 — 모델을 가져오는 중…",
 		xaiOauthFailed: "xAI 로그인 실패",
+		xaiUseOauth: "대신 OAuth 로그인 사용",
+		xaiUseOauthHint:
+			"API 키 대신 SuperGrok / X Premium+ 구독으로 로그인합니다.",
 	},
 	model: {
 		selectModel: "모델 선택",

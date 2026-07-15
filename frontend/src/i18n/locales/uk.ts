@@ -190,10 +190,14 @@ export const uk: Resources = {
 		capabilities: "Можливості",
 		xaiOauthLogin: "Увійти через xAI",
 		xaiOauthStarting: "Запуск…",
-		xaiOauthInstructions: "Перейдіть за посиланням і введіть код для авторизації:",
+		xaiOauthInstructions:
+			"Перейдіть за посиланням і введіть код для авторизації:",
 		xaiOauthWaiting: "Очікування авторизації…",
 		xaiOauthSuccess: "Вхід виконано — отримання ваших моделей…",
 		xaiOauthFailed: "Не вдалося увійти через xAI",
+		xaiUseOauth: "Використати вхід через OAuth",
+		xaiUseOauthHint:
+			"Увійдіть за допомогою підписки SuperGrok / X Premium+ замість ключа API.",
 	},
 	model: {
 		selectModel: "Вибрати модель",

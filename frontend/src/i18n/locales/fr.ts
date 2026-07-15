@@ -129,10 +129,14 @@ export const fr: Resources = {
 		capabilities: "Capacités",
 		xaiOauthLogin: "Se connecter avec xAI",
 		xaiOauthStarting: "Démarrage…",
-		xaiOauthInstructions: "Visitez ce lien et saisissez le code pour autoriser :",
+		xaiOauthInstructions:
+			"Visitez ce lien et saisissez le code pour autoriser :",
 		xaiOauthWaiting: "En attente d'autorisation…",
 		xaiOauthSuccess: "Connecté — récupération de vos modèles…",
 		xaiOauthFailed: "Échec de la connexion à xAI",
+		xaiUseOauth: "Utiliser la connexion OAuth à la place",
+		xaiUseOauthHint:
+			"Connectez-vous avec un abonnement SuperGrok / X Premium+ au lieu d'une clé API.",
 	},
 	model: {
 		selectModel: "Choisir un modèle",

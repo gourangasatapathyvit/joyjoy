@@ -191,6 +191,10 @@ function wireToUI(wire: SessionMessageWire[]): UIMessage[] {
 			});
 		} else if (m.role === "assistant") {
 			const parts: UIPart[] = [];
+			// Mirror appendReasoning's live ordering (reasoning unshifted ahead of
+			// text/tool-call parts) so a reloaded message renders identically to a
+			// freshly-streamed one instead of silently losing its Reasoning box.
+			if (m.reasoning) parts.push({ type: "reasoning", text: m.reasoning });
 			if (m.content) parts.push({ type: "text", text: m.content });
 			for (const tc of m.tool_calls ?? []) {
 				toolLoc.set(tc.id, { mi: out.length, pi: parts.length });

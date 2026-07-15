@@ -190,10 +190,14 @@ export const hu: Resources = {
 		capabilities: "Képességek",
 		xaiOauthLogin: "Bejelentkezés xAI-vel",
 		xaiOauthStarting: "Indítás…",
-		xaiOauthInstructions: "Látogasson el erre a linkre, és adja meg a kódot az engedélyezéshez:",
+		xaiOauthInstructions:
+			"Látogasson el erre a linkre, és adja meg a kódot az engedélyezéshez:",
 		xaiOauthWaiting: "Várakozás az engedélyezésre…",
 		xaiOauthSuccess: "Bejelentkezve — modellek lekérése…",
 		xaiOauthFailed: "Az xAI bejelentkezés sikertelen",
+		xaiUseOauth: "OAuth bejelentkezés használata helyette",
+		xaiUseOauthHint:
+			"Jelentkezzen be SuperGrok / X Premium+ előfizetéssel API-kulcs helyett.",
 	},
 	model: {
 		selectModel: "Modell kiválasztása",

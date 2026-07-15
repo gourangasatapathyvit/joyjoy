@@ -194,6 +194,9 @@ export const pt: Resources = {
 		xaiOauthWaiting: "Aguardando autorização…",
 		xaiOauthSuccess: "Conectado — buscando seus modelos…",
 		xaiOauthFailed: "Falha no login do xAI",
+		xaiUseOauth: "Usar login OAuth em vez disso",
+		xaiUseOauthHint:
+			"Faça login com uma assinatura SuperGrok / X Premium+ em vez de uma chave de API.",
 	},
 	model: {
 		selectModel: "Selecionar modelo",

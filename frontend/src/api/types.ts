@@ -242,6 +242,7 @@ export interface SessionMessageWire {
 	id?: string;
 	role: "user" | "assistant" | "tool" | "system";
 	content: string;
+	reasoning?: string;
 	tool_calls?: { id: string; name: string; args: Record<string, unknown> }[];
 	tool_call_id?: string;
 	name?: string;

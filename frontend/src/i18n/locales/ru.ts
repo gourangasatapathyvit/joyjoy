@@ -194,6 +194,9 @@ export const ru: Resources = {
 		xaiOauthWaiting: "Ожидание авторизации…",
 		xaiOauthSuccess: "Вход выполнен — загрузка ваших моделей…",
 		xaiOauthFailed: "Не удалось войти через xAI",
+		xaiUseOauth: "Использовать вход через OAuth",
+		xaiUseOauthHint:
+			"Войдите с помощью подписки SuperGrok / X Premium+ вместо ключа API.",
 	},
 	model: {
 		selectModel: "Выбрать модель",

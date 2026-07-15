@@ -191,10 +191,14 @@ export const ga: Resources = {
 		capabilities: "Cumais",
 		xaiOauthLogin: "Logáil isteach le xAI",
 		xaiOauthStarting: "Ag tosú…",
-		xaiOauthInstructions: "Tabhair cuairt ar an nasc seo agus cuir isteach an cód chun údarú a dhéanamh:",
+		xaiOauthInstructions:
+			"Tabhair cuairt ar an nasc seo agus cuir isteach an cód chun údarú a dhéanamh:",
 		xaiOauthWaiting: "Ag fanacht le húdarú…",
 		xaiOauthSuccess: "Logáilte isteach — ag fáil do mhúnlaí…",
 		xaiOauthFailed: "Theip ar logáil isteach xAI",
+		xaiUseOauth: "Úsáid logáil isteach OAuth ina ionad sin",
+		xaiUseOauthHint:
+			"Logáil isteach le síntiús SuperGrok / X Premium+ in ionad eochair API.",
 	},
 	model: {
 		selectModel: "Roghnaigh samhail",
