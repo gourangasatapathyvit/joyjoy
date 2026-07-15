@@ -8,6 +8,7 @@ import { useUiSettings, useUpdateUiSettings } from "@/api/usersettings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useChatStore } from "@/store/chat";
 import { Field } from "./Field";
 
 // Profile = account identity (display name + email persisted to the backend),
@@ -74,7 +75,11 @@ export function ProfilePane() {
 
 	const onLogout = async () => {
 		await authApi.logout();
-		await qc.invalidateQueries({ queryKey: ["me"] });
+		// Mint a fresh thread id (clears the persisted "active thread") and drop every
+		// cached query — otherwise the next login on this browser (a different user)
+		// would inherit this user's thread_id/workspace and any cached session/model data.
+		useChatStore.getState().newChat();
+		qc.clear();
 		navigate("/signin", { replace: true });
 	};
 

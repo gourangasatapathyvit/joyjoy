@@ -27,6 +27,14 @@ from app.core.timeutils import to_epoch, utcnow
 logger = logging.getLogger("joyjoy.sessions")
 
 
+def _mint_workspace_id(user_id: str, thread_id: str) -> str:
+    """A structurally per-user workspace key for a BRAND-NEW session. ``thread_id``
+    alone is already globally unique (a UUID), so this isn't needed to avoid
+    collisions — it's so the sandbox volume name itself is namespaced by user,
+    independent of any ownership check elsewhere ever being correct."""
+    return f"{user_id}-{thread_id}"
+
+
 def _title_from_text(text: str) -> str:
     first = ""
     for line in (text or "").splitlines():
@@ -82,7 +90,7 @@ async def record_session(
                 if first_text and (not row.title or row.title == "New chat"):
                     row.title = _title_from_text(first_text)
                 if not row.workspace_path:
-                    row.workspace_path = workspace_id or thread_id
+                    row.workspace_path = workspace_id or _mint_workspace_id(user_id, thread_id)
             else:
                 s.add(
                     Session(
@@ -92,7 +100,7 @@ async def record_session(
                         default_model=model or "",
                         reasoning=reasoning or "off",
                         auto_approve=bool(auto_approve),
-                        workspace_path=workspace_id or thread_id,
+                        workspace_path=workspace_id or _mint_workspace_id(user_id, thread_id),
                     )
                 )
     except Exception:
@@ -101,17 +109,29 @@ async def record_session(
 
 async def workspace_id_for(user_id: str, thread_id: str) -> str:
     """The workspace-dir key for a thread: the session's stored ``workspace_path``,
-    else the ``thread_id`` itself (so a brand-new chat gets its own workspace)."""
+    else a freshly-minted per-user id (so a brand-new chat gets its own workspace).
+
+    Never returns a workspace another user owns: a missing/empty ``thread_id``, or
+    one that resolves to a DIFFERENT user's session, falls back to this user's own
+    "default" workspace instead of a value that could be shared across users."""
+    fallback = f"default-{user_id}"
     if not thread_id:
-        return "default"
+        return fallback
     try:
         async with db_session() as s:
             row = await s.get(Session, thread_id)
-            if row and row.user_id == str(user_id):
-                return row.workspace_path or thread_id
+            if row:
+                if row.user_id == str(user_id):
+                    return row.workspace_path or _mint_workspace_id(user_id, thread_id)
+                logger.warning(
+                    "workspace_id_for: thread_id %s belongs to a different user; "
+                    "refusing to reuse its workspace",
+                    thread_id,
+                )
+                return fallback
     except Exception:
         logger.debug("workspace_id_for failed", exc_info=True)
-    return thread_id
+    return _mint_workspace_id(user_id, thread_id)
 
 
 async def fork_session(user_id: str, src_thread_id: str, *, title: str | None = None) -> dict:
@@ -164,7 +184,7 @@ async def create_session(user_id: str, title: str | None = None) -> dict:
             thread_id=thread_id,
             user_id=str(user_id),
             title=(title or "").strip()[:120] or "New chat",
-            workspace_path=thread_id,
+            workspace_path=_mint_workspace_id(user_id, thread_id),
         )
         s.add(row)
         await s.flush()
