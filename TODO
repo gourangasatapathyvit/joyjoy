@@ -1,0 +1,25 @@
+TODO
+====
+
+- Refactor model providers: use dedicated LangChain provider packages instead of
+  routing everything through the generic "openai-compatible" ChatOpenAI + base_url
+  path. Start with NVIDIA:
+    - Add `langchain-nvidia-ai-endpoints` (ChatNVIDIA) as its own first-class
+      provider (separate from the generic openai-compatible bucket it's lumped
+      into today) — see backend/app/agent/agent.py (_build_llm / ChatOpenAI usage).
+    - Use `ChatNVIDIA.get_available_models()` + `.supports_tools` during model
+      discovery (discover_models / _discover_* adapters in agent.py) instead of
+      empirically trial-and-erroring which models handle tool calling reliably —
+      NVIDIA models can silently degrade to leaking raw `<tool_call>`/`<function=...>`
+      text instead of a real tool_calls response under realistic multi-tool +
+      system-prompt requests (confirmed with qwen/qwen3.5-122b-a10b: returns an
+      EMPTY completion under that combo despite "working" on a simple smoke test).
+    - Uses its own `NVIDIA_API_KEY` env convention, distinct from a generic
+      OpenAI-style key — factor that into the provider config schema.
+
+  General policy going forward: whenever a provider has an official LangChain
+  integration package (see https://docs.langchain.com/oss/python/integrations/providers/overview),
+  prefer adding it as its own proper provider rather than defaulting new
+  providers to the generic openai-compatible path. Simplifies capability
+  detection (tool-calling, structured output, vision, etc.) since the dedicated
+  package usually exposes that metadata directly instead of us hand-verifying it.
