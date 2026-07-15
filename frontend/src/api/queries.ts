@@ -144,6 +144,16 @@ export function useDiscoverModels() {
 			dataApi.discoverModels(entry),
 	});
 }
+// xAI Grok device-code OAuth login: one `start`, then `poll` called repeatedly
+// (each `mutate()` is a single poll attempt) on the widget's own interval timer.
+export function useXaiOauthStart() {
+	return useMutation({ mutationFn: () => dataApi.xaiOauthStart() });
+}
+export function useXaiOauthPoll() {
+	return useMutation({
+		mutationFn: (device_code: string) => dataApi.xaiOauthPoll(device_code),
+	});
+}
 export function useWriteMemory() {
 	const qc = useQueryClient();
 	return useMutation({

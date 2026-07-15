@@ -183,6 +183,12 @@ export const en = {
 		addSelected: "Add selected ({{count}})",
 		enterManually: "Enter a model ID manually",
 		capabilities: "Capabilities",
+		xaiOauthLogin: "Log in with xAI",
+		xaiOauthStarting: "Starting…",
+		xaiOauthInstructions: "Visit this link and enter the code to authorize:",
+		xaiOauthWaiting: "Waiting for authorization…",
+		xaiOauthSuccess: "Logged in — fetching your models…",
+		xaiOauthFailed: "xAI login failed",
 	},
 	model: {
 		selectModel: "Select model",

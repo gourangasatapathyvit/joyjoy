@@ -188,6 +188,12 @@ export const uk: Resources = {
 		addSelected: "Додати вибрані ({{count}})",
 		enterManually: "Ввести ідентифікатор моделі вручну",
 		capabilities: "Можливості",
+		xaiOauthLogin: "Увійти через xAI",
+		xaiOauthStarting: "Запуск…",
+		xaiOauthInstructions: "Перейдіть за посиланням і введіть код для авторизації:",
+		xaiOauthWaiting: "Очікування авторизації…",
+		xaiOauthSuccess: "Вхід виконано — отримання ваших моделей…",
+		xaiOauthFailed: "Не вдалося увійти через xAI",
 	},
 	model: {
 		selectModel: "Вибрати модель",

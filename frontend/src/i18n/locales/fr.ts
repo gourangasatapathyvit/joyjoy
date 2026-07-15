@@ -127,6 +127,12 @@ export const fr: Resources = {
 		addSelected: "Ajouter la sélection ({{count}})",
 		enterManually: "Saisir un ID de modèle manuellement",
 		capabilities: "Capacités",
+		xaiOauthLogin: "Se connecter avec xAI",
+		xaiOauthStarting: "Démarrage…",
+		xaiOauthInstructions: "Visitez ce lien et saisissez le code pour autoriser :",
+		xaiOauthWaiting: "En attente d'autorisation…",
+		xaiOauthSuccess: "Connecté — récupération de vos modèles…",
+		xaiOauthFailed: "Échec de la connexion à xAI",
 	},
 	model: {
 		selectModel: "Choisir un modèle",

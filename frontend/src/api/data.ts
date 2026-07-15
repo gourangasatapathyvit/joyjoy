@@ -12,6 +12,8 @@ import type {
 	Ok,
 	Skill,
 	SkillContent,
+	XaiOauthPollResponse,
+	XaiOauthStartResponse,
 } from "@/api/types";
 
 // Typed wrappers over the backend /v1 data endpoints. All are per-user (the dev
@@ -106,6 +108,18 @@ export const dataApi = {
 		http<ModelTestResult>("/v1/models/config/test", {
 			method: "POST",
 			body: JSON.stringify({ id }),
+		}),
+	// xAI Grok device-code OAuth login (RFC 8628) — start, then poll on the
+	// returned `interval` until status is no longer "pending".
+	xaiOauthStart: () =>
+		http<XaiOauthStartResponse>("/v1/models/config/xai-oauth/start", {
+			method: "POST",
+			body: JSON.stringify({}),
+		}),
+	xaiOauthPoll: (device_code: string) =>
+		http<XaiOauthPollResponse>("/v1/models/config/xai-oauth/poll", {
+			method: "POST",
+			body: JSON.stringify({ device_code }),
 		}),
 
 	memory: () => http<Memory>("/v1/memory"),

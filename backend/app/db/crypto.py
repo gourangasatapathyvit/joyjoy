@@ -18,7 +18,7 @@ from cryptography.fernet import Fernet, InvalidToken
 logger = logging.getLogger("joyjoy.crypto")
 
 # Secret keys that must never be persisted in the clear.
-SECRET_FIELDS = ("api_key", "aws_secret_access_key", "aws_session_token")
+SECRET_FIELDS = ("api_key", "aws_secret_access_key", "aws_session_token", "xai_refresh_token")
 
 _PREFIX = "enc:"
 _fernet: Fernet | None = None

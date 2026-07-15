@@ -185,6 +185,12 @@ export const tr: Resources = {
 		addSelected: "Seçilenleri ekle ({{count}})",
 		enterManually: "Model kimliğini elle gir",
 		capabilities: "Yetenekler",
+		xaiOauthLogin: "xAI ile giriş yap",
+		xaiOauthStarting: "Başlatılıyor…",
+		xaiOauthInstructions: "Bu bağlantıyı ziyaret edin ve yetkilendirmek için kodu girin:",
+		xaiOauthWaiting: "Yetkilendirme bekleniyor…",
+		xaiOauthSuccess: "Giriş yapıldı — modelleriniz alınıyor…",
+		xaiOauthFailed: "xAI girişi başarısız oldu",
 	},
 	model: {
 		selectModel: "Model seç",

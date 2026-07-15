@@ -186,6 +186,12 @@ export const af: Resources = {
 		addSelected: "Voeg gekose by ({{count}})",
 		enterManually: "Voer 'n model-ID handmatig in",
 		capabilities: "Vermoëns",
+		xaiOauthLogin: "Meld aan met xAI",
+		xaiOauthStarting: "Begin…",
+		xaiOauthInstructions: "Besoek hierdie skakel en voer die kode in om te magtig:",
+		xaiOauthWaiting: "Wag vir magtiging…",
+		xaiOauthSuccess: "Aangemeld — haal jou modelle op…",
+		xaiOauthFailed: "xAI-aanmelding het misluk",
 	},
 	model: {
 		selectModel: "Kies model",

@@ -186,6 +186,12 @@ export const ja: Resources = {
 		addSelected: "選択したものを追加 ({{count}})",
 		enterManually: "モデル ID を手動で入力",
 		capabilities: "機能",
+		xaiOauthLogin: "xAI でログイン",
+		xaiOauthStarting: "開始中…",
+		xaiOauthInstructions: "このリンクにアクセスし、コードを入力して承認してください：",
+		xaiOauthWaiting: "承認を待っています…",
+		xaiOauthSuccess: "ログインしました — モデルを取得中…",
+		xaiOauthFailed: "xAI へのログインに失敗しました",
 	},
 	model: {
 		selectModel: "モデルを選択",

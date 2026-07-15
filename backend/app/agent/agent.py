@@ -17,6 +17,7 @@ import asyncio
 import logging
 import os
 import re
+import time
 from pathlib import Path
 
 import httpx
@@ -30,11 +31,13 @@ from langchain_core.tools import StructuredTool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from langchain_openai import AzureChatOpenAI, ChatOpenAI
+from langchain_xai import ChatXAI
 from langgraph.runtime import get_runtime
 
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 
+from app.agent import xai_oauth
 from app.agent.middleware import agent_middleware
 from app.agent.agent_common import (
     _MCP_BLOB,
@@ -167,7 +170,85 @@ def model_supports_reasoning(spec: dict) -> bool:
         # reasoning-effort toggle without it actually doing anything would be worse
         # than not showing it. Flip this once that's wired.
         return False
+    if provider in (Provider.XAI, Provider.XAI_OAUTH):
+        # NOT every Grok model accepts a reasoning-effort param — unlike NVIDIA, xAI's
+        # API rejects it outright (HTTP 400) for models that don't support it, rather
+        # than silently ignoring it. This allowlist is a third-party-verified list of
+        # models confirmed to ACCEPT it (grok-4/grok-3/grok-code-fast-1 reject it and
+        # are deliberately excluded here). Verified against xAI's Responses API by a
+        # third party, not joyjoy's own ChatXAI (chat completions) surface directly —
+        # test_model's live probe (requires actual visible reasoning text, not just
+        # "no error") is the safety net if this heuristic is ever wrong for a model.
+        return any(k in blob for k in ("grok-3-mini", "grok-4.20-multi-agent", "grok-4.3", "grok-4.5"))
     return False
+
+
+# One asyncio.Lock per xai_oauth model id, so a refresh in flight for a given model
+# blocks any concurrent build for the SAME model rather than racing it — xAI rotates
+# the refresh token on every use, so two concurrent refreshes with the same (soon
+# stale) refresh_token would have one succeed and one 400.
+_xai_oauth_refresh_locks: dict[str, asyncio.Lock] = {}
+
+
+def _xai_oauth_refresh_lock(model_id: str) -> asyncio.Lock:
+    lock = _xai_oauth_refresh_locks.get(model_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _xai_oauth_refresh_locks[model_id] = lock
+    return lock
+
+
+async def _persist_xai_oauth_tokens(
+    user_id: str, model_id: str, access_token: str, refresh_token: str, expires_at: float | None
+) -> None:
+    """Persist rotated OAuth tokens back onto the model's row. xAI rotates the
+    refresh token on every use — the old one won't work a second time, so this MUST
+    happen before the next build for this model or it'll refresh with a dead token."""
+    async with db_session() as s:
+        row = await s.scalar(
+            select(UserModel).where(UserModel.user_id == str(user_id), UserModel.model_id == model_id)
+        )
+        if row is None:
+            return
+        cur = dict(row.settings or {})
+        cur["api_key"] = encrypt(access_token)
+        cur["xai_refresh_token"] = encrypt(refresh_token)
+        cur["xai_token_expires_at"] = expires_at
+        row.settings = cur  # reassign (not in-place) so SQLAlchemy flags the JSON column dirty
+    _invalidate_user_cache(user_id)
+
+
+async def _ensure_xai_oauth_fresh(settings: Settings, user_id: str, model_id: str, spec: dict) -> dict:
+    """Refresh the stored xAI OAuth access token if it's expiring, persisting the
+    rotated tokens so this build AND any concurrent one see the fresh values. Returns
+    the (possibly updated) spec; never raises — a refresh failure just means the
+    ensuing API call fails with xAI's own clear auth error instead of one from here."""
+    access_token = spec.get("api_key") or ""
+    refresh_token = spec.get("xai_refresh_token") or ""
+    if not xai_oauth.is_expiring(spec.get("xai_token_expires_at"), access_token):
+        return spec
+    if not refresh_token:
+        return spec
+    async with _xai_oauth_refresh_lock(model_id):
+        # Someone else may have refreshed while we waited for the lock — re-check
+        # against a fresh read before spending (and rotating) the refresh token again.
+        fresh_specs = await merged_model_specs(settings, user_id)
+        fresh = fresh_specs.get(model_id) or spec
+        if not xai_oauth.is_expiring(fresh.get("xai_token_expires_at"), fresh.get("api_key")):
+            return fresh
+        try:
+            result = await xai_oauth.refresh_access_token(fresh.get("xai_refresh_token") or refresh_token)
+        except Exception:
+            logger.warning("xai_oauth token refresh failed for model=%s", model_id, exc_info=True)
+            return spec
+        new_access = result.get("access_token") or ""
+        if not new_access:
+            return spec
+        new_refresh = result.get("refresh_token") or ""
+        expires_in = result.get("expires_in")
+        new_expires_at = (time.time() + float(expires_in)) if expires_in else None
+        await _persist_xai_oauth_tokens(user_id, model_id, new_access, new_refresh, new_expires_at)
+        return {**fresh, "api_key": new_access, "xai_refresh_token": new_refresh, "xai_token_expires_at": new_expires_at}
 
 
 async def build_model_for(settings: Settings, model_id: str, uid: str | None = None, reasoning=None, *, force_reasoning: bool = False) -> BaseChatModel:
@@ -184,6 +265,12 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
       * ``gemini`` — ``ChatGoogleGenerativeAI`` (Google AI Studio API key).
       * ``nvidia`` — ``ChatNVIDIA`` against NVIDIA NIM (integrate.api.nvidia.com by
         default, or a self-hosted NIM via ``endpoint``).
+      * ``xai`` — ``ChatXAI`` (Grok) with a plain API key. Reasoning effort is only
+        sent for models on an allowlist (model_supports_reasoning) — xAI 400s on an
+        unsupported model instead of ignoring the param.
+      * ``xai_oauth`` — ``ChatXAI`` authenticated via a SuperGrok / X Premium+ OAuth
+        device-code login instead of a metered key (`xai_oauth.py`); refreshed
+        in-place here when the stored access token is expiring.
 
     ``force_reasoning`` applies the requested effort even when the support heuristic
     says no — only used by ``test_model``'s capability probe so it can DETECT support
@@ -261,6 +348,34 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
         if spec.get("max_tokens"):
             kwargs["max_completion_tokens"] = spec["max_tokens"]
         return ChatNVIDIA(**kwargs)
+
+    if provider == Provider.XAI:
+        # xAI Grok. `xai_api_base` (NOT `base_url` — ChatXAI's field name; verified
+        # against the installed package) defaults to api.x.ai when omitted.
+        kwargs = {"model": spec["deployment"], "api_key": spec["api_key"]}
+        if spec.get("endpoint"):
+            kwargs["xai_api_base"] = spec["endpoint"]
+        if spec.get("max_tokens"):
+            kwargs["max_tokens"] = spec["max_tokens"]
+        if effort:
+            # Only reached when model_supports_reasoning's allowlist matched — sending
+            # this to a Grok model that doesn't accept it gets a hard HTTP 400 from
+            # xAI (unlike NVIDIA, which just silently ignores an unknown param).
+            kwargs["reasoning_effort"] = "high" if effort in ("high", "extra_high") else ("low" if effort in ("minimal", "low") else "medium")
+        return ChatXAI(**kwargs)
+
+    if provider == Provider.XAI_OAUTH:
+        # Grok via a SuperGrok / X Premium+ subscription instead of a metered API key.
+        # The stored "api_key" IS the OAuth access_token — xAI's API takes it directly
+        # as the bearer, no separate token exchange (same as every reference OAuth
+        # client for this provider). Refresh it here if it's expiring before building.
+        fresh = await _ensure_xai_oauth_fresh(settings, str(uid or DEFAULT_USER_ID), model_id, spec)
+        kwargs = {"model": fresh["deployment"], "api_key": fresh["api_key"]}
+        if fresh.get("max_tokens"):
+            kwargs["max_tokens"] = fresh["max_tokens"]
+        if effort:
+            kwargs["reasoning_effort"] = "high" if effort in ("high", "extra_high") else ("low" if effort in ("minimal", "low") else "medium")
+        return ChatXAI(**kwargs)
 
     if provider == Provider.GEMINI:
         kwargs = {"model": spec["deployment"], "google_api_key": spec["api_key"]}
@@ -486,15 +601,21 @@ async def describe_providers() -> list[dict]:
     """Provider field-schemas for the Providers-tab add/edit form — read from the
     ``global_providers`` table (the single source of truth, also what the seed
     populates). Each row's ``config_schema`` JSON holds the ``fields`` list the UI
-    renders; ``name``/``label``/``sort_order`` give the id, heading, and order."""
+    renders; ``name``/``label``/``sort_order`` give the id, heading, and order.
+    ``auth_flow`` (when set, e.g. "xai_device_code") tells the UI to render a
+    stateful login widget instead of the plain field form for that provider."""
     async with db_session() as s:
         rows = (
             await s.scalars(select(GlobalProvider).order_by(GlobalProvider.sort_order))
         ).all()
-    return [
-        {"id": r.name, "label": r.label, "fields": (r.config_schema or {}).get("fields", [])}
-        for r in rows
-    ]
+    out = []
+    for r in rows:
+        cs = r.config_schema or {}
+        entry = {"id": r.name, "label": r.label, "fields": cs.get("fields", [])}
+        if cs.get("auth_flow"):
+            entry["auth_flow"] = cs["auth_flow"]
+        out.append(entry)
+    return out
 
 # Secret keys to mask in API responses = the SAME set db.crypto encrypts at rest.
 _MASK = "••••"  # ••••
@@ -615,7 +736,7 @@ def _validate_model_entry(e: dict) -> str | None:
         return "api_version is required for Azure OpenAI"
     if p == Provider.BEDROCK and not e.get("deployment"):
         return "Bedrock model id (deployment) is required"
-    if p in (Provider.OPENAI, Provider.GEMINI, Provider.NVIDIA):
+    if p in (Provider.OPENAI, Provider.GEMINI, Provider.NVIDIA, Provider.XAI, Provider.XAI_OAUTH):
         if not e.get("deployment"):
             return "model name (deployment) is required"
         if not e.get("api_key"):
@@ -688,6 +809,15 @@ async def save_user_model(settings, user_id, raw: dict) -> dict:
         if mt not in (None, ""):
             try:
                 detail["max_tokens"] = int(mt)
+            except (TypeError, ValueError):
+                pass
+        # xai_oauth token expiry (epoch seconds) — a number, not a secret; kept as its
+        # own field alongside xai_refresh_token (which IS in SECRET_FIELDS, encrypted
+        # by the loop below).
+        exp = raw.get("xai_token_expires_at")
+        if exp not in (None, ""):
+            try:
+                detail["xai_token_expires_at"] = float(exp)
             except (TypeError, ValueError):
                 pass
         # Secrets: a fresh (non-masked) value is encrypted; blank/masked keeps the prior.
@@ -877,6 +1007,21 @@ async def _discover_nvidia(creds: dict) -> list[dict]:
     return sorted(out, key=lambda x: x["id"])
 
 
+async def _discover_xai(creds: dict) -> list[dict]:
+    # xAI's /v1/models is OpenAI-compatible — same shape as _discover_openai. Used for
+    # BOTH `xai` (creds["api_key"] = a real API key) and `xai_oauth` (creds["api_key"]
+    # = the OAuth access_token, which xAI accepts as a bearer directly, same as an
+    # API key — no separate token exchange).
+    base = (creds.get("endpoint") or "").strip().rstrip("/") or "https://api.x.ai/v1"
+    key = (creds.get("api_key") or "").strip()
+    async with httpx.AsyncClient(timeout=_DISCOVER_TIMEOUT_S) as c:
+        r = await c.get(f"{base}/models", headers={"Authorization": f"Bearer {key}"})
+        r.raise_for_status()
+        data = r.json().get("data", [])
+    out = [{"id": m["id"], "capabilities": ["chat"]} for m in data if m.get("id")]
+    return sorted(out, key=lambda x: x["id"])
+
+
 def _discover_bedrock_sync(creds: dict) -> list[dict]:
     # boto3 is synchronous; discover_models runs this in a thread. UNTESTED (no creds).
     import boto3
@@ -937,6 +1082,8 @@ async def discover_models(settings: Settings, user_id: str, raw: dict) -> dict:
         Provider.ANTHROPIC: _discover_anthropic,
         Provider.AZURE_OPENAI: _discover_azure_openai,
         Provider.NVIDIA: _discover_nvidia,
+        Provider.XAI: _discover_xai,
+        Provider.XAI_OAUTH: _discover_xai,
     }
     try:
         if provider == Provider.BEDROCK:
@@ -965,6 +1112,7 @@ async def save_user_models_bulk(settings, user_id, raw: dict) -> dict:
         k: raw[k] for k in (
             "endpoint", "api_version", "region", "api_key",
             "aws_access_key_id", "aws_secret_access_key", "aws_session_token", "max_tokens",
+            "xai_refresh_token", "xai_token_expires_at",
         )
         if raw.get(k) not in (None, "")
     }

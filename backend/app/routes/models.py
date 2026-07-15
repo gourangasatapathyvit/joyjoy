@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from app.agent import xai_oauth
 from app.agent.agent import (
     delete_user_model,
     describe_models,
@@ -96,3 +97,42 @@ async def models_config_test(request: Request):
     body = await json_body(request)
     model_id = body.get("id") or body.get("model")
     return JSONResponse(await test_model(settings, uid, model_id))
+
+
+@router.post("/v1/models/config/xai-oauth/start")
+async def xai_oauth_start(request: Request):
+    """Kick off the xAI Grok device-code login (RFC 8628) — the Providers tab shows
+    the returned ``user_code``/``verification_uri_complete`` and starts polling."""
+    verify_gateway_key(request, settings)
+    resolve_user_id(request, settings)  # auth-gated, but the flow itself isn't per-user yet
+    try:
+        data = await xai_oauth.request_device_code()
+        return JSONResponse({
+            "ok": True,
+            "device_code": data.get("device_code"),
+            "user_code": data.get("user_code"),
+            "verification_uri": data.get("verification_uri"),
+            "verification_uri_complete": data.get("verification_uri_complete"),
+            "interval": data.get("interval") or 5,
+            "expires_in": data.get("expires_in"),
+        })
+    except Exception as e:  # noqa: BLE001 — surface any failure to the UI
+        return JSONResponse({"ok": False, "error": f"could not start xAI login: {e}"})
+
+
+@router.post("/v1/models/config/xai-oauth/poll")
+async def xai_oauth_poll(request: Request):
+    """One poll attempt against the device-code token endpoint — the frontend calls
+    this on its own ``interval`` timer rather than the backend blocking a connection
+    open for the whole login. On ``"complete"`` the tokens are returned to the
+    frontend so the normal discover → select → save-bulk flow can run next."""
+    verify_gateway_key(request, settings)
+    resolve_user_id(request, settings)
+    body = await json_body(request)
+    device_code = str(body.get("device_code") or "").strip()
+    if not device_code:
+        return JSONResponse({"status": "error", "error": "missing device_code"})
+    try:
+        return JSONResponse(await xai_oauth.poll_device_token(device_code))
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"status": "error", "error": str(e)[:300]})

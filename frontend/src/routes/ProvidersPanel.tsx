@@ -1,16 +1,19 @@
 import { Check, ChevronDown, Plus, Search } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	useDiscoverModels,
 	useModelMutations,
 	useModelsConfig,
+	useXaiOauthPoll,
+	useXaiOauthStart,
 } from "@/api/queries";
 import type {
 	DiscoveredModel,
 	ModelConfigItem,
 	ModelTestResult,
 	ProviderType,
+	XaiOauthStartResponse,
 } from "@/api/types";
 import { PanelLayout } from "@/components/layout/PanelLayout";
 import { Badge } from "@/components/ui/badge";
@@ -98,6 +101,127 @@ function DiscoveredRow({
 	);
 }
 
+// xAI Grok device-code OAuth login (RFC 8628) — replaces the credential field
+// form for the "xai_oauth" provider. Start → show the user_code + verification
+// link → poll on the returned interval until the login completes, then hand the
+// tokens up so the caller can run the normal discover/select/save-bulk flow.
+function XaiOauthLogin({
+	onAuthenticated,
+}: {
+	onAuthenticated: (tokens: {
+		access_token: string;
+		refresh_token?: string;
+		expires_at?: number;
+	}) => void;
+}) {
+	const { t } = useTranslation();
+	const start = useXaiOauthStart();
+	const poll = useXaiOauthPoll();
+	const [data, setData] = useState<XaiOauthStartResponse | null>(null);
+	const [phase, setPhase] = useState<"idle" | "waiting" | "done" | "error">(
+		"idle",
+	);
+	const [err, setErr] = useState<string | null>(null);
+
+	const begin = () => {
+		setErr(null);
+		setData(null);
+		setPhase("waiting");
+		start.mutate(undefined, {
+			onSuccess: (res) => {
+				if (!res.ok || !res.device_code) {
+					setErr(res.error ?? t("providers.xaiOauthFailed"));
+					setPhase("error");
+					return;
+				}
+				setData(res);
+			},
+			onError: () => {
+				setErr(t("providers.xaiOauthFailed"));
+				setPhase("error");
+			},
+		});
+	};
+
+	useEffect(() => {
+		if (phase !== "waiting" || !data?.device_code) return;
+		const ms = Math.max(1, data.interval ?? 5) * 1000;
+		let cancelled = false;
+		const id = setInterval(() => {
+			poll.mutate(data.device_code as string, {
+				onSuccess: (res) => {
+					if (cancelled) return;
+					if (res.status === "complete" && res.access_token) {
+						clearInterval(id);
+						setPhase("done");
+						onAuthenticated({
+							access_token: res.access_token,
+							refresh_token: res.refresh_token,
+							expires_at: res.expires_in
+								? Date.now() / 1000 + res.expires_in
+								: undefined,
+						});
+					} else if (res.status === "expired" || res.status === "error") {
+						clearInterval(id);
+						setErr(res.error ?? t("providers.xaiOauthFailed"));
+						setPhase("error");
+					}
+				},
+			});
+		}, ms);
+		return () => {
+			cancelled = true;
+			clearInterval(id);
+		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [phase, data?.device_code]);
+
+	if (phase === "done") {
+		return (
+			<p className="text-xs text-muted-foreground">
+				{t("providers.xaiOauthSuccess")}
+			</p>
+		);
+	}
+
+	return (
+		<div className="space-y-3 rounded-md border p-3">
+			{phase === "waiting" && data ? (
+				<div className="space-y-2 text-center">
+					<p className="text-xs text-muted-foreground">
+						{t("providers.xaiOauthInstructions")}
+					</p>
+					<p className="font-mono text-lg font-semibold tracking-widest">
+						{data.user_code}
+					</p>
+					<a
+						href={data.verification_uri_complete || data.verification_uri}
+						target="_blank"
+						rel="noreferrer"
+						className="block truncate text-xs text-primary underline"
+					>
+						{data.verification_uri_complete || data.verification_uri}
+					</a>
+					<p className="text-xs text-muted-foreground">
+						{t("providers.xaiOauthWaiting")}
+					</p>
+				</div>
+			) : (
+				<Button
+					className="w-full gap-2"
+					onClick={begin}
+					disabled={start.isPending || phase === "waiting"}
+				>
+					{start.isPending
+						? t("providers.xaiOauthStarting")
+						: t("providers.xaiOauthLogin")}
+				</Button>
+			)}
+			{err && <p className="text-xs text-destructive">{err}</p>}
+		</div>
+	);
+}
+
 // Add/edit a per-user model.
 //   • Editing → the classic field form (all provider fields, single save).
 //   • Adding  → enter credentials, "Fetch models" from the provider API, then
@@ -148,6 +272,13 @@ function ProviderModelDialog({
 	// Edit-mode only: the discovered entry the user picked to switch this model to,
 	// carried through to save so its label/capabilities update alongside deployment.
 	const [switchedModel, setSwitchedModel] = useState<DiscoveredModel | null>(null);
+	// xai_oauth add-mode only: the refresh_token/expiry from a completed device-code
+	// login, carried through to the final save-bulk call (the access_token itself
+	// rides in `values.api_key`, same field a typed API key would use).
+	const [oauthTokens, setOauthTokens] = useState<{
+		refresh_token?: string;
+		expires_at?: number;
+	} | null>(null);
 	const setField = (k: string, val: string) =>
 		setValues((p) => ({ ...p, [k]: val }));
 
@@ -182,6 +313,36 @@ function ProviderModelDialog({
 		});
 	};
 
+	// xai_oauth device-code login just completed — populate the access_token into
+	// the same `api_key` field a typed key would use, stash the refresh_token/expiry
+	// for the eventual save, and fetch the catalog with it directly (NOT via
+	// onFetch/credEntry — setValues hasn't re-rendered yet, so reading `values` here
+	// would see the stale pre-login state).
+	const onXaiAuthenticated = (tokens: {
+		access_token: string;
+		refresh_token?: string;
+		expires_at?: number;
+	}) => {
+		setValues((p) => ({ ...p, api_key: tokens.access_token }));
+		setOauthTokens({
+			refresh_token: tokens.refresh_token,
+			expires_at: tokens.expires_at,
+		});
+		setErr(null);
+		setDiscovered(null);
+		setSelected(new Set());
+		discover.mutate(
+			{ provider, api_key: tokens.access_token },
+			{
+				onSuccess: (res) =>
+					res.ok && res.models
+						? setDiscovered(res.models)
+						: setErr(res.error ?? t("providers.fetchFailed")),
+				onError: () => setErr(t("providers.fetchFailed")),
+			},
+		);
+	};
+
 	const toggle = (id: string) =>
 		setSelected((s) => {
 			const n = new Set(s);
@@ -200,6 +361,11 @@ function ProviderModelDialog({
 		if (!selected.size) return;
 		setErr(null);
 		const entry = credEntry();
+		// xai_oauth: the access_token is already in `values.api_key` (credEntry picks
+		// it up like any other credential field), but the refresh_token/expiry aren't
+		// part of the provider's visible field schema — carry them separately.
+		if (oauthTokens?.refresh_token) entry.xai_refresh_token = oauthTokens.refresh_token;
+		if (oauthTokens?.expires_at) entry.xai_token_expires_at = oauthTokens.expires_at;
 		entry.ids = [...selected];
 		const labels: Record<string, string> = {};
 		const capabilities: Record<string, string[]> = {};
@@ -379,18 +545,24 @@ function ProviderModelDialog({
 					) : (
 						// ── Add: fetch → multi-select ────────────────────────────────
 						<>
-							{credFields.map(renderField)}
-							<Button
-								variant="outline"
-								className="w-full gap-2"
-								onClick={onFetch}
-								disabled={discover.isPending}
-							>
-								<Search className="size-4" />
-								{discover.isPending
-									? t("providers.fetching")
-									: t("providers.fetchModels")}
-							</Button>
+							{schema?.auth_flow === "xai_device_code" ? (
+								<XaiOauthLogin onAuthenticated={onXaiAuthenticated} />
+							) : (
+								<>
+									{credFields.map(renderField)}
+									<Button
+										variant="outline"
+										className="w-full gap-2"
+										onClick={onFetch}
+										disabled={discover.isPending}
+									>
+										<Search className="size-4" />
+										{discover.isPending
+											? t("providers.fetching")
+											: t("providers.fetchModels")}
+									</Button>
+								</>
+							)}
 
 							{discovered && (
 								<div className="space-y-2">

@@ -26,6 +26,8 @@ class Provider(StrEnum):
     OPENAI = "openai"
     GEMINI = "gemini"
     NVIDIA = "nvidia"
+    XAI = "xai"
+    XAI_OAUTH = "xai_oauth"
 
     @classmethod
     def coerce(cls, value, default: "Provider | None" = None) -> "Provider":

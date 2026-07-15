@@ -16,6 +16,7 @@ dependencies = [
     "boto3>=1.34",
     "langchain-google-genai>=2.0",
     "langchain-nvidia-ai-endpoints>=1.4",
+    "langchain-xai>=1.2",
     "httpx>=0.27",  # outbound calls to provider list-models APIs (model discovery)
     # Sandboxed execution layer (OpenSandbox SDK; gated by the `sandbox` compose profile)
     "opensandbox",

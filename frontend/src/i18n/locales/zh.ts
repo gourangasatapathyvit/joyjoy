@@ -181,6 +181,12 @@ export const zh: Resources = {
 		addSelected: "添加所选 ({{count}})",
 		enterManually: "手动输入模型 ID",
 		capabilities: "能力",
+		xaiOauthLogin: "使用 xAI 登录",
+		xaiOauthStarting: "启动中…",
+		xaiOauthInstructions: "访问此链接并输入代码以授权：",
+		xaiOauthWaiting: "等待授权…",
+		xaiOauthSuccess: "已登录 — 正在获取您的模型…",
+		xaiOauthFailed: "xAI 登录失败",
 	},
 	model: {
 		selectModel: "选择模型",

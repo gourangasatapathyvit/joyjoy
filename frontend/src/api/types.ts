@@ -135,7 +135,9 @@ export type ModelProvider =
 	| "bedrock"
 	| "openai"
 	| "gemini"
-	| "nvidia";
+	| "nvidia"
+	| "xai"
+	| "xai_oauth";
 
 export interface ListModelsResponse {
 	object: "list";
@@ -260,6 +262,10 @@ export interface ProviderType {
 	id: ModelProvider;
 	label: string;
 	fields: ProviderField[];
+	// Set when this provider's "Add model" flow is a stateful login widget
+	// (currently only xAI's device-code OAuth) instead of a plain credential
+	// field form — the only value defined so far is "xai_device_code".
+	auth_flow?: string;
 }
 export interface ModelConfigItem {
 	id: string;
@@ -304,6 +310,27 @@ export interface BulkSaveResult {
 	error?: string;
 	saved?: string[];
 	errors?: Record<string, string>;
+}
+
+// ── xAI Grok device-code OAuth login (RFC 8628) ────────────────────────────
+// POST /v1/models/config/xai-oauth/start
+export interface XaiOauthStartResponse {
+	ok: boolean;
+	error?: string;
+	device_code?: string;
+	user_code?: string;
+	verification_uri?: string;
+	verification_uri_complete?: string;
+	interval?: number;
+	expires_in?: number;
+}
+// POST /v1/models/config/xai-oauth/poll — polled on the `interval` above.
+export interface XaiOauthPollResponse {
+	status: "pending" | "complete" | "expired" | "error";
+	error?: string;
+	access_token?: string;
+	refresh_token?: string;
+	expires_in?: number;
 }
 export interface ModelTestResult {
 	id: string;

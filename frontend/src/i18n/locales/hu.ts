@@ -188,6 +188,12 @@ export const hu: Resources = {
 		addSelected: "Kijelöltek hozzáadása ({{count}})",
 		enterManually: "Modellazonosító megadása kézzel",
 		capabilities: "Képességek",
+		xaiOauthLogin: "Bejelentkezés xAI-vel",
+		xaiOauthStarting: "Indítás…",
+		xaiOauthInstructions: "Látogasson el erre a linkre, és adja meg a kódot az engedélyezéshez:",
+		xaiOauthWaiting: "Várakozás az engedélyezésre…",
+		xaiOauthSuccess: "Bejelentkezve — modellek lekérése…",
+		xaiOauthFailed: "Az xAI bejelentkezés sikertelen",
 	},
 	model: {
 		selectModel: "Modell kiválasztása",

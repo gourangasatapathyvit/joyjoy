@@ -189,6 +189,12 @@ export const ga: Resources = {
 		addSelected: "Cuir na cinn roghnaithe leis ({{count}})",
 		enterManually: "Cuir ID samhla isteach de láimh",
 		capabilities: "Cumais",
+		xaiOauthLogin: "Logáil isteach le xAI",
+		xaiOauthStarting: "Ag tosú…",
+		xaiOauthInstructions: "Tabhair cuairt ar an nasc seo agus cuir isteach an cód chun údarú a dhéanamh:",
+		xaiOauthWaiting: "Ag fanacht le húdarú…",
+		xaiOauthSuccess: "Logáilte isteach — ag fáil do mhúnlaí…",
+		xaiOauthFailed: "Theip ar logáil isteach xAI",
 	},
 	model: {
 		selectModel: "Roghnaigh samhail",

@@ -126,6 +126,12 @@ export const de: Resources = {
 		addSelected: "Auswahl hinzufügen ({{count}})",
 		enterManually: "Modell-ID manuell eingeben",
 		capabilities: "Fähigkeiten",
+		xaiOauthLogin: "Mit xAI anmelden",
+		xaiOauthStarting: "Wird gestartet…",
+		xaiOauthInstructions: "Besuchen Sie diesen Link und geben Sie den Code zur Autorisierung ein:",
+		xaiOauthWaiting: "Warte auf Autorisierung…",
+		xaiOauthSuccess: "Angemeldet — Modelle werden abgerufen…",
+		xaiOauthFailed: "xAI-Anmeldung fehlgeschlagen",
 	},
 	model: {
 		selectModel: "Modell auswählen",

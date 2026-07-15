@@ -182,6 +182,12 @@ export const ko: Resources = {
 		addSelected: "선택 항목 추가 ({{count}})",
 		enterManually: "모델 ID 직접 입력",
 		capabilities: "기능",
+		xaiOauthLogin: "xAI로 로그인",
+		xaiOauthStarting: "시작 중…",
+		xaiOauthInstructions: "이 링크를 방문하여 코드를 입력해 승인하세요:",
+		xaiOauthWaiting: "승인 대기 중…",
+		xaiOauthSuccess: "로그인됨 — 모델을 가져오는 중…",
+		xaiOauthFailed: "xAI 로그인 실패",
 	},
 	model: {
 		selectModel: "모델 선택",

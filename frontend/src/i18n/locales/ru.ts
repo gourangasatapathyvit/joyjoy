@@ -188,6 +188,12 @@ export const ru: Resources = {
 		addSelected: "Добавить выбранные ({{count}})",
 		enterManually: "Ввести идентификатор модели вручную",
 		capabilities: "Возможности",
+		xaiOauthLogin: "Войти через xAI",
+		xaiOauthStarting: "Запуск…",
+		xaiOauthInstructions: "Перейдите по ссылке и введите код для авторизации:",
+		xaiOauthWaiting: "Ожидание авторизации…",
+		xaiOauthSuccess: "Вход выполнен — загрузка ваших моделей…",
+		xaiOauthFailed: "Не удалось войти через xAI",
 	},
 	model: {
 		selectModel: "Выбрать модель",
