@@ -23,9 +23,12 @@ host = "0.0.0.0"
 port = 8090
 max_sandbox_timeout_seconds = 86400
 
-# Optional: Uncomment to enable API key authentication
-api_key = "921d979b73511f4717a159d170f28ee0e76a0ecf7f64db87"
-# If api_key stays empty, startup requires explicit acknowledgment:
+# TOML has no ${VAR} interpolation, so this file is a TEMPLATE: the opensandbox
+# service's compose `command` renders it into a real config at container start,
+# substituting __OPENSANDBOX_API_KEY__ with $OPENSANDBOX_API_KEY from .env (empty
+# if unset). Never put a real key literal here — it would land in git history.
+api_key = "__OPENSANDBOX_API_KEY__"
+# If the substituted key is empty, startup requires explicit acknowledgment:
 # - Interactive TTY: type YES when prompted
 # - Non-interactive: set OPENSANDBOX_INSECURE_SERVER=YES
 

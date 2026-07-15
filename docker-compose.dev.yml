@@ -92,7 +92,12 @@ services:
     environment:
       DOCKER_HOST: tcp://docker-socket-proxy:2375
       OPENSANDBOX_INSECURE_SERVER: ${OPENSANDBOX_INSECURE_SERVER:-}
-    command: ["sh", "-c", "pip install --no-cache-dir uv && uvx --from opensandbox-server opensandbox-server --config /app/sandbox.toml"]
+      # Same key the host-run backend authenticates WITH (its SANDBOX_* config) —
+      # rendered into sandbox.toml below since TOML itself can't read env vars.
+      OPENSANDBOX_API_KEY: ${OPENSANDBOX_API_KEY:-}
+    # Renders sandbox.toml's __OPENSANDBOX_API_KEY__ placeholder into a real config on
+    # the container's own writable layer (never written back to the ro-mounted source).
+    command: ["sh", "-c", "python3 -c \"import os; s = open('/app/sandbox.toml').read().replace('__OPENSANDBOX_API_KEY__', os.environ.get('OPENSANDBOX_API_KEY', '')); open('/tmp/sandbox.toml', 'w').write(s)\" && pip install --no-cache-dir uv && uvx --from opensandbox-server opensandbox-server --config /tmp/sandbox.toml"]
 
   # ──────────────────────────────────────────────────────────────────────────
   # Observability — COMPOSE_PROFILES=observability. All ports are published so the

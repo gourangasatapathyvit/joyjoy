@@ -218,10 +218,16 @@ services:
       DOCKER_HOST: tcp://docker-socket-proxy:2375
       # Non-interactive ack if you run with an empty api_key (prefer a real key instead).
       OPENSANDBOX_INSECURE_SERVER: ${OPENSANDBOX_INSECURE_SERVER:-}
+      # Same key the backend authenticates WITH (backend service, above) — rendered into
+      # sandbox.toml below since TOML itself can't read env vars.
+      OPENSANDBOX_API_KEY: ${OPENSANDBOX_API_KEY:-}
     # exec-array form, NOT `command: >`. A folded block scalar keeps the newline before a
     # more-indented continuation line, so `&&` lands at the start of its own line →
     # "sh: Syntax error: && unexpected" and the server never starts. One line, no folding.
-    command: ["sh", "-c", "pip install --no-cache-dir uv && uvx --from opensandbox-server opensandbox-server --config /app/sandbox.toml"]
+    # First renders sandbox.toml's __OPENSANDBOX_API_KEY__ placeholder (see that file)
+    # into a real config on the container's own writable layer — never written back to
+    # the (read-only-mounted) source file, so the real key never touches the repo.
+    command: ["sh", "-c", "python3 -c \"import os; s = open('/app/sandbox.toml').read().replace('__OPENSANDBOX_API_KEY__', os.environ.get('OPENSANDBOX_API_KEY', '')); open('/tmp/sandbox.toml', 'w').write(s)\" && pip install --no-cache-dir uv && uvx --from opensandbox-server opensandbox-server --config /tmp/sandbox.toml"]
 
   # ──────────────────────────────────────────────────────────────────────────
   # Observability — OPT-IN. Enable with: COMPOSE_PROFILES=observability
