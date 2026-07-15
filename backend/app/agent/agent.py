@@ -28,6 +28,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.tools import StructuredTool
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from langchain_openai import AzureChatOpenAI, ChatOpenAI
 from langgraph.runtime import get_runtime
 
@@ -159,6 +160,13 @@ def model_supports_reasoning(spec: dict) -> bool:
         return any(k in blob for k in ("o1", "o3", "o4", "deepseek-r", "gpt-5", "reason"))
     if provider == Provider.GEMINI:
         return "2.5" in blob or "thinking" in blob
+    if provider == Provider.NVIDIA:
+        # NVIDIA discovery stores a real `.supports_thinking` signal (from
+        # ChatNVIDIA.get_available_models()) in the model's `capabilities` list, but
+        # build_model_for doesn't wire a thinking-mode kwarg through yet — showing the
+        # reasoning-effort toggle without it actually doing anything would be worse
+        # than not showing it. Flip this once that's wired.
+        return False
     return False
 
 
@@ -174,6 +182,8 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
       * ``openai`` — ``ChatOpenAI`` against any OpenAI-compatible endpoint
         (OpenAI / OpenRouter / DeepSeek / Groq / local) via optional ``endpoint``.
       * ``gemini`` — ``ChatGoogleGenerativeAI`` (Google AI Studio API key).
+      * ``nvidia`` — ``ChatNVIDIA`` against NVIDIA NIM (integrate.api.nvidia.com by
+        default, or a self-hosted NIM via ``endpoint``).
 
     ``force_reasoning`` applies the requested effort even when the support heuristic
     says no — only used by ``test_model``'s capability probe so it can DETECT support
@@ -238,6 +248,19 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
         if effort:
             kwargs["reasoning_effort"] = "high" if effort in ("high", "extra_high") else ("low" if effort in ("minimal", "low") else "medium")
         return ChatOpenAI(**kwargs)
+
+    if provider == Provider.NVIDIA:
+        # NVIDIA NIM (integrate.api.nvidia.com by default, or a self-hosted NIM via
+        # `endpoint`). Deliberately no reasoning/thinking kwarg wired yet — ChatNVIDIA
+        # doesn't take `reasoning_effort` the way ChatOpenAI does; NIM "thinking" models
+        # toggle it via extra_body/chat_template_kwargs instead (see
+        # model_supports_reasoning's NVIDIA branch for why this stays unwired for now).
+        kwargs = {"model": spec["deployment"], "api_key": spec["api_key"]}
+        if spec.get("endpoint"):
+            kwargs["base_url"] = spec["endpoint"]
+        if spec.get("max_tokens"):
+            kwargs["max_completion_tokens"] = spec["max_tokens"]
+        return ChatNVIDIA(**kwargs)
 
     if provider == Provider.GEMINI:
         kwargs = {"model": spec["deployment"], "google_api_key": spec["api_key"]}
@@ -592,7 +615,7 @@ def _validate_model_entry(e: dict) -> str | None:
         return "api_version is required for Azure OpenAI"
     if p == Provider.BEDROCK and not e.get("deployment"):
         return "Bedrock model id (deployment) is required"
-    if p in (Provider.OPENAI, Provider.GEMINI):
+    if p in (Provider.OPENAI, Provider.GEMINI, Provider.NVIDIA):
         if not e.get("deployment"):
             return "model name (deployment) is required"
         if not e.get("api_key"):
@@ -824,6 +847,36 @@ async def _discover_azure_openai(creds: dict) -> list[dict]:
     return sorted(out, key=lambda x: x["id"])
 
 
+def _nvidia_available_models_sync(creds: dict) -> list:
+    kwargs: dict = {"api_key": (creds.get("api_key") or "").strip()}
+    base_url = (creds.get("endpoint") or "").strip()
+    if base_url:
+        kwargs["base_url"] = base_url
+    return ChatNVIDIA.get_available_models(**kwargs)
+
+
+async def _discover_nvidia(creds: dict) -> list[dict]:
+    # ChatNVIDIA.get_available_models() is a synchronous classmethod (it instantiates a
+    # ChatNVIDIA and hits NVIDIA's own catalog endpoint) — run it off the event loop.
+    # Real capability flags from NVIDIA's own metadata, not id-string guessing like the
+    # other openai-compatible adapters have to do: supports_tools / supports_thinking /
+    # supports_structured_output are curated by NVIDIA per model.
+    models = await asyncio.to_thread(_nvidia_available_models_sync, creds)
+    out = []
+    for m in models:
+        if getattr(m, "deprecated", False):
+            continue
+        caps = [m.model_type or "chat"]
+        if getattr(m, "supports_tools", False):
+            caps.append("tools")
+        if getattr(m, "supports_thinking", False):
+            caps.append("thinking")
+        if getattr(m, "supports_structured_output", False):
+            caps.append("structured_output")
+        out.append({"id": m.id, "capabilities": caps})
+    return sorted(out, key=lambda x: x["id"])
+
+
 def _discover_bedrock_sync(creds: dict) -> list[dict]:
     # boto3 is synchronous; discover_models runs this in a thread. UNTESTED (no creds).
     import boto3
@@ -883,6 +936,7 @@ async def discover_models(settings: Settings, user_id: str, raw: dict) -> dict:
         Provider.GEMINI: _discover_gemini,
         Provider.ANTHROPIC: _discover_anthropic,
         Provider.AZURE_OPENAI: _discover_azure_openai,
+        Provider.NVIDIA: _discover_nvidia,
     }
     try:
         if provider == Provider.BEDROCK:
@@ -1187,8 +1241,19 @@ async def test_model(settings: Settings, user_id: str, model_id: str) -> dict:
                         visible = True
 
             await asyncio.wait_for(_probe(), timeout=REASONING_PROBE_TIMEOUT_S)
-            detected = True  # accepted the reasoning params and completed (text may be hidden)
-            out["reasoning"] = {"supported": True, "ok": True, "visible_text": visible}
+            # "No error" alone isn't proof the model actually used reasoning_effort —
+            # many OpenAI-compatible endpoints (NVIDIA, OpenRouter, etc.) silently
+            # ignore params they don't recognize instead of rejecting them. Require
+            # VISIBLE reasoning text, except for the one provider known to hide it by
+            # design: Azure AI Foundry's Claude endpoint returns only a thinking
+            # signature, never the text (see build_model_for's Anthropic branch).
+            provider = Provider.coerce(spec.get("provider"))
+            endpoint = (spec.get("endpoint") or "").lower()
+            hides_reasoning_by_design = provider == Provider.ANTHROPIC and (
+                "azure" in endpoint or "foundry" in endpoint
+            )
+            detected = visible or hides_reasoning_by_design
+            out["reasoning"] = {"supported": detected, "ok": True, "visible_text": visible}
         except Exception as e:  # noqa: BLE001
             detected = False  # standard worked but reasoning errored → params rejected
             out["reasoning"] = {"supported": False, "ok": False, "visible_text": False, "error": str(e)[:300]}

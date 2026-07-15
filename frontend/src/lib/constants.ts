@@ -18,6 +18,7 @@ export const STORAGE_KEYS = {
 	activity: "joyjoy-activity",
 	autoFollow: "joyjoy-autofollow",
 	locale: "joyjoy-locale",
+	settingsSection: "joyjoy-settings-section",
 } as const;
 
 // Manifest filenames the agent + UI special-case (skills bundle / long-term memory).

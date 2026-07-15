@@ -501,6 +501,7 @@ export function ProvidersPanel() {
 		<PanelLayout
 			title={t("providers.title")}
 			description={t("providers.subtitle")}
+			maxWidthClassName="max-w-5xl"
 		>
 			<div className="flex justify-end">
 				<Button size="sm" variant="outline" onClick={openNew}>
@@ -519,7 +520,9 @@ export function ProvidersPanel() {
 					>
 						<div className="min-w-0">
 							<div className="flex flex-wrap items-center gap-2">
-								<span className="font-mono text-sm font-medium">{m.id}</span>
+								<span className="break-all font-mono text-sm font-medium">
+									{m.id}
+								</span>
 								<Badge variant="outline" className="text-[10px]">
 									{m.provider}
 								</Badge>

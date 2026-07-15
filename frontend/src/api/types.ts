@@ -134,7 +134,8 @@ export type ModelProvider =
 	| "anthropic"
 	| "bedrock"
 	| "openai"
-	| "gemini";
+	| "gemini"
+	| "nvidia";
 
 export interface ListModelsResponse {
 	object: "list";

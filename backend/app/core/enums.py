@@ -25,6 +25,7 @@ class Provider(StrEnum):
     BEDROCK = "bedrock"
     OPENAI = "openai"
     GEMINI = "gemini"
+    NVIDIA = "nvidia"
 
     @classmethod
     def coerce(cls, value, default: "Provider | None" = None) -> "Provider":

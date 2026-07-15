@@ -1,6 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useMe } from "@/api/auth";
 import { ModelPicker } from "@/components/chat/ModelPicker";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { STORAGE_KEYS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { ProvidersPanel } from "@/routes/ProvidersPanel";
 import { AppearancePane } from "@/routes/settings/AppearancePane";
@@ -17,10 +20,49 @@ const SECTIONS: Section[] = [
 	"profile",
 ];
 
+// Per-user (keyed by username — /v1/auth/me carries no other stable id
+// client-side) so different accounts on the same browser don't inherit each
+// other's last-open tab. A genuinely fresh visit (no persisted section for
+// this user) lands on the first tab; any later visit restores whichever tab
+// that same user had open last.
+const sectionKeyFor = (username: string) => `${STORAGE_KEYS.settingsSection}:${username}`;
+
+const readSection = (username: string): Section => {
+	try {
+		const v = localStorage.getItem(sectionKeyFor(username));
+		if ((SECTIONS as string[]).includes(v ?? "")) return v as Section;
+	} catch {
+		// localStorage unavailable — fall through to the default
+	}
+	return SECTIONS[0];
+};
+
 // Settings = webui-style side-menu (Conversation / Appearance / Providers / Profile).
 export function SettingsPage() {
 	const { t } = useTranslation();
-	const [section, setSection] = useState<Section>("appearance");
+	const { data: me } = useMe();
+	const [section, setSectionState] = useState<Section>(SECTIONS[0]);
+	// Re-hydrate once we know WHICH user this is (usually already cached/
+	// synchronous by the time this route renders, since RequireAuth fetches it
+	// first — but guard with a ref so a later cache refetch of the same user
+	// doesn't clobber a tab switch the user already made this session).
+	const hydratedFor = useRef<string | null>(null);
+	useEffect(() => {
+		const uid = me?.username;
+		if (!uid || hydratedFor.current === uid) return;
+		hydratedFor.current = uid;
+		setSectionState(readSection(uid));
+	}, [me?.username]);
+
+	const setSection = (s: Section) => {
+		setSectionState(s);
+		if (!me?.username) return;
+		try {
+			localStorage.setItem(sectionKeyFor(me.username), s);
+		} catch {
+			// localStorage unavailable — keep in-memory only
+		}
+	};
 
 	return (
 		<div className="flex min-h-0 flex-1">
@@ -53,20 +95,22 @@ export function SettingsPage() {
 							</div>
 							<ModelPicker />
 						</div>
-						<div className="min-h-0 flex-1">
+						<div className="flex min-h-0 flex-1 flex-col">
 							<ProvidersPanel />
 						</div>
 					</div>
 				) : (
-					<div className="min-h-0 flex-1 overflow-y-auto p-6">
-						{section === "conversation" ? (
-							<ConversationPane />
-						) : section === "profile" ? (
-							<ProfilePane />
-						) : (
-							<AppearancePane />
-						)}
-					</div>
+					<ScrollArea className="min-h-0 flex-1">
+						<div className="p-6">
+							{section === "conversation" ? (
+								<ConversationPane />
+							) : section === "profile" ? (
+								<ProfilePane />
+							) : (
+								<AppearancePane />
+							)}
+						</div>
+					</ScrollArea>
 				)}
 			</main>
 		</div>
