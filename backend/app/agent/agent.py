@@ -19,6 +19,7 @@ import os
 import re
 from pathlib import Path
 
+import httpx
 from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend, FilesystemBackend
 from langchain_anthropic import ChatAnthropic
@@ -42,7 +43,6 @@ from app.agent.agent_common import (
     invalidate_user_cache as _invalidate_user_cache,
     user_blob_get,
     user_blob_put,
-    valid_name as _valid_name,
 )
 from app.sandbox import sandbox
 from app.sandbox import workspace_sandbox as _wsx
@@ -552,6 +552,8 @@ def _public_model_spec(s: dict) -> dict:
         "api_key_masked": _mask_key(s.get("api_key")),
         "has_aws_secret": bool(s.get("aws_secret_access_key")),
         "supports_reasoning": model_supports_reasoning(s),
+        "label": s.get("label") or "",
+        "capabilities": s.get("capabilities") or [],
     }
 
 
@@ -598,15 +600,34 @@ def _validate_model_entry(e: dict) -> str | None:
     return None
 
 
+def _valid_model_id(name: str) -> bool:
+    """Unlike ``valid_name`` (skills/MCP servers, where a name maps to a filesystem
+    path and '/' is a traversal risk), model ids are plain DB key strings that are
+    never used as paths — and many providers hand out '/'-namespaced ids natively
+    (e.g. NVIDIA NIM / OpenRouter: ``meta/llama-3.1-8b-instruct``). Only backslash
+    and '..' are blocked; '/' is allowed."""
+    return bool(name) and "\\" not in name and ".." not in name
+
+
+def _composite_model_id(provider: str, raw_id: str) -> str:
+    """Provider-qualified model id (``provider:raw_id``), e.g. ``openai:gpt-4.1``.
+
+    Model ids only need to be unique WITHIN a provider — the same base name (e.g.
+    ``gpt-4.1``) can legitimately exist under both ``azure_openai`` and ``openai``.
+    Global model ids stay bare (unnamespaced; the seed never collides across
+    providers today), so this qualifier is only applied to NEW user models."""
+    raw_id = raw_id.strip()
+    prefix = f"{provider}:"
+    return raw_id if raw_id.startswith(prefix) else f"{prefix}{raw_id}"
+
+
 async def save_user_model(settings, user_id, raw: dict) -> dict:
     """Create/update a per-user model. Secrets left blank/masked keep the old value;
     fresh secrets are Fernet-encrypted at rest (stored in the row's settings JSON)."""
     raw = raw or {}
-    mid = str(raw.get("id") or "").strip()
-    if not _valid_name(mid):
+    mid_in = str(raw.get("id") or "").strip()
+    if not _valid_model_id(mid_in):
         return {"ok": False, "error": "invalid model id"}
-    if await _is_global_model(mid):
-        return {"ok": False, "error": f"'{mid}' is a global (read-only) model"}
     provider = str(raw.get("provider") or Provider.AZURE_OPENAI).strip().lower()
     if provider not in _VALID_PROVIDERS:
         return {"ok": False, "error": "provider must be one of: " + " | ".join(sorted(_VALID_PROVIDERS))}
@@ -614,15 +635,32 @@ async def save_user_model(settings, user_id, raw: dict) -> dict:
         pid = await s.scalar(select(GlobalProvider.id).where(GlobalProvider.name == provider))
         if not pid:
             return {"ok": False, "error": f"unknown provider '{provider}'"}
+        # Edit-in-place if a row with this EXACT id already exists for this user (covers
+        # both already-namespaced ids and legacy bare ids saved before this qualifier
+        # existed). Otherwise this is a fresh add: qualify it by provider so it can't
+        # collide with a same-named model under a different provider (global or user).
         row = await s.scalar(
-            select(UserModel).where(UserModel.user_id == str(user_id), UserModel.model_id == mid)
+            select(UserModel).where(UserModel.user_id == str(user_id), UserModel.model_id == mid_in)
         )
+        if row is not None:
+            mid = mid_in
+        else:
+            mid = _composite_model_id(provider, mid_in)
+            if await _is_global_model(mid):
+                return {"ok": False, "error": f"'{mid}' is a global (read-only) model"}
+            row = await s.scalar(
+                select(UserModel).where(UserModel.user_id == str(user_id), UserModel.model_id == mid)
+            )
         prev_dec = decrypt_secrets(dict(row.settings) if row else {})
         detail: dict = {}
-        for k in ("deployment", "endpoint", "api_version", "region", "aws_access_key_id"):
+        for k in ("deployment", "endpoint", "api_version", "region", "aws_access_key_id", "label"):
             v = raw.get(k)
             if v not in (None, ""):
                 detail[k] = str(v).strip()
+        # capabilities (list) is carried through so the UI can show what a model does.
+        caps = raw.get("capabilities")
+        if isinstance(caps, list) and caps:
+            detail["capabilities"] = [str(c) for c in caps if c]
         mt = raw.get("max_tokens")
         if mt not in (None, ""):
             try:
@@ -661,6 +699,240 @@ async def delete_user_model(settings, user_id, mid) -> dict:
     if existed:
         _invalidate_user_cache(user_id)
     return {"ok": existed, "id": mid}
+
+
+# ---- Dynamic model discovery (list a provider's models from its API) -------------
+# The Providers tab calls this after the user enters credentials, so they pick from the
+# provider's live catalog instead of typing a model id. Each adapter returns a list of
+# {id, label?, capabilities: [...], description?}. discover_models() dispatches on the
+# provider and turns any network/HTTP failure into a friendly {"ok": False, "error"}.
+_DISCOVER_TIMEOUT_S = 15.0
+
+
+def _openai_capability(mid: str) -> list[str]:
+    """Best-effort capability tag from an OpenAI model id (the /v1/models list carries
+    no modality field). Purely for the on-hover hint in the picker."""
+    m = mid.lower()
+    if "embedding" in m:
+        return ["embeddings"]
+    if "tts" in m:
+        return ["text-to-speech"]
+    if "whisper" in m or "transcribe" in m:
+        return ["transcription"]
+    if "dall-e" in m or "image" in m:
+        return ["image"]
+    if "realtime" in m:
+        return ["realtime"]
+    if "moderation" in m:
+        return ["moderation"]
+    if "audio" in m:
+        return ["audio"]
+    return ["chat"]
+
+
+def _http_err(e: httpx.HTTPStatusError) -> str:
+    code = e.response.status_code
+    if code in (401, 403):
+        return "authentication failed — check the API key"
+    if code == 404:
+        return "list-models endpoint not found — check the endpoint URL"
+    detail = ""
+    try:
+        j = e.response.json()
+        err = j.get("error")
+        detail = (err.get("message") if isinstance(err, dict) else err) or ""
+    except Exception:
+        detail = e.response.text[:200]
+    return f"provider returned {code}: {detail or 'error'}"
+
+
+async def _discover_openai(creds: dict) -> list[dict]:
+    base = (creds.get("endpoint") or "").strip().rstrip("/") or "https://api.openai.com/v1"
+    key = (creds.get("api_key") or "").strip()
+    async with httpx.AsyncClient(timeout=_DISCOVER_TIMEOUT_S) as c:
+        r = await c.get(f"{base}/models", headers={"Authorization": f"Bearer {key}"})
+        r.raise_for_status()
+        data = r.json().get("data", [])
+    out = [
+        {"id": m["id"], "capabilities": _openai_capability(m["id"])}
+        for m in data if m.get("id")
+    ]
+    return sorted(out, key=lambda x: x["id"])
+
+
+async def _discover_gemini(creds: dict) -> list[dict]:
+    key = (creds.get("api_key") or "").strip()
+    url = "https://generativelanguage.googleapis.com/v1beta/models"
+    async with httpx.AsyncClient(timeout=_DISCOVER_TIMEOUT_S) as c:
+        r = await c.get(url, params={"key": key, "pageSize": 1000})
+        r.raise_for_status()
+        models = r.json().get("models", [])
+    out = []
+    for m in models:
+        name = (m.get("name") or "").split("/")[-1]  # "models/gemini-2.5-pro" -> "gemini-2.5-pro"
+        if not name:
+            continue
+        out.append({
+            "id": name,
+            "label": m.get("displayName") or name,
+            "capabilities": m.get("supportedGenerationMethods") or [],
+            "description": m.get("description") or "",
+        })
+    return sorted(out, key=lambda x: x["id"])
+
+
+async def _discover_anthropic(creds: dict) -> list[dict]:
+    # Direct Anthropic API. UNTESTED for the Azure AI Foundry `.../anthropic` endpoint,
+    # which does not expose an equivalent models-list route — verify with real creds.
+    key = (creds.get("api_key") or "").strip()
+    base = (creds.get("endpoint") or "").strip().rstrip("/") or "https://api.anthropic.com"
+    async with httpx.AsyncClient(timeout=_DISCOVER_TIMEOUT_S) as c:
+        r = await c.get(
+            f"{base}/v1/models",
+            headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
+        )
+        r.raise_for_status()
+        data = r.json().get("data", [])
+    out = [
+        {"id": m["id"], "label": m.get("display_name") or m["id"], "capabilities": ["chat"]}
+        for m in data if m.get("id")
+    ]
+    return sorted(out, key=lambda x: x["id"])
+
+
+async def _discover_azure_openai(creds: dict) -> list[dict]:
+    # Lists the deployments configured on the Azure OpenAI resource (the deployment name
+    # is what build_model_for needs). UNTESTED (no creds) — verify the api-version.
+    endpoint = (creds.get("endpoint") or "").strip().rstrip("/")
+    key = (creds.get("api_key") or "").strip()
+    api_version = (creds.get("api_version") or "2023-03-15-preview").strip()
+    if not endpoint:
+        raise ValueError("Azure OpenAI endpoint is required to list deployments")
+    async with httpx.AsyncClient(timeout=_DISCOVER_TIMEOUT_S) as c:
+        r = await c.get(
+            f"{endpoint}/openai/deployments",
+            params={"api-version": api_version},
+            headers={"api-key": key},
+        )
+        r.raise_for_status()
+        data = r.json().get("data", [])
+    out = []
+    for d in data:
+        did = d.get("id") or d.get("model")
+        if did:
+            out.append({"id": did, "label": d.get("model") or did, "capabilities": ["chat"]})
+    return sorted(out, key=lambda x: x["id"])
+
+
+def _discover_bedrock_sync(creds: dict) -> list[dict]:
+    # boto3 is synchronous; discover_models runs this in a thread. UNTESTED (no creds).
+    import boto3
+
+    kwargs: dict = {"region_name": (creds.get("region") or "").strip() or "us-east-1"}
+    ak = (creds.get("aws_access_key_id") or "").strip()
+    sk = (creds.get("aws_secret_access_key") or "").strip()
+    if ak and sk:
+        kwargs["aws_access_key_id"] = ak
+        kwargs["aws_secret_access_key"] = sk
+        if (creds.get("aws_session_token") or "").strip():
+            kwargs["aws_session_token"] = creds["aws_session_token"].strip()
+    client = boto3.client("bedrock", **kwargs)
+    resp = client.list_foundation_models()
+    out = []
+    for m in resp.get("modelSummaries", []):
+        mid = m.get("modelId")
+        if not mid:
+            continue
+        caps = [str(x).lower() for x in (m.get("outputModalities") or [])] or ["chat"]
+        out.append({"id": mid, "label": m.get("modelName") or mid, "capabilities": caps})
+    return sorted(out, key=lambda x: x["id"])
+
+
+_DISCOVER_CRED_FIELDS = (
+    "api_key", "endpoint", "api_version", "region",
+    "aws_access_key_id", "aws_secret_access_key", "aws_session_token",
+)
+
+
+async def discover_models(settings: Settings, user_id: str, raw: dict) -> dict:
+    """List the models available from a provider's API using the credentials in ``raw``
+    (same cleartext shape ``save_user_model`` accepts). Returns
+    ``{"ok": True, "provider", "models": [{id, label?, capabilities, description?}]}``.
+
+    When editing an existing model, the frontend sends ``edit_id`` alongside whatever
+    secret fields are blank/masked (it can't un-mask a stored key to re-send it) — fall
+    back to that row's own decrypted secrets so re-browsing the catalog doesn't force
+    the user to retype their API key."""
+    raw = raw or {}
+    provider = Provider.coerce(raw.get("provider"))
+    creds = {k: raw.get(k) for k in _DISCOVER_CRED_FIELDS}
+    edit_id = str(raw.get("edit_id") or "").strip()
+    if edit_id:
+        async with db_session() as s:
+            row = await s.scalar(
+                select(UserModel).where(UserModel.user_id == str(user_id), UserModel.model_id == edit_id)
+            )
+        if row is not None:
+            prev = decrypt_secrets(dict(row.settings) if row.settings else {})
+            for sk in SECRET_FIELDS:
+                v = str(creds.get(sk) or "").strip()
+                if (not v or v.startswith(_MASK)) and prev.get(sk):
+                    creds[sk] = prev[sk]
+    adapters = {
+        Provider.OPENAI: _discover_openai,
+        Provider.GEMINI: _discover_gemini,
+        Provider.ANTHROPIC: _discover_anthropic,
+        Provider.AZURE_OPENAI: _discover_azure_openai,
+    }
+    try:
+        if provider == Provider.BEDROCK:
+            models = await asyncio.to_thread(_discover_bedrock_sync, creds)
+        else:
+            models = await adapters[provider](creds)
+    except httpx.HTTPStatusError as e:
+        return {"ok": False, "error": _http_err(e)}
+    except httpx.HTTPError as e:
+        return {"ok": False, "error": f"could not reach provider: {e}"}
+    except Exception as e:  # noqa: BLE001 — surface any adapter failure to the UI
+        return {"ok": False, "error": f"could not list models: {e}"}
+    return {"ok": True, "provider": provider, "models": models}
+
+
+async def save_user_models_bulk(settings, user_id, raw: dict) -> dict:
+    """Save many discovered models at once (one UserModel per id), sharing the provider
+    credentials/endpoint from ``raw`` and using each id as its own deployment name.
+    Reuses ``save_user_model`` per id for validation + Fernet encryption + cache bust."""
+    raw = raw or {}
+    ids = raw.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return {"ok": False, "error": "no model ids selected"}
+    provider = str(raw.get("provider") or Provider.AZURE_OPENAI).strip().lower()
+    shared = {
+        k: raw[k] for k in (
+            "endpoint", "api_version", "region", "api_key",
+            "aws_access_key_id", "aws_secret_access_key", "aws_session_token", "max_tokens",
+        )
+        if raw.get(k) not in (None, "")
+    }
+    labels = raw.get("labels") if isinstance(raw.get("labels"), dict) else {}
+    caps = raw.get("capabilities") if isinstance(raw.get("capabilities"), dict) else {}
+    saved: list[str] = []
+    errors: dict[str, str] = {}
+    for mid in ids:
+        mid = str(mid).strip()
+        if not mid:
+            continue
+        entry = {"provider": provider, "id": mid, "deployment": mid, **shared}
+        if labels.get(mid):
+            entry["label"] = labels[mid]
+        if caps.get(mid):
+            entry["capabilities"] = caps[mid]
+        res = await save_user_model(settings, user_id, entry)
+        if res.get("ok"):
+            saved.append(mid)
+        else:
+            errors[mid] = res.get("error") or "save failed"
+    return {"ok": bool(saved), "saved": saved, "errors": errors}
 
 
 async def _system_prompt_for(user_id, settings: Settings | None = None) -> str:

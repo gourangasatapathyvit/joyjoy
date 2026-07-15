@@ -1,5 +1,5 @@
-# joyjoy — self-contained stack: Postgres + the single FastAPI app (serves the
-# React SPA and the /v1 API on :8080; all app data is relational, prod = Postgres).
+# joyjoy — self-contained stack: the single FastAPI app (serves the React SPA and the
+# /v1 API on :8080) plus opt-in infra, all selected by COMPOSE_PROFILES in .env.
 #
 #   1. set the required secrets in .env (compose reads it for ${VAR} interpolation):
 #        JWT_SECRET, CREDENTIAL_ENCRYPTION_KEY   (generate-once; keep stable!)
@@ -7,29 +7,44 @@
 #   2. docker compose up --build
 #   3. open http://localhost:8080  → sign up / log in
 #
+# COMPOSE_PROFILES is the ONE switch — the backend self-configures from it, there are NO
+# separate SANDBOX_ENABLED / METRICS_ENABLED / TRACING_ENABLED flags to keep in sync:
+#   • (none)         → external Postgres from the DB_* vars in .env  ("server" db_mode)
+#   • localdb        → bundled Postgres 16 (this file's `db` service), two databases
+#                      (APP_DB_NAME + LANGGRAPH_CHECKPOINT_DB) created on first init
+#   • devdb          → no Postgres at all; the backend uses local SQLite
+#   • sandbox        → the OpenSandbox code-execution tier (opensandbox + socket proxy)
+#   • observability  → self-hosted Langfuse (tracing) + Prometheus/Grafana (metrics)
+#   combine freely, e.g.  COMPOSE_PROFILES=localdb,sandbox,observability
+# DEV_MODE (default false here) toggles auth strictness, not infra.
+#
 # On first boot the app creates the schema and loads backend/app/db/seeds/global_seed.sql
 # into the empty DB (skins, providers, base models, MCP, skills). No secret is in the
 # SQL — model keys are ${AZURE_OPENAI_API_KEY} env-refs resolved at runtime.
 
 services:
-  # ---- Optional bundled Postgres for LOCAL dev (DB_HOSTER=0) ----
-  # Gated behind the `localdb` profile: it ONLY starts when COMPOSE_PROFILES includes
-  # `localdb`. For server-hosted Postgres (DB_HOSTER=1 / prod) leave that profile unset
-  # and point DATABASE_URL at your server. There is intentionally NO `depends_on` from
-  # backend → db (a depends_on would force this to start even in server mode); in local
-  # mode the backend just retries via `restart: unless-stopped` until Postgres is ready.
+  # ---- Optional bundled Postgres for LOCAL dev (COMPOSE_PROFILES=localdb) ----
+  # ONLY starts when COMPOSE_PROFILES includes `localdb`. For a server-hosted Postgres
+  # leave that profile unset and set the DB_* vars in .env (the backend's "server"
+  # db_mode). There is intentionally NO `depends_on` from backend → db (a depends_on
+  # would force this to start even in server mode); in local mode the backend just
+  # retries via `restart: unless-stopped` until Postgres is ready.
+  # Creates TWO databases on first init: APP_DB_NAME (via POSTGRES_DB) + the separate
+  # LANGGRAPH_CHECKPOINT_DB (via the db-init script) — same names the backend uses.
   db:
     profiles: ["localdb"]
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-joyjoy}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-joyjoy}
-      POSTGRES_DB: ${POSTGRES_DB:-joyjoy_db}
+      POSTGRES_USER: ${DB_USERNAME:-joyjoy}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-joyjoy}
+      POSTGRES_DB: ${APP_DB_NAME:-joyjoy_db}
+      LANGGRAPH_CHECKPOINT_DB: ${LANGGRAPH_CHECKPOINT_DB:-langgraph_db}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./scripts/db-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-joyjoy} -d ${POSTGRES_DB:-joyjoy_db}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-joyjoy} -d ${APP_DB_NAME:-joyjoy_db}"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -40,30 +55,48 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      APP_ENV: prod
-      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
-      # Generate-once secrets — MUST be set and STABLE in prod (rotating
+      # Auth strictness (NOT infra). Default false = real auth; DEV_MODE=true in .env
+      # relaxes it (no-auth X-User-Id header + auto dev user) for a local container.
+      DEV_MODE: ${DEV_MODE:-false}
+      # Forwarded so the backend self-derives db_mode + sandbox/observability toggles.
+      COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}
+      # ---- Database (used unless COMPOSE_PROFILES=devdb → SQLite) ----
+      # localdb: leave DB_HOST unset → the backend targets the bundled `db` service
+      # with the localdb defaults. server: set all DB_* in .env to your Postgres.
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USERNAME: ${DB_USERNAME:-joyjoy}
+      DB_PASSWORD: ${DB_PASSWORD:-joyjoy}
+      APP_DB_NAME: ${APP_DB_NAME:-joyjoy_db}
+      LANGGRAPH_CHECKPOINT_DB: ${LANGGRAPH_CHECKPOINT_DB:-langgraph_db}
+      # Generate-once secrets — MUST be set and STABLE (rotating
       # CREDENTIAL_ENCRYPTION_KEY orphans every stored encrypted secret).
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?set CREDENTIAL_ENCRYPTION_KEY in .env}
       # Base/global model API key — the seeded models reference ${AZURE_OPENAI_API_KEY}.
       AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
-      # Agent workspace files (the ONLY on-disk state in prod). The sessions table
-      # stores a RELATIVE workspace_path; this root resolves it — point it at a shared
-      # mount for multi-node. (SQLITE_CHECKPOINT_PATH/APP_DB_PATH are dev-only and
-      # unused in prod — and must NOT live on a network FS: SQLite locking corrupts.)
-      # Literal (NOT ${WORKSPACE_ROOT}) so the dev .env's absolute path can't leak in —
-      # this must be the in-container mount path below. Change both together to relocate.
-      WORKSPACE_ROOT: /data
+      # Agent workspace files + (in devdb mode) SQLite files, all on ${CONTAINER_DATA_DIR}
+      # — the ONE var driving both the volume mount below and these three paths, so they
+      # can never drift out of sync. Deliberately NOT ${WORKSPACE_ROOT}/${APP_DB_PATH}/
+      # ${SQLITE_CHECKPOINT_PATH} themselves: those are the HOST-dev vars (used by
+      # scripts/run-backend.sh, docker-compose.dev.yml), often absolute WSL host paths —
+      # reusing them here would leak a path that doesn't exist inside this container.
+      # devdb's SQLite files must live on this same mounted volume (not the container's
+      # ephemeral writable layer, which is wiped on every rebuild) to survive
+      # `docker compose up --build`; irrelevant (and harmless) otherwise. Must NOT live
+      # on a network FS in that case either: SQLite locking corrupts there.
+      WORKSPACE_ROOT: ${CONTAINER_DATA_DIR:-/data}
+      APP_DB_PATH: ${CONTAINER_DATA_DIR:-/data}/joyjoy.db
+      SQLITE_CHECKPOINT_PATH: ${CONTAINER_DATA_DIR:-/data}/dev_checkpoints.sqlite
       BACKEND_HOST: 0.0.0.0
       BACKEND_PORT: "8080"
-      # ---- Agent sandbox (code/shell execution) — OFF by default ----
-      # false → host workspace mode (agent files on the /data volume above).
-      # true  → per-session OpenSandbox containers via the `opensandbox` service.
-      # To turn ON: set SANDBOX_ENABLED=true AND COMPOSE_PROFILES=sandbox in .env
-      # (the profile starts the server + builds the sandbox image). The backend talks
-      # to the server by its compose service name; nothing else changes.
-      SANDBOX_ENABLED: ${SANDBOX_ENABLED:-false}
+      # ---- Agent sandbox (code/shell execution) ----
+      # Auto-derived from COMPOSE_PROFILES: `sandbox` present → per-session OpenSandbox
+      # containers via the `opensandbox` service (that profile also starts the server +
+      # builds the image); absent → host workspace mode (agent files on /data above).
+      # No SANDBOX_ENABLED flag — the profile IS the switch. These are connection
+      # details for when it's on (harmless otherwise); the backend reaches the server
+      # by its compose service name.
       SANDBOX_SERVER_DOMAIN: ${SANDBOX_SERVER_DOMAIN:-opensandbox:8090}
       SANDBOX_SERVER_PROTOCOL: ${SANDBOX_SERVER_PROTOCOL:-http}
       # MUST be true in compose: sandboxes are spawned as host-bridge siblings the
@@ -73,9 +106,10 @@ services:
       SANDBOX_USE_SERVER_PROXY: ${SANDBOX_USE_SERVER_PROXY:-true}
       OPENSANDBOX_API_KEY: ${OPENSANDBOX_API_KEY:-}
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-joyjoy/sandbox-fat:4}
-      # ---- Observability (off unless set in .env) ----
-      METRICS_ENABLED: ${METRICS_ENABLED:-false}
-      TRACING_ENABLED: ${TRACING_ENABLED:-false}
+      # ---- Observability ----
+      # Metrics + tracing auto-derive from COMPOSE_PROFILES (`observability` present) —
+      # no METRICS_ENABLED / TRACING_ENABLED flags. Below are just the transport details
+      # used when it's on (Langfuse keys / OTLP endpoint), harmless when it's off.
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-joyjoy-backend}
       # Tracing transport (A) Langfuse callback — native per-user/session:
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
@@ -87,12 +121,14 @@ services:
     ports:
       - "${PORT:-8080}:8080"
     volumes:
-      # Named volume by default. For a REMOTE/shared mount (NFS/EFS/SMB/object-FUSE),
-      # replace this with a bind/driver-mounted path at /data, e.g.:
+      # Named volume by default, mounted at ${CONTAINER_DATA_DIR:-/data} — the SAME var
+      # used to build WORKSPACE_ROOT/APP_DB_PATH/SQLITE_CHECKPOINT_PATH above, so the
+      # mount point and those env vars can't drift apart. For a REMOTE/shared mount
+      # (NFS/EFS/SMB/object-FUSE), replace this with a bind/driver-mounted path, e.g.:
       #   - type: volume
       #     source: nfs-workspaces   # defined under top-level `volumes:` with driver_opts
-      #     target: /data
-      - workspaces:/data    # → WORKSPACE_ROOT
+      #     target: ${CONTAINER_DATA_DIR:-/data}
+      - workspaces:${CONTAINER_DATA_DIR:-/data}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/v1/health"]
       interval: 15s
@@ -111,8 +147,9 @@ services:
 
   # ──────────────────────────────────────────────────────────────────────────
   # Sandbox execution layer — OPT-IN. Enable with:  COMPOSE_PROFILES=sandbox
-  # (and SANDBOX_ENABLED=true on the backend). Without the profile, none of this
-  # runs and the app uses host workspace mode. NOTE: this is a starting scaffold —
+  # (the backend auto-enables sandbox mode from that profile — no separate flag).
+  # Without the profile, none of this runs and the app uses host workspace mode.
+  # NOTE: this is a starting scaffold —
   # the OpenSandbox-in-a-container networking below needs validating for your host
   # (the proven dev path runs the server on the host via scripts/start_all.sh).
   # ──────────────────────────────────────────────────────────────────────────
@@ -188,14 +225,16 @@ services:
 
   # ──────────────────────────────────────────────────────────────────────────
   # Observability — OPT-IN. Enable with: COMPOSE_PROFILES=observability
-  # (combine: COMPOSE_PROFILES=sandbox,localdb,observability). Two stacks:
+  # (combine: COMPOSE_PROFILES=sandbox,localdb,observability). The profile ALSO flips
+  # the backend's metrics + tracing on automatically — no METRICS_ENABLED /
+  # TRACING_ENABLED flags. Two stacks:
   #   • Tracing  → self-hosted Langfuse (web+worker+postgres+clickhouse+redis+minio).
-  #     Turn the backend on with TRACING_ENABLED=true + OTEL_EXPORTER_OTLP_ENDPOINT=
-  #     http://langfuse-web:3000/api/public/otel + OTEL_EXPORTER_OTLP_HEADERS Basic auth.
-  #   • Metrics  → Prometheus scrapes the backend's /metrics (METRICS_ENABLED=true);
-  #     Grafana visualizes it. All on joyjoy-net so the backend reaches langfuse-web.
-  # First run: create a Langfuse org/project in the UI (:3000), copy its public/secret
-  # keys into OTEL_EXPORTER_OTLP_HEADERS, then restart the backend.
+  #     The backend uses the LANGFUSE_* keys below (native per-user/session), or falls
+  #     back to OTEL_EXPORTER_OTLP_ENDPOINT/_HEADERS if you set those instead.
+  #   • Metrics  → Prometheus scrapes the backend's /metrics; Grafana visualizes it.
+  #     All on joyjoy-net so the backend reaches langfuse-web.
+  # The bundled Langfuse auto-provisions its project from LANGFUSE_INIT_* on first boot,
+  # so the dev keys work out of the box; rotate them for real deployments.
   # ──────────────────────────────────────────────────────────────────────────
   langfuse-postgres:
     profiles: ["observability"]
@@ -345,7 +384,7 @@ networks:
     name: joyjoy-sandbox-net
 
 volumes:
-  pgdata:            # used only by the `db` service (localdb profile / DB_HOSTER=0)
+  pgdata:            # used only by the `db` service (COMPOSE_PROFILES=localdb)
   workspaces:
   opensandbox-state:
   # observability profile

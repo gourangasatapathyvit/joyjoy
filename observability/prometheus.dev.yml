@@ -1,0 +1,17 @@
+# Prometheus scrape config for the DEV workflow (docker-compose.dev.yml), where the
+# backend runs on the HOST (uvicorn), not in a container. Prometheus therefore scrapes
+# it via host.docker.internal instead of the `backend` service name. The backend only
+# exposes /metrics when the `observability` profile is active (auto-derived).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: joyjoy-backend
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:8080"]   # the host-run backend
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

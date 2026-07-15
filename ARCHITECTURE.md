@@ -13,7 +13,8 @@ joyjoy is a **single FastAPI process** that serves a **React SPA** and a **`/v1`
 ```
 joyjoy/
 ├── Dockerfile                 # multi-stage: node:22 builds SPA → python:3.13-slim runs uvicorn + serves dist
-├── docker-compose.yml         # backend(:8080) + optional localdb (profile) + optional sandbox (profile)
+├── docker-compose.yml         # baked stack: backend(:8080) + profile-gated infra (localdb/sandbox/observability)
+├── docker-compose.dev.yml     # infra only (no backend) — run the backend on the host
 ├── sandbox.toml               # OpenSandbox server config (runtime/egress/network hardening)
 ├── ARCHITECTURE.md  CLAUDE.md  README.md
 ├── scripts/                   # start_all.sh, run_atlassian_wsl.sh, install_{bedrock,gemini}.sh, run-backend.sh …
@@ -117,12 +118,14 @@ Request shapes:
 
 ## 4. Data Stores
 
-| Store | Dev | Prod | Holds |
+Which backend is used is set by `COMPOSE_PROFILES` (`Settings.db_mode`): `devdb` → SQLite; `localdb`/`server` → Postgres.
+
+| Store | `devdb` | `localdb`/`server` | Holds |
 |-------|-----|------|-------|
-| **Relational app DB** (SQLAlchemy 2.0 async) | SQLite `./data/joyjoy.db` | Postgres (`DATABASE_URL`) | Accounts, config, catalogs, per-user skills/MCP/models, sessions |
-| **LangGraph checkpointer** | SqliteSaver | PostgresSaver (same PG) | **Chat message history** + run state (the only place messages live) |
-| **Workspace files** | `./data/...` | `/data` Docker volume (`WORKSPACE_ROOT`) | Agent's real files per `<uid>/workspace/<thread>` — only on-disk app state in prod |
-| **OpenSandbox volumes** (opt-in) | — | docker named volume per `workspace_id` | Durable per-session sandbox FS when `SANDBOX_ENABLED` |
+| **Relational app DB** (SQLAlchemy 2.0 async) | SQLite `./data/joyjoy.db` | Postgres `APP_DB_NAME` (`joyjoy_db`) | Accounts, config, catalogs, per-user skills/MCP/models, sessions |
+| **LangGraph checkpointer** | SqliteSaver | PostgresSaver — **separate** DB `LANGGRAPH_CHECKPOINT_DB` (`langgraph_db`) | **Chat message history** + run state (the only place messages live) |
+| **Workspace files** | `./data/...` | `/data` Docker volume (`WORKSPACE_ROOT`) | Agent's real files per `<uid>/workspace/<thread>` — only on-disk app state in the baked stack |
+| **OpenSandbox volumes** (opt-in) | — | docker named volume per `workspace_id` | Durable per-session sandbox FS when the `sandbox` profile is active |
 
 **Relational schema** (`backend/app/db/models.py`) — surrogate string-UUID PKs:
 - **Accounts**: `users`, `password_resets`.
@@ -136,7 +139,8 @@ Request shapes:
 
 ## 5. External Integrations / APIs
 
-- **Model providers** (LangChain SDKs; dispatched by `provider` in each model spec): Azure OpenAI, Anthropic (incl. Azure AI Foundry `/anthropic` Claude endpoint), AWS Bedrock (`langchain-aws`/boto3), Google GenAI. Catalog = `global_models` + per-user `user_models`; keys referenced as `${VAR}` and expanded at build (kept out of the DB seed).
+- **Model providers** (LangChain SDKs; dispatched by `provider` in each model spec): Azure OpenAI, Anthropic (incl. Azure AI Foundry `/anthropic` Claude endpoint), AWS Bedrock (`langchain-aws`/boto3), Google GenAI, and any OpenAI-compatible endpoint (OpenAI itself, OpenRouter, DeepSeek, Groq, NVIDIA NIM, local servers — via a configurable base URL). Catalog = `global_models` + per-user `user_models`; keys referenced as `${VAR}` and expanded at build (kept out of the DB seed).
+- **Dynamic model discovery**: instead of hand-typing a model id, the Providers tab can call `POST /v1/models/config/discover` with the entered credentials to list a provider's live catalog (`agent.py`'s per-provider adapters — `httpx` for OpenAI/Gemini/Anthropic/Azure REST list-models calls, `boto3` for Bedrock's `list_foundation_models`), then bulk-save a multi-selected subset via `POST /v1/models/config/save-bulk`. Per-user model ids are **provider-qualified composites** (`{provider}:{raw_id}`, e.g. `openai:gpt-4.1`) so the same base model name can exist under different providers without colliding with a global model or another user model — global (seeded) ids stay bare. Discovery re-uses a model's own stored (decrypted) credentials when editing, so switching a model's underlying deployment doesn't require retyping the API key.
 - **MCP servers** (`langchain-mcp-adapters`, stdio + streamable-http): configured in `global_mcps` + `user_mcps`. Examples: `joyjoy_demo` (demo `joyjoy_ping`), `jira` (mcp-atlassian over http), `web-search` (DuckDuckGo via `uvx`). `${VAR}` expansion in command/args/url/headers/env; stdio servers get PATH/HOME/cache injected. **All MCP/plugin tools auto-gate for HITL approval.** `describe_mcp` returns the original `${VAR}` refs — never the expanded secret.
 - **SMTP** (optional): password-reset OTP email; when unset, the OTP is logged (dev).
 
@@ -145,14 +149,15 @@ Request shapes:
 ## 6. Deployment & Infrastructure
 
 - **Image**: one multi-stage Dockerfile — Stage 1 `node:22` builds the SPA; Stage 2 `python:3.13-slim` installs the backend (`uv pip install -e .`), copies `frontend/dist`, runs `uvicorn` on `:8080`. Includes `uv`/`uvx` (for uvx MCPs) + headless LibreOffice (office previews).
-- **Compose** (`docker-compose.yml`, network `joyjoy-net`): the `backend` service always runs; the other services are gated behind **two optional, independent profiles** that can be enabled together via `COMPOSE_PROFILES=sandbox,localdb` (or singly, or neither):
-  - `backend` *(no profile — always on)* — the app; `APP_ENV=prod`, reads `DATABASE_URL`; volume `workspaces:/data`; healthcheck `GET /v1/health`.
-  - **`localdb` profile** — bundled Postgres 16 (`db` service) for local dev only; without it, prod points `DATABASE_URL` at a hosted Postgres (there is intentionally no `depends_on`).
-  - **`sandbox` profile** — the opt-in code-execution tier: `opensandbox` server + `docker-socket-proxy` (least-privilege daemon access) + `sandbox-image` (build-only). Also set `SANDBOX_ENABLED=true` on the backend. Spawned sandboxes live on the isolated `joyjoy-sandbox-net` (cannot reach backend/DB).
-  - **`observability` profile** — opt-in metrics + tracing stack (see §7a): self-hosted **Langfuse** (`langfuse-web`/`-worker` + `-postgres`/`-clickhouse`/`-redis`/`-minio`) for traces, and **Prometheus** + **Grafana** for metrics (config under `observability/`). Turn the backend on with `METRICS_ENABLED=true` / `TRACING_ENABLED=true`.
-  - Profiles compose freely: e.g. `COMPOSE_PROFILES=sandbox,localdb,observability docker compose up --build` runs backend + bundled Postgres + the sandbox tier + the observability stack; unset → backend only (hosted DB, host-workspace mode).
-- **Secrets** via `.env` (compose interpolation): `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY` (generate-once, must stay stable), `AZURE_OPENAI_API_KEY`, `DATABASE_URL`.
-- **Dev (WSL)**: `scripts/start_all.sh` brings up jira MCP (`:9000`) → backend (`:8080`) in order; idempotent. SQLite + no-auth dev user.
+- **Compose** (`docker-compose.yml`, network `joyjoy-net`): the `backend` service always runs; every other service is gated behind a profile. **`COMPOSE_PROFILES` is the single switch** — the backend self-derives its DB mode, sandbox, and metrics/tracing from it (no separate `SANDBOX_ENABLED`/`METRICS_ENABLED`/`TRACING_ENABLED` flags); `DEV_MODE` (default `false` in the image) separately toggles auth strictness.
+  - `backend` *(no profile — always on)* — the app; volume `workspaces:${CONTAINER_DATA_DIR:-/data}`; healthcheck `GET /v1/health`. `WORKSPACE_ROOT`/`APP_DB_PATH`/`SQLITE_CHECKPOINT_PATH` inside the container all derive from the same `CONTAINER_DATA_DIR` as the volume mount, so `devdb` mode's SQLite files (and the workspace files) survive `docker compose up --build` instead of living on the container's ephemeral writable layer.
+  - **DB backend** (pick one, or none): **`localdb`** → bundled Postgres 16 (`db` service), which creates two databases on first init (`APP_DB_NAME` + the separate `LANGGRAPH_CHECKPOINT_DB` via `scripts/db-init`); **`devdb`** → no Postgres, local SQLite; **neither** → external Postgres from the `DB_*` vars (there is intentionally no `depends_on`).
+  - **`sandbox` profile** — the code-execution tier: `opensandbox` server + `docker-socket-proxy` (least-privilege daemon access) + `sandbox-image` (build-only). The profile alone enables sandbox mode in the backend. Spawned sandboxes live on the isolated `joyjoy-sandbox-net` (cannot reach backend/DB).
+  - **`observability` profile** — metrics + tracing stack (see §7a): self-hosted **Langfuse** (`langfuse-web`/`-worker` + `-postgres`/`-clickhouse`/`-redis`/`-minio`) for traces, and **Prometheus** + **Grafana** for metrics (config under `observability/`). The profile alone flips the backend's metrics + tracing on.
+  - Profiles compose freely: e.g. `COMPOSE_PROFILES=localdb,sandbox,observability docker compose up --build` runs backend + bundled Postgres + the sandbox tier + the observability stack.
+- **Dev-infra compose** (`docker-compose.dev.yml`): the same profile-gated infra with **no `backend` service** — for the workflow where the developer builds the SPA and runs the backend on the host. `scripts/dev-up.sh` picks this file vs the baked `docker-compose.yml` based on `DEV_MODE` in `.env`.
+- **Secrets** via `.env` (compose interpolation): `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY` (generate-once, must stay stable), `AZURE_OPENAI_API_KEY`, and the `DB_*` vars in `server` db mode.
+- **Dev (WSL)**: `scripts/start_all.sh` brings up jira MCP (`:9000`) → backend (`:8080`) in order; idempotent. `DEV_MODE=true` + `devdb` = SQLite + no-auth dev user.
 - **CI/CD & monitoring**: not yet codified in-repo (logs via stdout `logging`; healthcheck endpoint exists). *(see Roadmap)*
 
 ---
@@ -175,11 +180,11 @@ Two independent, env-gated layers — both off by default, both no-ops unless en
 **Tracing → self-hosted Langfuse, attributed per-user + per-session.** deepagents runs on LangChain, so its native tracer captures every graph node / LLM call / tool call with **no code**. `setup_tracing()` picks one of two transports by what's configured:
 - **(A) Langfuse LangChain callback — preferred** (when `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` are set). `trace_config()` stamps each run's metadata with `langfuse_user_id` (the tenant) and `langfuse_session_id` (the thread = the chat), which the handler maps to Langfuse's **native User + Session fields** → real per-user analytics and per-session (session-label) grouping/replay. The handler is attached per run via `langchain_callbacks()`.
 - **(B) OTLP bridge — fallback** (when no Langfuse keys, but `OTEL_EXPORTER_OTLP_ENDPOINT` is set): LangSmith's OTEL export → any OTLP collector (Tempo/Jaeger too). Vendor-neutral, but user/thread arrive as generic metadata, not native fields. Requires `opentelemetry-sdk` + the OTLP HTTP exporter.
-- One toggle: `TRACING_ENABLED=true`. The `observability` profile headless-bootstraps the Langfuse project with the same keys (`LANGFUSE_INIT_*`), so per-user/session tracing works on first boot with no manual key-copy.
+- Enabled automatically by `COMPOSE_PROFILES=observability` (no separate `TRACING_ENABLED` flag; set it explicitly only to override). The same profile headless-bootstraps the Langfuse project with the same keys (`LANGFUSE_INIT_*`), so per-user/session tracing works on first boot with no manual key-copy.
 
 > **Granularity:** per-user and per-session live in **tracing** (Langfuse User/Session), NOT in metric labels — Prometheus labels stay bounded (model/tool/decision) to avoid cardinality blow-up.
 
-**Metrics → Prometheus + Grafana.** `METRICS_ENABLED=true` exposes `/metrics` and instruments:
+**Metrics → Prometheus + Grafana.** Enabled automatically by `COMPOSE_PROFILES=observability` (no separate `METRICS_ENABLED` flag). Exposes `/metrics` and instruments:
 - HTTP (pure-ASGI `RequestMetricsMiddleware`, so SSE isn't buffered): request count + latency by method/templated-path/status.
 - Agent runs (in `runs.py`): runs total/errors, end-to-end latency, active-runs gauge, token totals (from `usage_metadata`), HITL approval decisions.
 - LLM/tool calls (a `PrometheusCallbackHandler` attached per run via the run config): call counts + latencies, tool errors.
@@ -191,8 +196,8 @@ Two independent, env-gated layers — both off by default, both no-ops unless en
 
 - **Backend**: Python ≥3.11, `uv` for deps; run `uvicorn app.main:app` (or `scripts/run-backend.sh`). Tests: `pytest` (asyncio mode) in `backend/tests`. Lint: `ruff`. Migrations: `alembic`.
 - **Frontend**: Node 22; `npm run dev` (Vite `:5173`), `npm run build` (`tsc -b && vite build`), `npm run check` (Biome lint+format). Strict TypeScript.
-- **Dev defaults**: `APP_ENV=dev` → SQLite app DB + SQLite checkpointer + no-auth dev user. Browse via Vite `:5173` (proxy injects `X-User-Id`) or the baked SPA on `:8080`.
-- **Full local stack**: `docker compose --profile localdb up --build` (bundled Postgres), or `scripts/start_all.sh` in WSL.
+- **Dev defaults**: `DEV_MODE=true` + `COMPOSE_PROFILES=devdb` → SQLite app DB + SQLite checkpointer + no-auth dev user. Browse via Vite `:5173` (proxy injects `X-User-Id`) or the baked SPA on `:8080`.
+- **Full local stack**: `COMPOSE_PROFILES=localdb docker compose up --build` (bundled Postgres), the infra-only `docker compose -f docker-compose.dev.yml up -d`, or `scripts/start_all.sh` in WSL.
 
 ---
 
@@ -212,7 +217,7 @@ Two independent, env-gated layers — both off by default, both no-ops unless en
 - **Repository**: local working tree at `~/joyjoy` (WSL). Backend `joyjoy-backend`, frontend `frontend`.
 - **Primary entry points**: `backend/app/main.py` (API + SPA), `frontend/src/main.tsx` (SPA).
 - **Runtime port**: `:8080` (single origin for SPA + `/v1` API).
-- **Last updated**: 2026-06-28.
+- **Last updated**: 2026-07-15.
 
 ---
 
@@ -228,4 +233,5 @@ Two independent, env-gated layers — both off by default, both no-ops unless en
 - **OpenSandbox**: opt-in per-session container providing isolated code/shell execution and a durable volume.
 - **Generative UI**: agent-emitted rich UI — `render_ui` (JSON component kit, native assistant-ui renderer) and `render_html` (sandboxed HTML-canvas iframe). Gated per session by the `genui` flag.
 - **External-store runtime**: assistant-ui mode where chat state is owned by the app (zustand + custom SSE) rather than a built-in runtime.
+- **Composite model id**: a per-user model's catalog key, `{provider}:{raw_id}` (e.g. `openai:gpt-4.1`), so the same base model name can exist under multiple providers without colliding. Global (seeded) model ids stay bare.
 ```

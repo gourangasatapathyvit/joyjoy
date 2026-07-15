@@ -9,9 +9,11 @@ from app.agent.agent import (
     delete_user_model,
     describe_models,
     describe_providers,
+    discover_models,
     merged_model_specs,
     model_supports_reasoning,
     save_user_model,
+    save_user_models_bulk,
     test_model,
 )
 from app.core.auth import resolve_user_id, verify_gateway_key
@@ -34,6 +36,7 @@ async def list_models(request: Request):
                 "id": mid, "object": "model", "owned_by": "joyjoy",
                 "provider": s.get("provider", Provider.AZURE_OPENAI),
                 "supports_reasoning": model_supports_reasoning(s),
+                "capabilities": s.get("capabilities") or [],
             }
             for mid, s in specs.items()
         ],
@@ -55,6 +58,25 @@ async def models_config_save(request: Request):
     uid = resolve_user_id(request, settings)
     body = await json_body(request)
     return JSONResponse(await save_user_model(settings, uid, body))
+
+
+@router.post("/v1/models/config/discover")
+async def models_config_discover(request: Request):
+    """List the models a provider's API exposes, from the credentials in the body, so
+    the Providers tab can render them for selection instead of hand-typing a model id."""
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    body = await json_body(request)
+    return JSONResponse(await discover_models(settings, uid, body))
+
+
+@router.post("/v1/models/config/save-bulk")
+async def models_config_save_bulk(request: Request):
+    """Save several discovered models at once (shared provider creds + one per id)."""
+    verify_gateway_key(request, settings)
+    uid = resolve_user_id(request, settings)
+    body = await json_body(request)
+    return JSONResponse(await save_user_models_bulk(settings, uid, body))
 
 
 @router.post("/v1/models/config/delete")

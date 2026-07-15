@@ -1,7 +1,8 @@
-"""Persistence factory — the single dev/prod swap point.
+"""Persistence factory — the single sqlite/postgres swap point.
 
-- **dev**  : SQLite saver + SQLite store (local files under ``data/``).
-- **prod** : Postgres saver + Postgres store (everything in Postgres; pods stateless).
+- **devdb**            : SQLite saver + SQLite store (local files under ``data/``).
+- **localdb / server** : Postgres saver + Postgres store (in the langgraph DB; pods
+                         stateless). See ``Settings.db_mode``.
 
 The agent code is identical for both; only the (checkpointer, store) pair changes.
 Both are async context managers, so we open them in the FastAPI lifespan and keep
@@ -32,7 +33,7 @@ logger = logging.getLogger("joyjoy.persistence")
 async def open_persistence(settings: Settings) -> AsyncIterator[tuple[object, object]]:
     """Yield ``(checkpointer, store)`` for the active environment."""
     async with contextlib.AsyncExitStack() as stack:
-        if settings.is_prod:
+        if settings.db_mode != "devdb":
             dsn = settings.pg_dsn
             logger.info("persistence=postgres db=%s host=%s", dsn.rsplit("/", 1)[-1].split("?")[0], settings.db_host)
             # A connection POOL (not from_conn_string's single connection) so many

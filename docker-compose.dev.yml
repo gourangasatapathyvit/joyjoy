@@ -1,0 +1,242 @@
+# joyjoy — DEV infra ONLY (DEV_MODE=true). This file brings up the bundled backing
+# services; it deliberately has NO `backend` service and builds nothing. The developer
+# builds the SPA and runs the backend on the HOST, pointed at whatever came up here:
+#
+#   1. cp .env.example .env  &&  fill secrets  &&  set DEV_MODE=true
+#   2. docker compose -f docker-compose.dev.yml up -d      (or: scripts/dev-up.sh)
+#   3. cd frontend && npm run build                        (SPA the backend serves)
+#   4. cd backend  && uvicorn app.main:app --reload        (on :8080, host)
+#
+# Same COMPOSE_PROFILES switches as docker-compose.yml select what runs here:
+#   • localdb        → bundled Postgres 16 (two databases: APP_DB_NAME + LANGGRAPH_*)
+#   • sandbox        → OpenSandbox code-execution tier
+#   • observability  → Langfuse (tracing) + Prometheus/Grafana (metrics)
+# `devdb` (SQLite) needs NO container here — just run the backend with that profile.
+#
+# Host-backend caveats vs the baked stack: the backend reaches these at localhost
+# (DB_HOST=localhost, SANDBOX_SERVER_DOMAIN=127.0.0.1:8090, LANGFUSE_HOST=
+# http://localhost:3000), and Prometheus scrapes the host via prometheus.dev.yml.
+
+services:
+  # ---- Bundled Postgres (COMPOSE_PROFILES=localdb) ----
+  # Creates TWO databases on first init: APP_DB_NAME (via POSTGRES_DB) + the separate
+  # LANGGRAPH_CHECKPOINT_DB (via the db-init script). Published on :5432 so the
+  # host-run backend can reach it at DB_HOST=localhost.
+  db:
+    profiles: ["localdb"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-joyjoy}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-joyjoy}
+      POSTGRES_DB: ${APP_DB_NAME:-joyjoy_db}
+      LANGGRAPH_CHECKPOINT_DB: ${LANGGRAPH_CHECKPOINT_DB:-langgraph_db}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-joyjoy} -d ${APP_DB_NAME:-joyjoy_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Sandbox execution layer — COMPOSE_PROFILES=sandbox. opensandbox publishes :8090
+  # so the HOST backend can reach it (SANDBOX_SERVER_DOMAIN=127.0.0.1:8090,
+  # SANDBOX_USE_SERVER_PROXY=true). NOTE: on the host dev path you can alternatively
+  # run the server via scripts/start_all.sh — pick one, not both.
+  # ──────────────────────────────────────────────────────────────────────────
+  sandbox-image:
+    profiles: ["sandbox"]
+    build:
+      context: ./sandbox-image
+    image: ${SANDBOX_IMAGE:-joyjoy/sandbox-fat:4}
+    command: ["true"]
+    restart: "no"
+
+  docker-socket-proxy:
+    profiles: ["sandbox"]
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      VOLUMES: 1
+      NETWORKS: 1
+      INFO: 1
+      PING: 1
+      POST: 1
+      EXEC: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  opensandbox:
+    profiles: ["sandbox"]
+    image: python:3.13-slim
+    restart: unless-stopped
+    depends_on:
+      sandbox-image:
+        condition: service_completed_successfully
+      docker-socket-proxy:
+        condition: service_started
+    networks:
+      - default
+      - sandbox-net
+    ports:
+      - "${SANDBOX_SERVER_PORT:-8090}:8090"   # reachable by the host-run backend
+    volumes:
+      - ./sandbox.toml:/app/sandbox.toml:ro
+      - opensandbox-state:/root/.opensandbox
+    environment:
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
+      OPENSANDBOX_INSECURE_SERVER: ${OPENSANDBOX_INSECURE_SERVER:-}
+    command: ["sh", "-c", "pip install --no-cache-dir uv && uvx --from opensandbox-server opensandbox-server --config /app/sandbox.toml"]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Observability — COMPOSE_PROFILES=observability. All ports are published so the
+  # host-run backend + your browser reach them at localhost. Prometheus scrapes the
+  # host backend via prometheus.dev.yml (host.docker.internal:8080).
+  # ──────────────────────────────────────────────────────────────────────────
+  langfuse-postgres:
+    profiles: ["observability"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse}
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  langfuse-clickhouse:
+    profiles: ["observability"]
+    image: clickhouse/clickhouse-server:24.3
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+    volumes:
+      - langfuse-clickhouse:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  langfuse-redis:
+    profiles: ["observability"]
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${LANGFUSE_REDIS_PASSWORD:-redis}"]
+
+  langfuse-minio:
+    profiles: ["observability"]
+    image: minio/minio
+    restart: unless-stopped
+    entrypoint: ["sh", "-c"]
+    command: ["mkdir -p /data/langfuse && minio server /data --console-address ':9001'"]
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+    volumes:
+      - langfuse-minio:/data
+
+  langfuse-worker:
+    profiles: ["observability"]
+    image: langfuse/langfuse-worker:3
+    restart: unless-stopped
+    depends_on:
+      langfuse-postgres: {condition: service_healthy}
+      langfuse-clickhouse: {condition: service_healthy}
+      langfuse-redis: {condition: service_started}
+      langfuse-minio: {condition: service_started}
+    environment: &langfuse-env
+      DATABASE_URL: postgresql://postgres:${LANGFUSE_DB_PASSWORD:-langfuse}@langfuse-postgres:5432/langfuse
+      SALT: ${LANGFUSE_SALT:-joyjoy-dev-langfuse-salt}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_CONNECTION_STRING: redis://default:${LANGFUSE_REDIS_PASSWORD:-redis}@langfuse-redis:6379
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+
+  langfuse-web:
+    profiles: ["observability"]
+    image: langfuse/langfuse:3
+    restart: unless-stopped
+    depends_on:
+      langfuse-postgres: {condition: service_healthy}
+      langfuse-clickhouse: {condition: service_healthy}
+      langfuse-redis: {condition: service_started}
+      langfuse-minio: {condition: service_started}
+    ports:
+      - "${LANGFUSE_PORT:-3000}:3000"
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_URL: ${LANGFUSE_NEXTAUTH_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-joyjoy-dev-nextauth-secret}
+      LANGFUSE_INIT_ORG_ID: joyjoy
+      LANGFUSE_INIT_PROJECT_ID: joyjoy
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-joyjoy-dev}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-joyjoy-dev}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-admin@joyjoy.local}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-joyjoyadmin}
+      LANGFUSE_INIT_USER_NAME: joyjoy admin
+
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # so it can scrape the host-run backend
+    volumes:
+      - ./observability/prometheus.dev.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+
+networks:
+  # Same fixed names as docker-compose.yml so sandbox.toml's network_mode still matches.
+  default:
+    name: joyjoy-net
+  sandbox-net:
+    name: joyjoy-sandbox-net
+
+volumes:
+  pgdata:
+  opensandbox-state:
+  langfuse-pgdata:
+  langfuse-clickhouse:
+  langfuse-minio:
+  prometheus-data:
+  grafana-data:

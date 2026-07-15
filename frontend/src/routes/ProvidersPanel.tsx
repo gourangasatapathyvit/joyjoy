@@ -1,8 +1,13 @@
-import { Plus } from "lucide-react";
+import { Check, ChevronDown, Plus, Search } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useModelMutations, useModelsConfig } from "@/api/queries";
+import {
+	useDiscoverModels,
+	useModelMutations,
+	useModelsConfig,
+} from "@/api/queries";
 import type {
+	DiscoveredModel,
 	ModelConfigItem,
 	ModelTestResult,
 	ProviderType,
@@ -11,6 +16,11 @@ import { PanelLayout } from "@/components/layout/PanelLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
 	Dialog,
 	DialogContent,
@@ -27,9 +37,72 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { NEW_ITEM } from "@/lib/constants";
+import { cn } from "@/lib/utils";
 
-// Add/edit a per-user model. Fields are driven by the provider's field-schema
-// (PROVIDER_TYPES from the backend). Secrets left blank keep the stored value.
+// One selectable row in the discovered-models checklist. The capability tags are
+// shown inline (muted) AND on hover via the native title, per the request.
+function DiscoveredRow({
+	model,
+	checked,
+	onToggle,
+	capabilitiesLabel,
+}: {
+	model: DiscoveredModel;
+	checked: boolean;
+	onToggle: () => void;
+	capabilitiesLabel: string;
+}) {
+	const caps = model.capabilities ?? [];
+	const title = caps.length
+		? `${capabilitiesLabel}: ${caps.join(", ")}`
+		: undefined;
+	return (
+		<button
+			type="button"
+			onClick={onToggle}
+			title={title}
+			className={cn(
+				"flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent",
+				checked && "bg-accent",
+			)}
+		>
+			<span
+				className={cn(
+					"flex size-4 shrink-0 items-center justify-center rounded border",
+					checked
+						? "border-primary bg-primary text-primary-foreground"
+						: "border-input",
+				)}
+			>
+				{checked && <Check className="size-3" />}
+			</span>
+			<span className="min-w-0 flex-1">
+				<span className="block truncate font-mono text-xs">{model.id}</span>
+				{model.label && model.label !== model.id && (
+					<span className="block truncate text-[11px] text-muted-foreground">
+						{model.label}
+					</span>
+				)}
+			</span>
+			{caps.slice(0, 2).map((c) => (
+				<Badge key={c} variant="outline" className="hidden shrink-0 text-[9px] sm:inline-flex">
+					{c}
+				</Badge>
+			))}
+			{caps.length > 2 && (
+				<Badge variant="outline" className="hidden shrink-0 text-[9px] sm:inline-flex">
+					+{caps.length - 2}
+				</Badge>
+			)}
+		</button>
+	);
+}
+
+// Add/edit a per-user model.
+//   • Editing → the classic field form (all provider fields, single save).
+//   • Adding  → enter credentials, "Fetch models" from the provider API, then
+//     multi-select the ones to add (bulk save). A collapsible manual-entry
+//     fallback covers models the provider's API doesn't list.
 function ProviderModelDialog({
 	providers,
 	initial,
@@ -40,7 +113,8 @@ function ProviderModelDialog({
 	onClose: () => void;
 }) {
 	const { t } = useTranslation();
-	const { save } = useModelMutations();
+	const { save, saveBulk } = useModelMutations();
+	const discover = useDiscoverModels();
 	const editing = !!initial;
 	const [provider, setProvider] = useState<string>(
 		initial?.provider ?? providers[0]?.id ?? "azure_openai",
@@ -65,10 +139,99 @@ function ProviderModelDialog({
 		return v;
 	});
 	const [err, setErr] = useState<string | null>(null);
+	// Discovery state — shared by add-mode (multi-select) and edit-mode (pick-one to
+	// replace the current deployment).
+	const [discovered, setDiscovered] = useState<DiscoveredModel[] | null>(null);
+	const [selected, setSelected] = useState<Set<string>>(new Set());
+	const [search, setSearch] = useState("");
+	const [manualOpen, setManualOpen] = useState(false);
+	// Edit-mode only: the discovered entry the user picked to switch this model to,
+	// carried through to save so its label/capabilities update alongside deployment.
+	const [switchedModel, setSwitchedModel] = useState<DiscoveredModel | null>(null);
 	const setField = (k: string, val: string) =>
 		setValues((p) => ({ ...p, [k]: val }));
 
-	const onSave = () => {
+	// Credential fields for discovery = every provider field except the model's own
+	// id/deployment (those come FROM the fetched list).
+	const credFields = (schema?.fields ?? []).filter(
+		(f) => f.key !== "id" && f.key !== "deployment",
+	);
+	const credEntry = () => {
+		const entry: Record<string, unknown> = { provider };
+		for (const f of credFields) {
+			const v = (values[f.key] ?? "").trim();
+			if (v) entry[f.key] = v;
+		}
+		// Editing: a masked/blank secret above can't be un-masked to resend, so let the
+		// backend fall back to this model's own stored credentials for discovery.
+		if (editing && initial?.id) entry.edit_id = initial.id;
+		return entry;
+	};
+
+	const onFetch = () => {
+		setErr(null);
+		setDiscovered(null);
+		setSelected(new Set());
+		setSwitchedModel(null);
+		discover.mutate(credEntry(), {
+			onSuccess: (res) =>
+				res.ok && res.models
+					? setDiscovered(res.models)
+					: setErr(res.error ?? t("providers.fetchFailed")),
+			onError: () => setErr(t("providers.fetchFailed")),
+		});
+	};
+
+	const toggle = (id: string) =>
+		setSelected((s) => {
+			const n = new Set(s);
+			n.has(id) ? n.delete(id) : n.add(id);
+			return n;
+		});
+
+	// Edit mode: picking a discovered model replaces THIS row's deployment (the id
+	// stays put — it's the stable catalog key) instead of adding a new row.
+	const pickForEdit = (m: DiscoveredModel) => {
+		setSwitchedModel(m);
+		setField("deployment", m.id);
+	};
+
+	const onAddSelected = () => {
+		if (!selected.size) return;
+		setErr(null);
+		const entry = credEntry();
+		entry.ids = [...selected];
+		const labels: Record<string, string> = {};
+		const capabilities: Record<string, string[]> = {};
+		for (const m of discovered ?? []) {
+			if (!selected.has(m.id)) continue;
+			if (m.label && m.label !== m.id) labels[m.id] = m.label;
+			if (m.capabilities?.length) capabilities[m.id] = m.capabilities;
+		}
+		entry.labels = labels;
+		entry.capabilities = capabilities;
+		saveBulk.mutate(entry, {
+			onSuccess: (res) => {
+				const perModelErrors = Object.entries(res.errors ?? {});
+				// Only auto-close when EVERY selected model saved cleanly — a bulk save can
+				// partially succeed (e.g. one id collides), and the per-model reason lives in
+				// res.errors, not a single res.error, so surface it instead of a generic message.
+				if (res.ok && perModelErrors.length === 0) {
+					onClose();
+					return;
+				}
+				setErr(
+					perModelErrors.length
+						? perModelErrors.map(([id, msg]) => `${id}: ${msg}`).join("; ")
+						: (res.error ?? t("providers.saveFailed")),
+				);
+			},
+			onError: () => setErr(t("providers.saveFailed")),
+		});
+	};
+
+	// Manual entry (edit mode, or the add-mode fallback): the classic full form.
+	const onSaveManual = () => {
 		const entry: Record<string, unknown> = { provider };
 		for (const f of schema?.fields ?? []) {
 			const val = (values[f.key] ?? "").trim();
@@ -77,6 +240,16 @@ function ProviderModelDialog({
 		if (!entry.id) {
 			setErr(t("providers.idRequired"));
 			return;
+		}
+		// Switched to a different model via the fetch/pick list: carry its label +
+		// capabilities along with the deployment change already reflected in `values`.
+		if (switchedModel) {
+			if (switchedModel.label && switchedModel.label !== switchedModel.id) {
+				entry.label = switchedModel.label;
+			}
+			if (switchedModel.capabilities?.length) {
+				entry.capabilities = switchedModel.capabilities;
+			}
 		}
 		setErr(null);
 		save.mutate(entry, {
@@ -88,9 +261,38 @@ function ProviderModelDialog({
 		});
 	};
 
+	const q = search.trim().toLowerCase();
+	const filtered = (discovered ?? []).filter(
+		(m) =>
+			!q ||
+			m.id.toLowerCase().includes(q) ||
+			(m.label ?? "").toLowerCase().includes(q),
+	);
+
+	const renderField = (f: ProviderType["fields"][number]) => (
+		<div key={f.key} className="space-y-1.5">
+			<Label htmlFor={`f-${f.key}`}>
+				{f.label}
+				{f.required && <span className="text-destructive"> *</span>}
+			</Label>
+			<Input
+				id={`f-${f.key}`}
+				type={f.secret ? "password" : "text"}
+				value={values[f.key] ?? ""}
+				disabled={editing && f.key === "id"}
+				onChange={(e) => setField(f.key, e.target.value)}
+				placeholder={
+					f.secret && editing && initial?.has_key
+						? t("providers.unchanged")
+						: f.placeholder
+				}
+			/>
+		</div>
+	);
+
 	return (
 		<Dialog open onOpenChange={(o) => !o && onClose()}>
-			<DialogContent className="max-w-lg">
+			<DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto sm:max-w-2xl">
 				<DialogHeader>
 					<DialogTitle>
 						{editing
@@ -102,10 +304,16 @@ function ProviderModelDialog({
 					<div className="space-y-1.5">
 						<Label htmlFor="prov">{t("providers.provider")}</Label>
 						<Select value={provider} onValueChange={(v) => v && setProvider(v)}>
-							<SelectTrigger id="prov">
+							<SelectTrigger id="prov" className="w-full">
 								<SelectValue />
 							</SelectTrigger>
-							<SelectContent>
+							{/* alignItemWithTrigger (the base default) centers the SELECTED item on
+							    the trigger, native-select style — with 5 providers, whichever one is
+							    selected changes how many options render above vs. below, so the list
+							    appears to jump to a different position depending on context (e.g. Edit
+							    mode, where the selected provider often isn't first). Anchoring below
+							    the trigger instead keeps it in the same place every time. */}
+							<SelectContent alignItemWithTrigger={false}>
 								{providers.map((p) => (
 									<SelectItem key={p.id} value={p.id}>
 										{p.label}
@@ -114,35 +322,145 @@ function ProviderModelDialog({
 							</SelectContent>
 						</Select>
 					</div>
-					{schema?.fields.map((f) => (
-						<div key={f.key} className="space-y-1.5">
-							<Label htmlFor={`f-${f.key}`}>
-								{f.label}
-								{f.required && <span className="text-destructive"> *</span>}
-							</Label>
-							<Input
-								id={`f-${f.key}`}
-								type={f.secret ? "password" : "text"}
-								value={values[f.key] ?? ""}
-								disabled={editing && f.key === "id"}
-								onChange={(e) => setField(f.key, e.target.value)}
-								placeholder={
-									f.secret && editing && initial?.has_key
-										? t("providers.unchanged")
-										: f.placeholder
-								}
-							/>
-						</div>
-					))}
-					{err && <p className="text-xs text-destructive">{err}</p>}
-					<div className="flex justify-end gap-2">
-						<Button variant="ghost" onClick={onClose}>
-							{t("common.cancel")}
-						</Button>
-						<Button onClick={onSave} disabled={save.isPending}>
-							{save.isPending ? t("common.saving") : t("common.save")}
-						</Button>
-					</div>
+
+					{editing ? (
+						// ── Edit: classic full form + optional fetch-and-switch ────────
+						<>
+							{schema?.fields.map(renderField)}
+							<Button
+								variant="outline"
+								className="w-full gap-2"
+								onClick={onFetch}
+								disabled={discover.isPending}
+							>
+								<Search className="size-4" />
+								{discover.isPending
+									? t("providers.fetching")
+									: t("providers.fetchModels")}
+							</Button>
+
+							{discovered && (
+								<div className="space-y-2">
+									<Input
+										value={search}
+										onChange={(e) => setSearch(e.target.value)}
+										placeholder={t("providers.searchModels")}
+									/>
+									<div className="max-h-64 space-y-0.5 overflow-y-auto rounded-md border p-1">
+										{filtered.length === 0 ? (
+											<p className="px-2 py-3 text-center text-xs text-muted-foreground">
+												{t("providers.noModelsFound")}
+											</p>
+										) : (
+											filtered.map((m) => (
+												<DiscoveredRow
+													key={m.id}
+													model={m}
+													checked={switchedModel?.id === m.id}
+													onToggle={() => pickForEdit(m)}
+													capabilitiesLabel={t("providers.capabilities")}
+												/>
+											))
+										)}
+									</div>
+								</div>
+							)}
+
+							{err && <p className="text-xs text-destructive">{err}</p>}
+							<div className="flex justify-end gap-2">
+								<Button variant="ghost" onClick={onClose}>
+									{t("common.cancel")}
+								</Button>
+								<Button onClick={onSaveManual} disabled={save.isPending}>
+									{save.isPending ? t("common.saving") : t("common.save")}
+								</Button>
+							</div>
+						</>
+					) : (
+						// ── Add: fetch → multi-select ────────────────────────────────
+						<>
+							{credFields.map(renderField)}
+							<Button
+								variant="outline"
+								className="w-full gap-2"
+								onClick={onFetch}
+								disabled={discover.isPending}
+							>
+								<Search className="size-4" />
+								{discover.isPending
+									? t("providers.fetching")
+									: t("providers.fetchModels")}
+							</Button>
+
+							{discovered && (
+								<div className="space-y-2">
+									<Input
+										value={search}
+										onChange={(e) => setSearch(e.target.value)}
+										placeholder={t("providers.searchModels")}
+									/>
+									<div className="max-h-64 space-y-0.5 overflow-y-auto rounded-md border p-1">
+										{filtered.length === 0 ? (
+											<p className="px-2 py-3 text-center text-xs text-muted-foreground">
+												{t("providers.noModelsFound")}
+											</p>
+										) : (
+											filtered.map((m) => (
+												<DiscoveredRow
+													key={m.id}
+													model={m}
+													checked={selected.has(m.id)}
+													onToggle={() => toggle(m.id)}
+													capabilitiesLabel={t("providers.capabilities")}
+												/>
+											))
+										)}
+									</div>
+								</div>
+							)}
+
+							{/* Fallback: type a model id by hand (for anything the API omits). */}
+							<Collapsible open={manualOpen} onOpenChange={setManualOpen}>
+								<CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+									<ChevronDown
+										className={cn(
+											"size-3.5 transition-transform",
+											manualOpen && "rotate-180",
+										)}
+									/>
+									{t("providers.enterManually")}
+								</CollapsibleTrigger>
+								<CollapsibleContent className="space-y-3 pt-2">
+									{schema?.fields.map(renderField)}
+									<div className="flex justify-end">
+										<Button
+											size="sm"
+											variant="secondary"
+											onClick={onSaveManual}
+											disabled={save.isPending}
+										>
+											{save.isPending ? t("common.saving") : t("common.save")}
+										</Button>
+									</div>
+								</CollapsibleContent>
+							</Collapsible>
+
+							{err && <p className="text-xs text-destructive">{err}</p>}
+							<div className="flex justify-end gap-2">
+								<Button variant="ghost" onClick={onClose}>
+									{t("common.cancel")}
+								</Button>
+								<Button
+									onClick={onAddSelected}
+									disabled={saveBulk.isPending || selected.size === 0}
+								>
+									{saveBulk.isPending
+										? t("common.saving")
+										: t("providers.addSelected", { count: selected.size })}
+								</Button>
+							</div>
+						</>
+					)}
 				</div>
 			</DialogContent>
 		</Dialog>

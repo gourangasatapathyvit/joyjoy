@@ -87,6 +87,10 @@ export function ModelPicker() {
 	const toOption = (m: ModelRow): ModelOption => ({
 		id: m.id,
 		name: m.id,
+		// Capabilities (chat / embeddings / image / …) shown under the name.
+		...(m.capabilities?.length
+			? { description: m.capabilities.join(", ") }
+			: {}),
 		// Searchable by provider label, beyond id/name.
 		keywords: [labelFor(m.provider ?? "other"), m.provider ?? "other"].filter(
 			Boolean,

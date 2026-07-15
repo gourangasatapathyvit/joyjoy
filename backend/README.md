@@ -43,7 +43,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 # or: ../scripts/run-backend.sh
 ```
 
-Dev defaults (`APP_ENV=dev`): SQLite app DB (`./data/joyjoy.db`) + SQLite checkpointer + a no-auth dev user resolved from the `X-User-Id` header. On first boot the global catalogs (skins/providers/models/skills/MCP) are seeded from `app/db/seeds/global_seed.sql`.
+Dev defaults (`DEV_MODE=true` + `COMPOSE_PROFILES=devdb`): SQLite app DB (`./data/joyjoy.db`) + SQLite checkpointer + a no-auth dev user resolved from the `X-User-Id` header. On first boot the global catalogs (skins/providers/models/skills/MCP) are seeded from `app/db/seeds/global_seed.sql`.
 
 Full stack (backend + SPA + jira MCP, WSL): `../scripts/start_all.sh`. Containerized: see [`../ARCHITECTURE.md`](../ARCHITECTURE.md) §6 (`docker compose up --build`).
 
@@ -53,22 +53,23 @@ Settings come from env / `.env` (pydantic-settings; field names map case-insensi
 
 | Var | Purpose |
 |-----|---------|
-| `APP_ENV` | `dev` (SQLite, no-auth) or `prod` (Postgres, cookie/JWT auth) |
-| `DATABASE_URL` | Postgres DSN (prod); shared by the app DB and the LangGraph checkpointer |
-| `JWT_SECRET` | signs session cookies / per-user JWTs — **required & stable in prod** |
+| `DEV_MODE` | `true` = dev-relaxed auth (no-auth `X-User-Id` header + auto dev user); `false` = strict cookie/JWT auth |
+| `COMPOSE_PROFILES` | the single infra switch: `localdb`/`devdb`/`server` (db backend) + `sandbox` + `observability`. The backend self-derives its DB mode, sandbox, and metrics/tracing from this |
+| `DB_HOST` / `DB_PORT` / `DB_USERNAME` / `DB_PASSWORD` | Postgres server (used when db mode is `localdb` or `server`; blank in `localdb` = bundled-container defaults) |
+| `APP_DB_NAME` / `LANGGRAPH_CHECKPOINT_DB` | the two **separate** Postgres databases: app data vs LangGraph checkpoints |
+| `JWT_SECRET` | signs session cookies / per-user JWTs — **required & stable when `DEV_MODE=false`** |
 | `CREDENTIAL_ENCRYPTION_KEY` | Fernet key for secrets at rest — **generate once; rotating it orphans stored secrets** |
 | `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_ENDPOINT` | base model creds (seeded models reference `${AZURE_OPENAI_API_KEY}`) |
-| `WORKSPACE_ROOT` | agent workspace files root (`/data` volume in prod) |
+| `WORKSPACE_ROOT` | agent workspace files root (`/data` volume in the baked stack) |
 | `JOYJOY_INTERRUPT_TOOLS` | extra built-in tools to gate for HITL approval (MCP/plugin tools auto-gate) |
-| `SANDBOX_ENABLED` / `OPENSANDBOX_API_KEY` / `SANDBOX_*` | opt-in code-execution sandbox (off by default) |
-| `METRICS_ENABLED` | expose Prometheus `/metrics` + instrument runs/HTTP (off by default) |
-| `TRACING_ENABLED` / `OTEL_EXPORTER_OTLP_*` | route LangChain traces to OTLP/Langfuse (off by default) |
+| `OPENSANDBOX_API_KEY` / `SANDBOX_*` | code-execution sandbox connection details (the `sandbox` profile is the on/off switch) |
+| `OTEL_EXPORTER_OTLP_*` / `LANGFUSE_*` | metrics/tracing transport details (the `observability` profile is the on/off switch) |
 
 Model & MCP secrets are referenced as `${VAR}` in the DB/config and expanded at agent build, so keys stay out of the committed seed. `describe_mcp` returns the original `${VAR}` refs — never the expanded secret.
 
 ## API surface (`/v1`, mounted in `main.py`)
 
-`health` · `auth` (signup/login/OTP/me) · `models` (+providers) · `mcp` (servers/tools CRUD) · `skills` (global read-only + user CRUD) · `memory` (AGENTS.md + notes) · `workspace` (file CRUD + `/v1/media`) · `settings_ui` (UI prefs) · `chat` · `runs` (SSE run loop + approvals + `/v1/capabilities`) · `sessions` (per-user sidebar).
+`health` · `auth` (signup/login/OTP/me) · `models` (+providers, incl. `/v1/models/config/discover` — fetch a provider's live catalog — and `/save-bulk` — save several discovered models at once) · `mcp` (servers/tools CRUD) · `skills` (global read-only + user CRUD) · `memory` (AGENTS.md + notes) · `workspace` (file CRUD + `/v1/media`) · `settings_ui` (UI prefs) · `chat` · `runs` (SSE run loop + approvals + `/v1/capabilities`) · `sessions` (per-user sidebar).
 
 Chat runs stream tokens, tool calls, and HITL approval interrupts over SSE; everything else is plain JSON.
 
@@ -80,6 +81,7 @@ Chat runs stream tokens, tool calls, and HITL approval interrupts over SSE; ever
 - **Middleware** (`agent/middleware.py`): `StripStaleThinkingMiddleware` (fixes multi-turn thinking-block replays) + production guards (call/tool limits, transient retry, context trimming), additive over deepagents' built-ins.
 - **Messages live in the LangGraph checkpointer**, not the relational DB. The relational DB holds accounts, catalogs, per-user skills/MCP/models, and `sessions` metadata.
 - **Observability** (`app/core/observability.py`, both opt-in): tracing is pure env-var (LangChain → OTLP → self-hosted Langfuse via LangSmith's OTEL bridge); metrics are a Prometheus registry at `/metrics` fed by an ASGI middleware + a per-run `PrometheusCallbackHandler` + `record_*` calls in the run loop. Backing stack = the `observability` compose profile. See ARCHITECTURE.md §7a.
+- **Model discovery** (`agent.py`: `discover_models`, `save_user_models_bulk`, `_composite_model_id`): the Providers tab can fetch a provider's live model catalog instead of hand-typing an id (per-provider adapters for Azure OpenAI, Anthropic, Bedrock, OpenAI-compatible endpoints, and Gemini), then bulk-save a selection. Per-user model ids are `{provider}:{raw_id}` composites so the same base name can exist under multiple providers without colliding with a global (bare-id) model.
 
 ## Testing & migrations
 

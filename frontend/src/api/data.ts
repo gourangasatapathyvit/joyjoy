@@ -1,5 +1,7 @@
 import { http } from "@/api/client";
 import type {
+	BulkSaveResult,
+	DiscoverModelsResponse,
 	ListModelsResponse,
 	McpServer,
 	McpTool,
@@ -78,8 +80,20 @@ export const dataApi = {
 		}),
 
 	modelsConfig: () => http<ModelsConfigResponse>("/v1/models/config"),
+	// Fetch a provider's live model list from its API (creds in the body).
+	discoverModels: (entry: Record<string, unknown>) =>
+		http<DiscoverModelsResponse>("/v1/models/config/discover", {
+			method: "POST",
+			body: JSON.stringify(entry),
+		}),
 	saveModel: (entry: Record<string, unknown>) =>
 		http<Ok>("/v1/models/config/save", {
+			method: "POST",
+			body: JSON.stringify(entry),
+		}),
+	// Save several discovered models at once (shared creds + one per id).
+	saveModelsBulk: (entry: Record<string, unknown>) =>
+		http<BulkSaveResult>("/v1/models/config/save-bulk", {
 			method: "POST",
 			body: JSON.stringify(entry),
 		}),

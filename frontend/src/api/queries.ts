@@ -125,12 +125,24 @@ export function useModelMutations() {
 			mutationFn: (entry: Record<string, unknown>) => dataApi.saveModel(entry),
 			onSuccess,
 		}),
+		saveBulk: useMutation({
+			mutationFn: (entry: Record<string, unknown>) =>
+				dataApi.saveModelsBulk(entry),
+			onSuccess,
+		}),
 		remove: useMutation({
 			mutationFn: (id: string) => dataApi.deleteModel(id),
 			onSuccess,
 		}),
 		test: useMutation({ mutationFn: (id: string) => dataApi.testModel(id) }),
 	};
+}
+// Fetch a provider's live model list (no cache invalidation — it's a lookup).
+export function useDiscoverModels() {
+	return useMutation({
+		mutationFn: (entry: Record<string, unknown>) =>
+			dataApi.discoverModels(entry),
+	});
 }
 export function useWriteMemory() {
 	const qc = useQueryClient();

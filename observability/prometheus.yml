@@ -1,6 +1,7 @@
-# Prometheus scrape config for the joyjoy `observability` compose profile.
-# Mounted at /etc/prometheus/prometheus.yml. The backend exposes /metrics only
-# when METRICS_ENABLED=true.
+# Prometheus scrape config for the joyjoy `observability` compose profile (the baked
+# stack — docker-compose.yml). Mounted at /etc/prometheus/prometheus.yml. The backend
+# exposes /metrics whenever the `observability` profile is active. (For the host-run
+# backend under docker-compose.dev.yml, prometheus.dev.yml scrapes host.docker.internal.)
 global:
   scrape_interval: 15s
   evaluation_interval: 15s

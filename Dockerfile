@@ -24,9 +24,11 @@ RUN apt-get update \
       ca-certificates curl \
       libreoffice-writer libreoffice-calc libreoffice-impress fonts-liberation \
  && rm -rf /var/lib/apt/lists/*
+# DEV_MODE=false → real auth by default (secure image). Compose can override it, and
+# COMPOSE_PROFILES (forwarded by compose) drives DB/sandbox/observability at runtime.
 ENV UV_SYSTEM_PYTHON=1 \
     PYTHONUNBUFFERED=1 \
-    APP_ENV=prod \
+    DEV_MODE=false \
     BACKEND_HOST=0.0.0.0 \
     BACKEND_PORT=8080
 

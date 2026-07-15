@@ -113,8 +113,9 @@ async def lifespan(app: FastAPI):
         await get_agent(settings, checkpointer, store, settings.default_model, DEFAULT_USER_ID)  # warm default
         sandbox.start_reaper(settings)  # idle-pause per-session sandboxes (no-op unless enabled)
         logger.info(
-            "joyjoy backend ready (env=%s, prod=%s, sandbox=%s, models=%s)",
-            settings.app_env, settings.is_prod, settings.sandbox_enabled, list(settings.model_specs),
+            "joyjoy backend ready (dev_mode=%s, prod=%s, db_mode=%s, sandbox=%s, models=%s)",
+            settings.dev_mode, settings.is_prod, settings.db_mode,
+            settings.sandbox_enabled, list(settings.model_specs),
         )
         try:
             yield

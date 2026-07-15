@@ -14,8 +14,9 @@ def _health_payload() -> dict:
         "status": "ok",
         "state": "alive",
         "gateway_state": "alive",
-        "env": settings.app_env,
+        "dev_mode": settings.dev_mode,
         "prod": settings.is_prod,
+        "db_mode": settings.db_mode,
         "models": list(settings.model_specs),
     }
 

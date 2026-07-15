@@ -142,6 +142,8 @@ export interface ListModelsResponse {
 		id: string;
 		provider?: ModelProvider;
 		supports_reasoning?: boolean;
+		// What the model can do (chat / embeddings / image / …) — shown on hover.
+		capabilities?: string[];
 	}>;
 }
 
@@ -271,12 +273,36 @@ export interface ModelConfigItem {
 	api_key_masked?: string;
 	has_aws_secret?: boolean;
 	supports_reasoning?: boolean;
+	label?: string;
+	capabilities?: string[];
 	scope: "global" | "user";
 	editable: boolean;
 }
 export interface ModelsConfigResponse {
 	models: ModelConfigItem[];
 	providers: ProviderType[];
+}
+
+// ── Dynamic model discovery (fetch a provider's live model list) ───────────
+// POST /v1/models/config/discover with { provider, ...credentials }.
+export interface DiscoveredModel {
+	id: string;
+	label?: string;
+	capabilities?: string[];
+	description?: string;
+}
+export interface DiscoverModelsResponse {
+	ok: boolean;
+	error?: string;
+	provider?: ModelProvider;
+	models?: DiscoveredModel[];
+}
+// POST /v1/models/config/save-bulk with { provider, ids, ...shared credentials }.
+export interface BulkSaveResult {
+	ok: boolean;
+	error?: string;
+	saved?: string[];
+	errors?: Record<string, string>;
 }
 export interface ModelTestResult {
 	id: string;
