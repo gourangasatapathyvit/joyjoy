@@ -36,5 +36,5 @@ NEXT
 else
   echo "[dev-up] DEV_MODE=false → full baked stack (docker-compose.yml)"
   docker compose -f docker-compose.yml up --build "${ARGS[@]}"
-  echo "[dev-up] stack up → http://localhost:${PORT:-8080}"
+  echo "[dev-up] stack up → http://localhost:${BACKEND_PORT:-8080}"
 fi

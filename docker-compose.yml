@@ -88,8 +88,8 @@ services:
       WORKSPACE_ROOT: ${CONTAINER_DATA_DIR:-/data}
       APP_DB_PATH: ${CONTAINER_DATA_DIR:-/data}/joyjoy.db
       SQLITE_CHECKPOINT_PATH: ${CONTAINER_DATA_DIR:-/data}/dev_checkpoints.sqlite
-      BACKEND_HOST: 0.0.0.0
-      BACKEND_PORT: "8080"
+      BACKEND_HOST: ${BACKEND_HOST:-0.0.0.0}
+      BACKEND_PORT: ${BACKEND_PORT:-8080}
       # ---- Agent sandbox (code/shell execution) ----
       # Auto-derived from COMPOSE_PROFILES: `sandbox` present → per-session OpenSandbox
       # containers via the `opensandbox` service (that profile also starts the server +
@@ -119,7 +119,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
     ports:
-      - "${PORT:-8080}:8080"
+      - "${BACKEND_PORT:-8080}:8080"
     volumes:
       # Named volume by default, mounted at ${CONTAINER_DATA_DIR:-/data} — the SAME var
       # used to build WORKSPACE_ROOT/APP_DB_PATH/SQLITE_CHECKPOINT_PATH above, so the
@@ -241,13 +241,13 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
+      POSTGRES_USER: ${LANGFUSE_DB_USER:-postgres}
       POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse}
-      POSTGRES_DB: langfuse
+      POSTGRES_DB: ${LANGFUSE_DB_NAME:-langfuse}
     volumes:
       - langfuse-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${LANGFUSE_DB_USER:-postgres}"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -257,7 +257,7 @@ services:
     image: clickhouse/clickhouse-server:24.3
     restart: unless-stopped
     environment:
-      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
       CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
     volumes:
       - langfuse-clickhouse:/var/lib/clickhouse
@@ -280,9 +280,9 @@ services:
     # Pre-create the langfuse bucket dir before starting (Langfuse v3 stages OTEL
     # ingestion events in S3; without the bucket, ingestion 500s with NoSuchBucket).
     entrypoint: ["sh", "-c"]
-    command: ["mkdir -p /data/langfuse && minio server /data --console-address ':9001'"]
+    command: ["mkdir -p /data/${LANGFUSE_S3_BUCKET:-langfuse} && minio server /data --console-address ':9001'"]
     environment:
-      MINIO_ROOT_USER: minio
+      MINIO_ROOT_USER: ${LANGFUSE_MINIO_USER:-minio}
       MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:-miniosecret}
     volumes:
       - langfuse-minio:/data
@@ -298,7 +298,7 @@ services:
       langfuse-redis: {condition: service_started}
       langfuse-minio: {condition: service_started}
     environment: &langfuse-env
-      DATABASE_URL: postgresql://postgres:${LANGFUSE_DB_PASSWORD:-langfuse}@langfuse-postgres:5432/langfuse
+      DATABASE_URL: postgresql://${LANGFUSE_DB_USER:-postgres}:${LANGFUSE_DB_PASSWORD:-langfuse}@langfuse-postgres:5432/${LANGFUSE_DB_NAME:-langfuse}
       # Dev defaults so the opt-in profile runs out-of-the-box; OVERRIDE in prod via
       # .env (these can't be :? required — compose interpolates all services even when
       # this profile is off, which would break a plain `docker compose up`).
@@ -306,14 +306,14 @@ services:
       ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
       CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
       CLICKHOUSE_URL: http://langfuse-clickhouse:8123
-      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
       CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
       CLICKHOUSE_CLUSTER_ENABLED: "false"
       REDIS_CONNECTION_STRING: redis://default:${LANGFUSE_REDIS_PASSWORD:-redis}@langfuse-redis:6379
-      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: ${LANGFUSE_S3_BUCKET:-langfuse}
       LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
       LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
-      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_MINIO_USER:-minio}
       LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:-miniosecret}
       LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
 
@@ -335,13 +335,13 @@ services:
       # Headless bootstrap: create the org/project/user with EXACTLY the keys the
       # backend uses (LANGFUSE_PUBLIC_KEY/SECRET_KEY) so per-user/session tracing
       # works on first boot with no manual UI step. UI login = the init user below.
-      LANGFUSE_INIT_ORG_ID: joyjoy
-      LANGFUSE_INIT_PROJECT_ID: joyjoy
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-joyjoy}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-joyjoy}
       LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-joyjoy-dev}
       LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-joyjoy-dev}
       LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-admin@joyjoy.local}
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-joyjoyadmin}
-      LANGFUSE_INIT_USER_NAME: joyjoy admin
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-joyjoy admin}
 
   prometheus:
     profiles: ["observability"]
