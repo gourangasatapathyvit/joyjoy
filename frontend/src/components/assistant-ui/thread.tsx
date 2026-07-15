@@ -162,6 +162,27 @@ const ThreadRoot: FC<{ isEmpty: boolean }> = ({ isEmpty }) => {
 	const { Welcome = ThreadWelcome } = useContext(ThreadComponentsContext);
 	const autoFollow = useSettingsStore((s) => s.autoFollow);
 
+	// The composer previously lived INSIDE the scrollable viewport as a
+	// `position: sticky` footer. Sticky-in-flow only avoids covering message
+	// content at the exact document-flow bottom; at any other scroll position
+	// (mid-thread, or short of that exact bottom by even a few px — the normal
+	// resting spot after a real scroll gesture) it visually floats on top of
+	// whatever message content is currently in that screen band, hiding it.
+	// No amount of reserved margin fixes that — it's inherent to sticky-in-flow.
+	// Instead, the composer now lives OUTSIDE `ThreadPrimitive.Viewport`, as a
+	// plain flex sibling: the viewport takes `flex-1` and the composer row
+	// takes its natural height, so flexbox — not scroll position — guarantees
+	// they never occupy the same pixels.
+	const composerRow = (
+		<div className="relative mx-auto flex w-full max-w-(--thread-max-width) flex-col gap-4 px-4 pb-4 md:pb-6">
+			{!isEmpty && <ThreadScrollToBottom />}
+			<Composer />
+			<AuiIf condition={(s) => isNewChatView(s) && s.composer.isEmpty}>
+				<ThreadSuggestions />
+			</AuiIf>
+		</div>
+	);
+
 	return (
 		<ThreadPrimitive.Root
 			className="aui-root aui-thread-root bg-background @container flex h-full flex-col"
@@ -200,28 +221,29 @@ const ThreadRoot: FC<{ isEmpty: boolean }> = ({ isEmpty }) => {
 
 					<div
 						data-slot="aui_message-group"
-						className="mb-14 flex flex-col gap-y-6 empty:hidden"
+						className="mb-6 flex flex-col gap-y-6 empty:hidden"
 					>
 						<ThreadPrimitive.Messages>
 							{() => <ThreadMessage />}
 						</ThreadPrimitive.Messages>
 					</div>
 
-					<ThreadPrimitive.ViewportFooter
-						className={cn(
-							"aui-thread-viewport-footer bg-background flex flex-col gap-4 overflow-visible pb-4 md:pb-6",
-							!isEmpty &&
-								"sticky bottom-0 mt-auto rounded-t-(--composer-radius)",
-						)}
-					>
-						<ThreadScrollToBottom />
-						<Composer />
-						<AuiIf condition={(s) => isNewChatView(s) && s.composer.isEmpty}>
-							<ThreadSuggestions />
-						</AuiIf>
-					</ThreadPrimitive.ViewportFooter>
+					{/* Empty (new-chat) state keeps the composer centered together with
+					    the welcome heading, inside the same centered column. */}
+					{isEmpty && composerRow}
 				</div>
 			</ThreadPrimitive.Viewport>
+
+			{/* Non-empty state: composer docked outside the scroll region — see
+			    comment above on why this replaces the old sticky-footer approach. */}
+			{!isEmpty && (
+				<div
+					data-slot="aui_thread-composer-dock"
+					className="aui-thread-viewport-footer bg-background rounded-t-(--composer-radius)"
+				>
+					{composerRow}
+				</div>
+			)}
 		</ThreadPrimitive.Root>
 	);
 };
