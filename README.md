@@ -22,7 +22,7 @@ React 19 SPA  ──HTTPS (cookie auth)──►  FastAPI  ──►  deepagents
 ## What it does
 
 - **Multi-tenant agents** — one compiled agent per `(user, model, reasoning, genui)`, cached in-process; per-request `user_id` + `thread_id` isolation.
-- **Bring your models** — Azure OpenAI, Anthropic (incl. Azure AI Foundry `/anthropic`), AWS Bedrock, Google GenAI, NVIDIA NIM, or any OpenAI-compatible endpoint (OpenRouter, DeepSeek, Groq, local servers, …); global catalog + per-user additions. Add a model by **fetching the provider's live catalog** and picking from it (or type an id by hand) — no need to know exact model names in advance.
+- **Bring your models** — Azure OpenAI, Anthropic (incl. Azure AI Foundry `/anthropic`), AWS Bedrock, Google GenAI, NVIDIA NIM, xAI/Grok (API key **or** log in with a SuperGrok/X Premium+ subscription), or any OpenAI-compatible endpoint (OpenRouter, DeepSeek, Groq, local servers, …); global catalog + per-user additions. Add a model by **fetching the provider's live catalog** and picking from it (or type an id by hand) — no need to know exact model names in advance.
 - **Skills & MCP tools** — global (read-only) + per-user, managed from the UI; all MCP/plugin tool calls auto-gate for human approval (HITL).
 - **Per-user memory & workspace** — durable `AGENTS.md` memory and a real per-thread file workspace (downloadable, inline media previews).
 - **Generative UI** — agents can emit rich UI: `render_ui` (JSON component kit) and `render_html` (sandboxed HTML canvas), toggleable per session.
