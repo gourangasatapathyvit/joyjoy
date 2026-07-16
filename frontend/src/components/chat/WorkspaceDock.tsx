@@ -25,6 +25,12 @@ import {
 } from "@/api/workspace";
 import { DownloadButton } from "@/components/chat/DownloadButton";
 import {
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
 	formatSize,
 	isImageFile,
 	isMarkdownFile,
@@ -436,12 +442,18 @@ export function WorkspaceDock() {
 		>
 			<ResizeHandle />
 			<div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-				<span
-					title={`Session: ${threadId}`}
-					className="flex cursor-help items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground"
-				>
-					<Folder className="size-3.5" /> {t("workspace.title")}
-				</span>
+				<TooltipProvider delay={0}>
+					<Tooltip>
+						<TooltipTrigger
+							render={
+								<span className="flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground" />
+							}
+						>
+							<Folder className="size-3.5" /> {t("workspace.title")}
+						</TooltipTrigger>
+						<TooltipContent side="bottom">Session: {threadId}</TooltipContent>
+					</Tooltip>
+				</TooltipProvider>
 				<div className="flex items-center gap-0.5">
 					<button
 						type="button"
