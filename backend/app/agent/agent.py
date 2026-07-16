@@ -1153,6 +1153,18 @@ async def _get_or_build(settings, checkpointer, store, model_id, user_id, *, run
     # Reasoning is per-request: bake the (normalized, support-gated) effort into the
     # cache key so a thinking-enabled model is a distinct compiled agent.
     spec = (await merged_model_specs(settings, uid)).get(mid) or {}
+    # The compiled-agent cache below has no TTL, and a compiled agent bakes its
+    # ChatXAI instance's access_token in at BUILD time — so a cache HIT (the common
+    # case) never re-reaches build_model_for's own _ensure_xai_oauth_fresh call,
+    # letting an xai_oauth model's access_token silently go stale (and every
+    # request 403) for as long as the cache entry survives, with nothing to ever
+    # refresh it. Check/refresh proactively on EVERY call, not just cold builds.
+    # is_expiring is a cheap time comparison when NOT due; when a refresh DOES
+    # happen, _persist_xai_oauth_tokens already invalidates this user's whole
+    # agent cache as a side effect, so the cache_get just below naturally misses
+    # and rebuilds with the fresh token via build_model_for's own refresh call.
+    if Provider.coerce(spec.get("provider")) == Provider.XAI_OAUTH:
+        await _ensure_xai_oauth_fresh(settings, uid, mid, spec)
     effort = normalize_reasoning_effort(reasoning) if model_supports_reasoning(spec) else None
     # genui is part of the key: when off, the generative-UI tools aren't compiled in,
     # so the agent literally can't render UI for that run.
