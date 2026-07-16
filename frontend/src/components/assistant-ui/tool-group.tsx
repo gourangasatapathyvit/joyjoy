@@ -146,8 +146,11 @@ function ToolGroupTrigger({
 				className={cn(
 					"aui-tool-group-trigger-chevron size-4 shrink-0",
 					"transition-transform duration-(--animation-duration) ease-out",
-					"group-data-[state=closed]/trigger:-rotate-90",
-					"group-data-[state=open]/trigger:rotate-0",
+					// base-ui's Collapsible.Trigger sets `data-panel-open` (presence-only),
+					// NOT Radix's `data-state="open"|"closed"` — the old Radix-style
+					// selectors here never matched, so the chevron never rotated.
+					"-rotate-90",
+					"group-data-[panel-open]/trigger:rotate-0",
 				)}
 			/>
 		</CollapsibleTrigger>
@@ -164,13 +167,14 @@ function ToolGroupContent({
 			data-slot="tool-group-content"
 			className={cn(
 				"aui-tool-group-content relative overflow-hidden text-sm outline-none",
-				"group/collapsible-content ease-out",
-				"data-[state=closed]:animate-collapsible-up",
-				"data-[state=open]:animate-collapsible-down",
-				"data-[state=closed]:fill-mode-forwards",
-				"data-[state=closed]:pointer-events-none",
-				"data-[state=open]:duration-(--animation-duration)",
-				"data-[state=closed]:duration-(--animation-duration)",
+				// base-ui's Panel exposes its live measured height as
+				// --collapsible-panel-height and forces it to 0 during the enter/exit
+				// transition via data-starting-style/data-ending-style — a plain height
+				// transition (not a keyframe animation, which needs a fixed end value
+				// rather than "auto") is base-ui's own idiom for this.
+				"h-(--collapsible-panel-height) transition-[height] duration-(--animation-duration) ease-out",
+				"data-[starting-style]:h-0 data-[ending-style]:h-0",
+				"data-[closed]:pointer-events-none",
 				className,
 			)}
 			{...props}

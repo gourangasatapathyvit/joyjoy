@@ -155,12 +155,12 @@ function ReasoningFade({
 				"bg-[linear-gradient(to_top,var(--color-background),transparent)]",
 				"group-data-[variant=muted]/reasoning-root:bg-[linear-gradient(to_top,hsl(var(--muted)/0.5),transparent)]",
 				"fade-in-0 animate-in",
-				"group-data-[state=open]/collapsible-content:animate-out",
-				"group-data-[state=open]/collapsible-content:fade-out-0",
-				"group-data-[state=open]/collapsible-content:delay-[calc(var(--animation-duration)*0.75)]",
-				"group-data-[state=open]/collapsible-content:fill-mode-forwards",
+				"group-data-[open]/collapsible-content:animate-out",
+				"group-data-[open]/collapsible-content:fade-out-0",
+				"group-data-[open]/collapsible-content:delay-[calc(var(--animation-duration)*0.75)]",
+				"group-data-[open]/collapsible-content:fill-mode-forwards",
 				"duration-(--animation-duration)",
-				"group-data-[state=open]/collapsible-content:duration-(--animation-duration)",
+				"group-data-[open]/collapsible-content:duration-(--animation-duration)",
 				className,
 			)}
 			{...props}
@@ -212,8 +212,11 @@ function ReasoningTrigger({
 				className={cn(
 					"aui-reasoning-trigger-chevron mt-0.5 size-4 shrink-0",
 					"transition-transform duration-(--animation-duration) ease-out",
-					"group-data-[state=closed]/trigger:-rotate-90",
-					"group-data-[state=open]/trigger:rotate-0",
+					// base-ui's Collapsible.Trigger sets `data-panel-open` (presence-only),
+					// NOT Radix's `data-state="open"|"closed"` — the old Radix-style
+					// selectors here never matched, so the chevron never rotated.
+					"-rotate-90",
+					"group-data-[panel-open]/trigger:rotate-0",
 				)}
 			/>
 		</CollapsibleTrigger>
@@ -232,13 +235,15 @@ function ReasoningContent({
 			data-slot="reasoning-content"
 			className={cn(
 				"aui-reasoning-content text-muted-foreground relative overflow-hidden text-sm outline-none",
-				"group/collapsible-content ease-out",
-				"data-[state=closed]:animate-collapsible-up",
-				"data-[state=open]:animate-collapsible-down",
-				"data-[state=closed]:fill-mode-forwards",
-				"data-[state=closed]:pointer-events-none",
-				"data-[state=open]:duration-(--animation-duration)",
-				"data-[state=closed]:duration-(--animation-duration)",
+				"group/collapsible-content",
+				// base-ui's Panel exposes its live measured height as
+				// --collapsible-panel-height and forces it to 0 during the enter/exit
+				// transition via data-starting-style/data-ending-style — a plain height
+				// transition (not a keyframe animation, which needs a fixed end value
+				// rather than "auto") is base-ui's own idiom for this.
+				"h-(--collapsible-panel-height) transition-[height] duration-(--animation-duration) ease-out",
+				"data-[starting-style]:h-0 data-[ending-style]:h-0",
+				"data-[closed]:pointer-events-none",
 				className,
 			)}
 			{...props}
@@ -296,14 +301,14 @@ function ReasoningText({
 			className={cn(
 				"aui-reasoning-text relative z-0 max-h-64 overflow-y-auto overscroll-contain ps-6 pt-2 pb-2 leading-relaxed",
 				"transform-gpu transition-[transform,opacity]",
-				"group-data-[state=open]/collapsible-content:animate-in",
-				"group-data-[state=closed]/collapsible-content:animate-out",
-				"group-data-[state=open]/collapsible-content:fade-in-0",
-				"group-data-[state=closed]/collapsible-content:fade-out-0",
-				"group-data-[state=open]/collapsible-content:slide-in-from-top-4",
-				"group-data-[state=closed]/collapsible-content:slide-out-to-top-4",
-				"group-data-[state=open]/collapsible-content:duration-(--animation-duration)",
-				"group-data-[state=closed]/collapsible-content:duration-(--animation-duration)",
+				"group-data-[open]/collapsible-content:animate-in",
+				"group-data-[closed]/collapsible-content:animate-out",
+				"group-data-[open]/collapsible-content:fade-in-0",
+				"group-data-[closed]/collapsible-content:fade-out-0",
+				"group-data-[open]/collapsible-content:slide-in-from-top-4",
+				"group-data-[closed]/collapsible-content:slide-out-to-top-4",
+				"group-data-[open]/collapsible-content:duration-(--animation-duration)",
+				"group-data-[closed]/collapsible-content:duration-(--animation-duration)",
 				className,
 			)}
 			{...props}
