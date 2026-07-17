@@ -68,6 +68,14 @@ class _Run:
         # Id of this turn's answer message → sources are persisted keyed by it so
         # each assistant turn keeps its own citations across reloads.
         self.answer_id: str | None = None
+        # tool name -> FIFO queue of real tool_call ids from `tool.started`, awaiting
+        # pairing with an `approval.request` for a gated call of that name. ``ActionRequest``
+        # (langchain's HITL middleware) carries only {name, args, description} — no
+        # tool_call_id — so when the model calls the SAME tool more than once in one
+        # turn (e.g. three `search` calls), each interrupt round's approval.request is
+        # matched back to its real id positionally (both lists follow the same
+        # tool_calls order), not by a "last id wins" name lookup on the client.
+        self.recent_tool_call_ids: dict[str, list[str]] = {}
 
 
 _RUNS: dict[str, _Run] = {}
@@ -224,6 +232,8 @@ async def _stream_segment(run: _Run, agent_input):
                             await _emit(run, "usage", **run.last_usage)
                         for tc in (getattr(m, "tool_calls", None) or []):
                             _collect_tool_sources(run, tc.get("name"), tc.get("args"))
+                            if tc.get("id"):
+                                run.recent_tool_call_ids.setdefault(tc.get("name"), []).append(tc["id"])
                             await _emit(run, "tool.started", tool=tc.get("name"), name=tc.get("name"),
                                         toolCallId=tc.get("id"), args=tc.get("args") or {}, label=tc.get("name"))
                     elif isinstance(m, ToolMessage):
@@ -270,10 +280,18 @@ async def _drive(run: _Run) -> None:
                     aid = "ap-" + uuid.uuid4().hex
                     fut = asyncio.get_running_loop().create_future()
                     run.pending[aid] = fut
+                    # Positionally pair this ActionRequest with the real tool_call id
+                    # `tool.started` already emitted for it (FIFO per tool name) — without
+                    # this, the client can only correlate by name, which silently
+                    # misattributes every approval but the last to one toolCallId when a
+                    # turn calls the same tool more than once, leaving the others' futures
+                    # (and this whole resume) waiting forever.
+                    ids_for_name = run.recent_tool_call_ids.get(ar.get("name")) or []
+                    tool_call_id = ids_for_name.pop(0) if ids_for_name else None
                     await _emit(
                         run, "approval.request",
                         approval_id=aid, run_id=run.run_id,
-                        tool=ar.get("name"), name=ar.get("name"),
+                        tool=ar.get("name"), name=ar.get("name"), toolCallId=tool_call_id,
                         args=ar.get("args") or {}, command=_fmt(ar.get("args") or {}),
                         description=ar.get("description") or ("Approve " + str(ar.get("name")) + "?"),
                         risk_level="high", choices=["approve", "reject"], allow_permanent=False,

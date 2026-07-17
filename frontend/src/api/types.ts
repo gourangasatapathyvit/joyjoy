@@ -61,6 +61,10 @@ export type RunEvent =
 			run_id: string;
 			tool?: string;
 			name?: string;
+			// The real backend tool_call id this approval gates, when the server could
+			// pair it (see runs.py) — prefer this over name-based correlation, which
+			// breaks when a turn calls the same tool more than once.
+			toolCallId?: string;
 			args?: unknown;
 			command?: string;
 			description?: string;

@@ -315,7 +315,7 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 			const startTool = (ev: Extract<RunEvent, { event: "tool.started" }>) => {
 				const id = ev.toolCallId ?? newId("tc");
 				const name = ev.tool ?? ev.name ?? "tool";
-				toolByNameRef.current[name] = id; // sync, before approval.request can read it
+				toolByNameRef.current[name] = id; // fallback correlation if an approval.request ever arrives without its own toolCallId
 				patch(assistantId, (m) => {
 					if (
 						m.parts.some((p) => p.type === "tool-call" && p.toolCallId === id)
@@ -380,7 +380,13 @@ export function JoyjoyRuntimeProvider({ children }: { children: ReactNode }) {
 					respondApproval(ev.run_id, ev.approval_id, "approve").catch(() => {});
 					return;
 				}
-				let toolCallId = toolByNameRef.current[name];
+				// Prefer the real backend tool_call id the server paired this approval
+				// with (see runs.py) over the name-based fallback below, which
+				// mis-corresponds whenever a turn calls the same tool more than once —
+				// every approval but the last would silently collide onto the same
+				// toolCallId and never get its own card, hanging the run forever once
+				// the visible one was answered (the backend awaits ALL of them).
+				let toolCallId = ev.toolCallId || toolByNameRef.current[name];
 				if (!toolCallId) {
 					toolCallId = newId("tc");
 					const tcid = toolCallId;
