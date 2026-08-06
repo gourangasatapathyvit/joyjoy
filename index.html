@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>sidebar icon preview</title>
+<style>
+	:root {
+		--background: #17102b;
+		--card: #1f1638;
+		--muted-foreground: #a99cc4;
+		--primary: #7c6cf0;
+		--border: #2e2350;
+	}
+	* { box-sizing: border-box; }
+	body {
+		margin: 0;
+		min-height: 100vh;
+		background: var(--background);
+		color: #eae6f7;
+		font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 48px;
+		padding: 48px 16px;
+	}
+	h1 { font-size: 15px; font-weight: 600; color: #eae6f7; margin: 0 0 4px; }
+	p.hint { font-size: 12.5px; color: var(--muted-foreground); margin: 0 0 18px; }
+	.bar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		background: var(--card);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 10px 14px;
+	}
+	.icon-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		border-radius: 6px;
+		border: none;
+		background: transparent;
+		color: var(--muted-foreground);
+		cursor: pointer;
+		transition: background-color .15s, color .15s;
+	}
+	.icon-btn:hover {
+		background: color-mix(in srgb, var(--primary) 12%, transparent);
+		color: var(--primary);
+	}
+	.icon-btn svg { width: 16px; height: 16px; }
+	.accent-pill {
+		width: 22px;
+		height: 22px;
+		border-radius: 7px;
+		background: linear-gradient(145deg, #8b7bf5, #6a5ae0);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		box-shadow: 0 1px 4px rgba(124, 108, 240, .5);
+		transition: transform .15s;
+	}
+	.accent-pill:hover { transform: scale(1.06); }
+	.accent-pill svg { width: 13px; height: 13px; color: #fff; }
+	.card {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+	}
+</style>
+</head>
+<body>
+
+<div class="card">
+	<h1>current (PanelLeftClose)</h1>
+	<p class="hint">what ConversationSidebar.tsx renders today</p>
+	<div class="bar">
+		<button class="icon-btn" title="Collapse">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<rect x="3" y="3" width="18" height="18" rx="2"/>
+				<path d="M9 3v18"/>
+				<path d="M16 15l-3-3 3-3"/>
+			</svg>
+		</button>
+	</div>
+</div>
+
+<div class="card">
+	<h1>option — hamburger only</h1>
+	<p class="hint">drop-in swap, same button, just a different glyph</p>
+	<div class="bar">
+		<button class="icon-btn" title="Toggle sidebar">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<line x1="4" x2="20" y1="6" y2="6"/>
+				<line x1="4" x2="20" y1="12" y2="12"/>
+				<line x1="4" x2="20" y1="18" y2="18"/>
+			</svg>
+		</button>
+	</div>
+</div>
+
+<div class="card">
+	<h1>option — hamburger + accent pill (matches your reference)</h1>
+	<p class="hint">hamburger toggles the sidebar; the colored pill is a separate action (e.g. new chat)</p>
+	<div class="bar">
+		<button class="icon-btn" title="Toggle sidebar">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<line x1="4" x2="20" y1="6" y2="6"/>
+				<line x1="4" x2="20" y1="12" y2="12"/>
+				<line x1="4" x2="20" y1="18" y2="18"/>
+			</svg>
+		</button>
+		<div class="accent-pill" title="New chat">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+				<path d="M12 5v14M5 12h14"/>
+			</svg>
+		</div>
+	</div>
+</div>
+
+</body>
+</html>
