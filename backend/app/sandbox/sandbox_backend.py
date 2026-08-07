@@ -23,6 +23,7 @@ import logging
 
 from deepagents.backends.sandbox import BaseSandbox
 from deepagents.backends.protocol import (
+    DeleteResult,
     EditResult,
     ExecuteResponse,
     FileDownloadResponse,
@@ -143,6 +144,18 @@ class OpenSandboxBackend(BaseSandbox):
         except _ConfinementError:
             return EditResult(error="path escapes the session workspace")
         return super().edit(wp, old_string, new_string, replace_all)
+
+    def delete(self, file_path: str):
+        # No adelete() override needed: BackendProtocol's default adelete()
+        # dispatches to asyncio.to_thread(self.delete, ...), and BaseSandbox
+        # (unlike ls/read/write/edit/glob/grep) doesn't shadow it with its own
+        # async-native implementation — so this confinement check already
+        # covers both the sync and async delete tool calls.
+        try:
+            wp = self._w(file_path)
+        except _ConfinementError:
+            return DeleteResult(error="path escapes the session workspace")
+        return super().delete(wp)
 
     def glob(self, pattern: str, path: str | None = None):
         try:

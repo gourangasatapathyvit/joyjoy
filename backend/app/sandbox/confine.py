@@ -21,6 +21,19 @@ def confine(root: str, rel_or_abs: str) -> str | None:
         rel = ""
     elif rel.startswith(root + "/"):
         rel = rel[len(root) + 1 :]
+    else:
+        # An absolute path that shares root's own parent (e.g. the shared
+        # mount) but points at a SIBLING directory — another thread's own
+        # subfolder, most plausibly — must be rejected outright here. Left
+        # unhandled, `rel.lstrip("/")` below would treat it as relative and
+        # silently re-nest it under root (e.g. "/mount/thread-b" confining
+        # "/mount/thread-a/x" would produce "/mount/thread-b/mount/thread-a/x"
+        # — still confined, since it still starts with root, so not an actual
+        # escape, but a confusing wrong-thread false negative instead of a
+        # clean rejection).
+        parent = posixpath.dirname(root)
+        if rel.startswith("/") and parent not in ("", "/") and (rel == parent or rel.startswith(parent + "/")):
+            return None
     full = posixpath.normpath(posixpath.join(root, rel.lstrip("/")))
     if full != root and not full.startswith(root + "/"):
         return None

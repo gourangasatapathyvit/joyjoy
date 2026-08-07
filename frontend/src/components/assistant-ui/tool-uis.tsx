@@ -169,14 +169,17 @@ function DiffView({ oldText, newText }: { oldText: string; newText: string }) {
 	);
 }
 
-/** Parse deepagents' line-numbered read_file output (`"   12\t<text>"`, with
- * `12.1`-style continuation rows for wrapped long lines) into number + text.
+/** Parse deepagents' line-numbered read_file output into number + text. Accepts
+ * both the tab-separated gutter (`"   12\t<text>"`, deepagents <0.7.0) and the
+ * two-space-aligned gutter (`"12  <text>"`, deepagents >=0.7.0) — old chat
+ * history persisted under the previous format still needs to render correctly.
+ * `12.1`-style continuation rows for wrapped long lines are supported by both.
  * Lines that don't match (e.g. the empty-file system reminder) keep no number. */
 function parseNumberedLines(
 	text: string,
 ): { no: string | null; text: string }[] {
 	return text.split("\n").map((line) => {
-		const m = line.match(/^\s*(\d+(?:\.\d+)?)\t(.*)$/);
+		const m = line.match(/^\s*(\d+(?:\.\d+)?)(?:\t| {2,})(.*)$/);
 		return m ? { no: m[1], text: m[2] } : { no: null, text: line };
 	});
 }
@@ -292,7 +295,11 @@ const EditFileToolUI: ToolCallMessagePartComponent = (part) => {
  * `str(paths)`) into its items. Returns null when the text isn't a list repr
  * (e.g. an error string) so the caller can fall back to the raw renderer. */
 function parsePyList(text: string): string[] | null {
-	if (!text.trim().startsWith("[")) return null;
+	const trimmed = text.trim();
+	// deepagents >=0.7.0 renders an empty ls/glob result as this literal string
+	// instead of "[]" — treat it as the empty-list case, not a parse failure.
+	if (trimmed === "No files found") return [];
+	if (!trimmed.startsWith("[")) return null;
 	const items: string[] = [];
 	const re = /'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"/g;
 	let m: RegExpExecArray | null = re.exec(text);

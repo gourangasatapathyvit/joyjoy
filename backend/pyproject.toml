@@ -5,7 +5,7 @@ description = "Multi-tenant Deep Agents backend (single process, Postgres-backed
 requires-python = ">=3.11"
 dependencies = [
     # Agent engine
-    "deepagents==0.6.11",
+    "deepagents==0.7.5",
     "langgraph>=1.2,<2",
     "langchain-core>=0.3",
     "langchain-openai>=0.2",
