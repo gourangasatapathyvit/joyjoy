@@ -97,15 +97,33 @@ class OpenSandboxBackend(BaseSandbox):
         subfolder + dedicated OS user on first use, cached thereafter."""
         return sandbox_mgr.ensure_thread_workspace_sync(self.settings, self.user_id, self._seg())
 
+    @property
+    def _skills_root(self) -> str:
+        return f"{self._mount}/.skills"
+
     def _w(self, path: str) -> str:
         """Map an agent file path into the CURRENT THREAD's confined subfolder,
         rejecting any ``..``/absolute-path escape attempt (raises
         ``_ConfinementError``). The deepagents file tools use root-relative paths
         (e.g. ``/data.txt``); those land under ``{mount}/{thread_seg}``, never the
         shared user mount directly, so one thread can't read/write another's
-        files even in this shared-per-user container."""
-        thread_root, _uid = self._thread()
-        full = confine(thread_root, path or "/")
+        files even in this shared-per-user container.
+
+        Exception: paths under ``{mount}/.skills`` — where ``load_skill``
+        materializes a skill (see ``agent.py:_make_load_skill_tool`` /
+        ``workspace_sandbox.materialize``), deliberately shared across all of a
+        user's threads, not confined to any one of them — confine against that
+        shared root instead. Without this, ``load_skill``'s own returned
+        instruction ("Read {base}/SKILL.md") would always fail: ``confine()``
+        otherwise rejects it as a sibling-directory escape from the thread root,
+        the same rule that (correctly) stops one thread from reading another's."""
+        skills_root = self._skills_root
+        p = path or "/"
+        if p == skills_root or p.startswith(skills_root + "/"):
+            full = confine(skills_root, p)
+        else:
+            thread_root, _uid = self._thread()
+            full = confine(thread_root, p)
         if full is None:
             raise _ConfinementError(path)
         return full
@@ -252,9 +270,11 @@ class OpenSandboxBackend(BaseSandbox):
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
         sb = self._sb()
         thread_root, _uid = self._thread()
+        skills_root = self._skills_root
         out: list[FileDownloadResponse] = []
         for p in paths:
-            full = confine(thread_root, p)
+            root = skills_root if (p == skills_root or p.startswith(skills_root + "/")) else thread_root
+            full = confine(root, p)
             if full is None:
                 out.append(FileDownloadResponse(path=p, error="path escapes the session workspace"))
                 continue
