@@ -404,9 +404,14 @@ async def build_model_for(settings: Settings, model_id: str, uid: str | None = N
     return AzureChatOpenAI(**azure_kwargs)
 
 
-def _session_workspace_seg() -> str | None:
-    """The current session's workspace key from the runtime context
-    (``workspace_id`` or ``thread_id``), or None when called outside a run."""
+def _thread_workspace_seg() -> str | None:
+    """The current THREAD's workspace segment from the runtime context
+    (``workspace_id`` or ``thread_id``), or None when called outside a run.
+
+    Distinct from the sandbox's per-USER pool identity (``uid``, already known
+    statically at backend-build time — see ``build_backend``): this value picks
+    which subfolder of that shared container (and which dedicated OS user) a
+    given thread is confined to, via ``OpenSandboxBackend``/``workspace_sandbox``."""
     try:
         rt = get_runtime()
     except Exception:
@@ -437,7 +442,7 @@ def _bind_session_workspace(tools: list) -> list:
 
         def _wrap(orig):
             async def _acall(**kwargs):
-                kwargs["workspace_id"] = _session_workspace_seg() or ""
+                kwargs["workspace_id"] = _thread_workspace_seg() or ""
                 return await orig.ainvoke(kwargs)
 
             return StructuredTool(
@@ -457,12 +462,14 @@ def _make_load_skill_tool(settings: Settings, uid: str):
     the DB and mounted read-only at /skills; this drops a runnable copy into the
     sandbox workspace under ``/workspace/.skills/<name>/``."""
     async def _load(name: str) -> str:
-        seg = _session_workspace_seg() or DEFAULT_USER_ID
         tree = await read_skill_tree(settings, uid, name)
         if not tree:
             return f"Skill '{name}' not found."
         base = f"{settings.sandbox_mount_path.rstrip('/')}/.skills/{name}"
-        n = await _wsx.materialize(settings, seg, base, tree)
+        # Materializes under the shared per-user mount, outside any thread's
+        # confined subfolder (skills are meant to be shared across a user's
+        # threads) — so this needs the pool identity (uid), not a thread segment.
+        n = await _wsx.materialize(settings, uid, base, tree)
         return (
             f"Skill '{name}' loaded into {base} ({n} files). Read {base}/SKILL.md and "
             f"run its scripts from there with the execute tool."
@@ -525,7 +532,7 @@ class SessionFilesystemBackend(FilesystemBackend):
 
     @property
     def cwd(self) -> Path:
-        seg = _session_workspace_seg()
+        seg = _thread_workspace_seg()
         root = (self._base / seg) if seg else self._base
         try:
             root.mkdir(parents=True, exist_ok=True)
@@ -571,7 +578,7 @@ def build_backend(settings: Settings, user_id: str = DEFAULT_USER_ID):
     # sandbox when enabled (CRUD + code run inside the container, on a durable
     # per-session volume), else the host per-session FilesystemBackend.
     if sandbox.is_enabled(settings):
-        default = OpenSandboxBackend(settings, uid, seg_fn=_session_workspace_seg)
+        default = OpenSandboxBackend(settings, uid, seg_fn=_thread_workspace_seg)
     else:
         host_root = os.path.join(settings.workspace_root_dir, uid, "workspace")
         os.makedirs(host_root, exist_ok=True)

@@ -86,13 +86,21 @@ async def sessions_update(thread_id: str, request: Request):
 async def sessions_delete(thread_id: str, request: Request):
     verify_gateway_key(request, settings)
     uid = resolve_user_id(request, settings)
+    # Resolve BEFORE delete_session removes the Session row — workspace_id_for
+    # needs that row to return the thread's real (fork-aware) workspace segment;
+    # once the row is gone it can only fall back to a synthetic "default-{uid}"
+    # value that doesn't correspond to any real folder.
+    ws = await sessions_mod.workspace_id_for(uid, thread_id) if sandbox_mgr.is_enabled(settings) else None
     res = await sessions_mod.delete_session(request.app.state.checkpointer, uid, thread_id)
-    # Reclaim the session's sandbox + its durable volume (the files are deliberately
-    # destroyed here — the conversation itself is being deleted).
-    if sandbox_mgr.is_enabled(settings):
+    # Delete just this thread's subfolder inside the user's SHARED sandbox
+    # container — not kill_session (full container teardown), which is now
+    # user-scoped and would take every other thread's sandbox down with it.
+    # Note: a forked session shares its parent's workspace segment, so deleting
+    # either one currently reclaims the files both point at (same tradeoff the
+    # old per-thread-container kill_session call already made).
+    if sandbox_mgr.is_enabled(settings) and ws:
         try:
-            ws = await sessions_mod.workspace_id_for(uid, thread_id)
-            await sandbox_mgr.kill_session(settings, ws, remove_volume=True)
+            await sandbox_mgr.delete_thread_workspace(settings, uid, ws)
         except Exception:  # noqa: BLE001 - cleanup is best-effort
             pass
     return JSONResponse(res)

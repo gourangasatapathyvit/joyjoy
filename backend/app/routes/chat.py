@@ -14,6 +14,7 @@ from sse_starlette.sse import EventSourceResponse
 from app.agent.agent import chunk_text, get_agent, invoke_once, resolve_model, stream_messages
 from app.core.auth import resolve_user_id, verify_gateway_key
 from app.core.context import AgentContext
+from app.stores import sessions as sessions_mod
 from .deps import last_user_text, settings, thread_id_from
 
 logger = logging.getLogger("joyjoy")
@@ -32,7 +33,8 @@ async def chat_completions(request: Request):
     reasoning = body.get("reasoning_effort")
     if reasoning is None:
         reasoning = body.get("reasoning")
-    ctx = AgentContext(user_id=user_id, thread_id=thread_id)
+    ws_id = await sessions_mod.workspace_id_for(user_id, thread_id)
+    ctx = AgentContext(user_id=user_id, thread_id=thread_id, workspace_id=ws_id)
     agent = await get_agent(settings, request.app.state.checkpointer, request.app.state.store, model, user_id, reasoning=reasoning)
 
     cid = f"chatcmpl-{uuid.uuid4().hex}"

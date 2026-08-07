@@ -133,12 +133,22 @@ function XaiOauthLogin({
 	// The poll effect below intentionally keys off only [phase, data?.device_code] —
 	// it must NOT restart (and re-register a fresh setInterval) every time the
 	// parent re-renders and hands down a new `onAuthenticated` closure, or every
-	// poll cycle would be cut short. Refs give the effect the latest callback/t
-	// without needing either in its dependency list.
+	// poll cycle would be cut short. Refs give the effect the latest callback/t/poll
+	// without needing any of them in its dependency list. `poll` in particular is
+	// the useMutation() RESULT OBJECT, which TanStack Query recreates on every
+	// render — this used to sit directly in the dependency array despite the
+	// comment above explicitly saying nothing unstable should, so the effect tore
+	// down and rebuilt a brand new setInterval on nearly every render. Each of
+	// those overlapping intervals independently polled the SAME device_code, so
+	// even after one of them got the real "complete" response, the others kept
+	// firing on their own schedule and keeping the OAuth code single-use, so every
+	// poll after the first success came back "invalid_grant" forever.
 	const onAuthenticatedRef = useRef(onAuthenticated);
 	onAuthenticatedRef.current = onAuthenticated;
 	const tRef = useRef(t);
 	tRef.current = t;
+	const pollRef = useRef(poll);
+	pollRef.current = poll;
 
 	const begin = () => {
 		setErr(null);
@@ -164,12 +174,23 @@ function XaiOauthLogin({
 	useEffect(() => {
 		if (phase !== "waiting" || !data?.device_code) return;
 		const ms = Math.max(1, data.interval ?? 5) * 1000;
-		let cancelled = false;
+		// The device_code is single-use: once ONE poll gets back "complete", xAI
+		// invalidates it, so a poll already in flight (fired the same tick, or
+		// just before this one's success handler ran) comes back "invalid_grant"
+		// a moment later. React only flips `cancelled` on unmount, which happens
+		// on the NEXT render after setPhase("done") — not synchronously — so that
+		// stale error response could still land in between and flip the UI from
+		// "done" back to "error" even though the login already succeeded. `settled`
+		// is set the instant a terminal result is acted on (not just on unmount),
+		// so any later-arriving duplicate response is a no-op.
+		let settled = false;
 		const id = setInterval(() => {
-			poll.mutate(data.device_code as string, {
+			if (settled) return;
+			pollRef.current.mutate(data.device_code as string, {
 				onSuccess: (res) => {
-					if (cancelled) return;
+					if (settled) return;
 					if (res.status === "complete" && res.access_token) {
+						settled = true;
 						clearInterval(id);
 						setPhase("done");
 						onAuthenticatedRef.current({
@@ -180,6 +201,7 @@ function XaiOauthLogin({
 								: undefined,
 						});
 					} else if (res.status === "expired" || res.status === "error") {
+						settled = true;
 						clearInterval(id);
 						setErr(res.error ?? tRef.current("providers.xaiOauthFailed"));
 						setPhase("error");
@@ -188,10 +210,10 @@ function XaiOauthLogin({
 			});
 		}, ms);
 		return () => {
-			cancelled = true;
+			settled = true;
 			clearInterval(id);
 		};
-	}, [phase, data?.device_code, poll]);
+	}, [phase, data?.device_code]);
 
 	if (phase === "done") {
 		return (

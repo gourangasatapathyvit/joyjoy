@@ -1,12 +1,14 @@
-"""OpenSandbox lifecycle manager — one sandbox per (user, thread), keyed by the
-session's ``workspace_id``.
+"""OpenSandbox lifecycle manager — one sandbox per USER, keyed by ``user_id``.
+Each of that user's threads gets its own subdirectory inside the shared volume,
+isolated from sibling threads by a dedicated unprivileged Linux user + ``chmod
+700`` (see ``ensure_thread_workspace*`` below) — not by which container it got.
 
 Durability model (two layers):
-  * The DURABLE store is a Docker named volume ``<prefix><workspace_id>`` mounted at
+  * The DURABLE store is a Docker named volume ``<prefix><user_id>`` mounted at
     ``settings.sandbox_mount_path``. It outlives the sandbox (OSEP-0003), so a
-    session's files survive sandbox pause/kill/GC and reattach to a fresh sandbox.
+    user's files survive sandbox pause/kill/GC and reattach to a fresh sandbox.
   * The sandbox itself is EPHEMERAL execution: a warm in-memory pool keyed by
-    workspace_id; idle ones are ``pause()``d. A known ``sandbox_id`` lets us
+    user_id; idle ones are ``pause()``d. A known ``sandbox_id`` lets us
     ``resume()`` warm, otherwise we ``create()`` a new sandbox attaching the same
     volume (files intact).
 
@@ -27,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import hashlib
 import logging
 import threading
 import time
@@ -74,6 +77,12 @@ _POOL: dict[str, "_Entry"] = {}
 _LOCK = asyncio.Lock()
 _REAPER: asyncio.Task | None = None
 
+# Per-thread OS-user bootstrap cache, keyed by (sandbox_id, thread_seg) — NOT just
+# thread_seg, because a container recreate (pause -> GC -> fresh create) loses its
+# Linux users even though the durable volume's files survive; keying on the live
+# sandbox's own id forces a fresh bootstrap whenever that happens.
+_THREAD_UID: dict[tuple[str, str], int] = {}
+
 
 class _Entry:
     __slots__ = ("sandbox", "sandbox_id", "last_used")
@@ -99,12 +108,12 @@ def _conn(settings: Settings):
     )
 
 
-def volume_name(settings: Settings, workspace_id: str) -> str:
-    return f"{settings.sandbox_volume_prefix}{safe_segment(workspace_id) or 'default'}"
+def volume_name(settings: Settings, user_id: str) -> str:
+    return f"{settings.sandbox_volume_prefix}{safe_segment(user_id) or 'default'}"
 
 
 def _volume(settings: Settings, vol: str) -> Volume:
-    """Runtime-neutral PERSISTENT per-workspace volume. ``createIfNotExists`` lets the
+    """Runtime-neutral PERSISTENT per-user volume. ``createIfNotExists`` lets the
     OpenSandbox **server** provision the backing store per ITS OWN runtime — a Docker
     named volume OR a Kubernetes PVC — so joyjoy never shells out to ``docker`` and this
     works identically on a single Docker host and on multi-pod Kubernetes.
@@ -119,8 +128,8 @@ def _volume(settings: Settings, vol: str) -> Volume:
     )
 
 
-async def _create(settings: Settings, workspace_id: str):
-    vol = volume_name(settings, workspace_id)
+async def _create(settings: Settings, user_id: str):
+    vol = volume_name(settings, user_id)
     sb = await Sandbox.create(
         settings.sandbox_image,
         # Durable: server auto-creates the volume; NOT delete-on-terminate, so it
@@ -130,7 +139,7 @@ async def _create(settings: Settings, workspace_id: str):
         timeout=datetime.timedelta(minutes=settings.sandbox_timeout_minutes),
         connection_config=_conn(settings),
     )
-    logger.info("created sandbox %s for ws=%s (vol=%s)", sb.id, workspace_id, vol)
+    logger.info("created sandbox %s for user=%s (vol=%s)", sb.id, user_id, vol)
     return sb
 
 
@@ -141,29 +150,29 @@ async def _renew(settings: Settings, sb) -> None:
         logger.debug("sandbox renew failed", exc_info=True)
 
 
-async def _pause_entry(workspace_id: str, entry: "_Entry") -> None:
+async def _pause_entry(user_id: str, entry: "_Entry") -> None:
     try:
         await entry.sandbox.pause()
-        logger.info("paused sandbox %s (ws=%s)", entry.sandbox_id, workspace_id)
+        logger.info("paused sandbox %s (user=%s)", entry.sandbox_id, user_id)
     except Exception:  # noqa: BLE001
-        logger.debug("pause failed for ws=%s", workspace_id, exc_info=True)
-    _POOL.pop(workspace_id, None)
+        logger.debug("pause failed for user=%s", user_id, exc_info=True)
+    _POOL.pop(user_id, None)
 
 
 async def _enforce_cap(settings: Settings) -> None:
     if len(_POOL) <= settings.sandbox_max_live:
         return
     victims = sorted(_POOL.items(), key=lambda kv: kv[1].last_used)[: len(_POOL) - settings.sandbox_max_live]
-    for wid, entry in victims:
-        await _pause_entry(wid, entry)
+    for uid, entry in victims:
+        await _pause_entry(uid, entry)
 
 
-async def _acquire(settings: Settings, workspace_id: str, known_sandbox_id: str | None = None):
-    """(runs on the sandbox loop) Return ``(sandbox, sandbox_id)`` for the session,
+async def _acquire(settings: Settings, user_id: str, known_sandbox_id: str | None = None):
+    """(runs on the sandbox loop) Return ``(sandbox, sandbox_id)`` for the user,
     creating/resuming as needed."""
-    wid = safe_segment(workspace_id) or "default"
+    uid = safe_segment(user_id) or "default"
     async with _LOCK:
-        entry = _POOL.get(wid)
+        entry = _POOL.get(uid)
         if entry is not None:
             entry.last_used = time.monotonic()
             await _renew(settings, entry.sandbox)
@@ -173,27 +182,29 @@ async def _acquire(settings: Settings, workspace_id: str, known_sandbox_id: str 
         if known_sandbox_id:
             try:
                 sb = await Sandbox.resume(sandbox_id=known_sandbox_id, connection_config=_conn(settings))
-                logger.info("resumed sandbox %s for ws=%s", known_sandbox_id, wid)
+                logger.info("resumed sandbox %s for user=%s", known_sandbox_id, uid)
             except Exception:  # noqa: BLE001
-                logger.info("resume %s failed (ws=%s); creating fresh", known_sandbox_id, wid, exc_info=True)
+                logger.info("resume %s failed (user=%s); creating fresh", known_sandbox_id, uid, exc_info=True)
                 sb = None
         if sb is None:
-            sb = await _create(settings, wid)
+            sb = await _create(settings, uid)
 
-        _POOL[wid] = _Entry(sb, sb.id)
+        _POOL[uid] = _Entry(sb, sb.id)
         await _enforce_cap(settings)
         return sb, sb.id
 
 
-async def _kill_session(settings: Settings, workspace_id: str, remove_volume: bool) -> None:
-    wid = safe_segment(workspace_id) or "default"
+async def _kill_session(settings: Settings, user_id: str, remove_volume: bool) -> None:
+    uid = safe_segment(user_id) or "default"
     async with _LOCK:
-        entry = _POOL.pop(wid, None)
+        entry = _POOL.pop(uid, None)
     if entry is not None:
         try:
             await entry.sandbox.kill()
         except Exception:  # noqa: BLE001
-            logger.debug("kill failed for ws=%s", wid, exc_info=True)
+            logger.debug("kill failed for user=%s", uid, exc_info=True)
+        for key in [k for k in _THREAD_UID if k[0] == entry.sandbox_id]:
+            _THREAD_UID.pop(key, None)
     if remove_volume:
         # Durable-volume DELETION is the platform's job, runtime-neutrally — joyjoy does
         # NOT touch it (no host ``docker`` dependency, so this is identical + safe on a
@@ -205,8 +216,8 @@ async def _kill_session(settings: Settings, workspace_id: str, remove_volume: bo
         # itself created (``deleteOnSandboxTermination``); that can't apply to a
         # pre-existing durable volume, so there is no in-SDK way to delete it here.
         logger.info(
-            "ws=%s deleted; durable volume %s retained for platform reclamation",
-            wid, volume_name(settings, wid),
+            "user=%s deleted; durable volume %s retained for platform reclamation",
+            uid, volume_name(settings, uid),
         )
 
 
@@ -251,19 +262,127 @@ async def _healthy(settings: Settings) -> bool:
         return False
 
 
+def _stdout_text(execution) -> str:
+    logs = getattr(execution, "logs", None)
+    if logs is None:
+        return getattr(execution, "text", "") or ""
+    parts = [getattr(s, "text", "") for s in (getattr(logs, "stdout", None) or [])]
+    return "\n".join(p for p in parts if p)
+
+
+async def _bootstrap_thread(settings: Settings, sb, sandbox_id: str, thread_seg: str) -> tuple[str, int]:
+    """Idempotently ensure ``{mount}/{thread_seg}`` exists, owned by a dedicated
+    unprivileged Linux user, chmod 700. Runs as root (no uid override) — the ONE
+    exec that isn't scoped to a thread's own uid, since it's what CREATES that uid.
+    Returns (abs_thread_dir, uid). The uid is a pure function of thread_seg (sha1
+    hash into a fixed range), re-derived identically on every container recreate —
+    no persisted mapping needed, and ``chown`` in the script re-affirms the correct
+    owner every time regardless of whether the directory already existed."""
+    seg = safe_segment(thread_seg) or "default"
+    cache_key = (sandbox_id, seg)
+    cached = _THREAD_UID.get(cache_key)
+    mount = settings.sandbox_mount_path.rstrip("/") or "/workspace"
+    thread_dir = f"{mount}/{seg}"
+    if cached is not None:
+        return thread_dir, cached
+
+    uname = "t_" + hashlib.sha1(seg.encode()).hexdigest()[:16]  # noqa: S324 - not cryptographic, just a stable id
+    candidate = settings.sandbox_thread_uid_base + (
+        int(hashlib.sha1(seg.encode()).hexdigest()[:8], 16) % settings.sandbox_thread_uid_range  # noqa: S324
+    )
+    script = f"""set -e
+UNAME="{uname}"
+DIR="{thread_dir}"
+mkdir -p "$DIR"
+if L=$(getent passwd "$UNAME"); then
+  UID_NUM=$(echo "$L" | cut -d: -f3)
+else
+  UID_NUM={candidate}
+  while getent passwd "$UID_NUM" >/dev/null 2>&1; do UID_NUM=$((UID_NUM+1)); done
+  useradd -M -N -u "$UID_NUM" -s /usr/sbin/nologin "$UNAME"
+fi
+chown "$UID_NUM" "$DIR"
+chmod 700 "$DIR"
+echo "$UID_NUM"
+"""
+    execution = await sb.commands.run(script)
+    if getattr(execution, "exit_code", 0) not in (0, None):
+        msg = f"failed to bootstrap thread workspace {seg!r} (exit={getattr(execution, 'exit_code', None)})"
+        raise RuntimeError(msg)
+    out = _stdout_text(execution).strip().splitlines()
+    if not out or not out[-1].strip().isdigit():
+        msg = f"failed to bootstrap thread workspace {seg!r}: no uid in output"
+        raise RuntimeError(msg)
+    uid_num = int(out[-1].strip())
+    _THREAD_UID[cache_key] = uid_num
+    return thread_dir, uid_num
+
+
+async def _ensure_thread_workspace(
+    settings: Settings, user_id: str, thread_id: str, known_sandbox_id: str | None = None,
+) -> tuple[str, int]:
+    sb, sandbox_id = await _acquire(settings, user_id, known_sandbox_id)
+    return await _bootstrap_thread(settings, sb, sandbox_id, thread_id)
+
+
+async def _delete_thread_workspace(settings: Settings, user_id: str, thread_id: str) -> None:
+    """Delete ``{mount}/{thread_seg}`` inside the user's shared container, WITHOUT
+    touching the container or the rest of the user's volume. Best-effort: if the
+    user's sandbox isn't currently live, this is a no-op (the orphaned subfolder is
+    harmless — it just sits inside that same user's own volume until they next use
+    the sandbox, at which point a stale directory with no matching OS user is not a
+    correctness problem, only a small amount of unreclaimed disk)."""
+    uid = safe_segment(user_id) or "default"
+    async with _LOCK:
+        entry = _POOL.get(uid)
+    if entry is None:
+        return
+    seg = safe_segment(thread_id) or "default"
+    mount = settings.sandbox_mount_path.rstrip("/") or "/workspace"
+    try:
+        await entry.sandbox.files.delete_directories([f"{mount}/{seg}"])
+    except Exception:  # noqa: BLE001
+        logger.debug("delete_thread_workspace failed for user=%s thread=%s", uid, seg, exc_info=True)
+    _THREAD_UID.pop((entry.sandbox_id, seg), None)
+
+
 # --- public API (dispatch onto the sandbox loop) -----------------------------
-def acquire_sync(settings: Settings, workspace_id: str, known_sandbox_id: str | None = None):
+def acquire_sync(settings: Settings, user_id: str, known_sandbox_id: str | None = None):
     """Sync acquire for the deepagents BaseSandbox file ops (called in to_thread)."""
-    return run_sync(_acquire(settings, workspace_id, known_sandbox_id))
+    return run_sync(_acquire(settings, user_id, known_sandbox_id))
 
 
-async def acquire_async(settings: Settings, workspace_id: str, known_sandbox_id: str | None = None):
+async def acquire_async(settings: Settings, user_id: str, known_sandbox_id: str | None = None):
     """Async acquire for main-loop callers (the workspace dock)."""
-    return await run_async(_acquire(settings, workspace_id, known_sandbox_id))
+    return await run_async(_acquire(settings, user_id, known_sandbox_id))
 
 
-async def kill_session(settings: Settings, workspace_id: str, *, remove_volume: bool = False) -> None:
-    await run_async(_kill_session(settings, workspace_id, remove_volume))
+def ensure_thread_workspace_sync(
+    settings: Settings, user_id: str, thread_id: str, known_sandbox_id: str | None = None,
+) -> tuple[str, int]:
+    """Sync: acquire the user's sandbox and return (abs_thread_dir, uid) for
+    thread_id, bootstrapping the thread's subfolder + dedicated OS user on first
+    use. Called by OpenSandboxBackend (in to_thread workers)."""
+    return run_sync(_ensure_thread_workspace(settings, user_id, thread_id, known_sandbox_id))
+
+
+async def ensure_thread_workspace_async(
+    settings: Settings, user_id: str, thread_id: str, known_sandbox_id: str | None = None,
+) -> tuple[str, int]:
+    """Async twin of ``ensure_thread_workspace_sync`` for main-loop callers (the
+    workspace dock)."""
+    return await run_async(_ensure_thread_workspace(settings, user_id, thread_id, known_sandbox_id))
+
+
+async def delete_thread_workspace(settings: Settings, user_id: str, thread_id: str) -> None:
+    """Delete one thread's subfolder from inside a user's shared sandbox, without
+    tearing down the container (unlike ``kill_session``, which is user/account-
+    level). Used by the session-delete route."""
+    await run_async(_delete_thread_workspace(settings, user_id, thread_id))
+
+
+async def kill_session(settings: Settings, user_id: str, *, remove_volume: bool = False) -> None:
+    await run_async(_kill_session(settings, user_id, remove_volume))
 
 
 async def healthy(settings: Settings) -> bool:

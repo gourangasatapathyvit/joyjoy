@@ -146,8 +146,13 @@ class Settings(BaseSettings):
     sandbox_timeout_minutes: int = 30  # sandbox TTL (renewed on use)
     sandbox_idle_minutes: int = 15  # pause a sandbox after this much idle
     sandbox_max_live: int = 16  # cap concurrent live sandboxes (LRU-pause beyond)
-    sandbox_volume_prefix: str = "joyjoy-ws-"  # docker volume name = prefix + workspace_id
-    sandbox_mount_path: str = "/workspace"  # where the per-session volume mounts
+    sandbox_volume_prefix: str = "joyjoy-ws-"  # docker volume name = prefix + user_id
+    sandbox_mount_path: str = "/workspace"  # where the per-user volume mounts
+    # Per-thread OS-user range for isolating threads sharing one user's container
+    # (see app/sandbox/sandbox.py's _bootstrap_thread): uids land in
+    # [sandbox_thread_uid_base, sandbox_thread_uid_base + sandbox_thread_uid_range).
+    sandbox_thread_uid_base: int = 20000
+    sandbox_thread_uid_range: int = 40000
 
     # ---- Azure OpenAI ----
     azure_openai_endpoint: str = ""

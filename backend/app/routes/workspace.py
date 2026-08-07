@@ -60,7 +60,7 @@ async def workspace_tree(request: Request):
     uid = resolve_user_id(request, settings)
     ws = await _ws_id(uid, request.query_params.get("thread_id"))
     if _sbx():
-        return {"tree": await ws_sbx.tree(settings, ws)}
+        return {"tree": await ws_sbx.tree(settings, uid, ws)}
     return {"tree": await asyncio.to_thread(workspace_mod.build_tree, settings, uid, ws)}
 
 
@@ -72,7 +72,7 @@ async def workspace_file(request: Request):
     ws = await _ws_id(uid, request.query_params.get("thread_id"))
     path = _norm_path(request.query_params.get("path"))
     data = (
-        await ws_sbx.read_file(settings, ws, path)
+        await ws_sbx.read_file(settings, uid, ws, path)
         if _sbx()
         else await asyncio.to_thread(workspace_mod.read_file, settings, uid, ws, path)
     )
@@ -93,7 +93,7 @@ async def media_get(request: Request):
     if _sbx():
         # Sandbox mode: every workspace op is in the sandbox — stream from the volume.
         ws = await _ws_id(uid, request.query_params.get("thread_id"))
-        res = await ws_sbx.raw_file(settings, ws, _norm_path(raw_path))
+        res = await ws_sbx.raw_file(settings, uid, ws, _norm_path(raw_path))
         if res is None:
             return JSONResponse({"error": "not found"}, status_code=404)
         data, mime = res
@@ -121,7 +121,7 @@ async def workspace_raw(request: Request):
     if _sbx():
         # Sandbox files have no host path → stream bytes directly. (Office→PDF
         # preview conversion is host-only; sandbox serves the raw bytes.)
-        res = await ws_sbx.raw_file(settings, ws, path)
+        res = await ws_sbx.raw_file(settings, uid, ws, path)
         if res is None:
             return JSONResponse({"error": "not found"}, status_code=404)
         data, mime = res
@@ -151,7 +151,7 @@ async def workspace_download(request: Request):
     ws = await _ws_id(uid, request.query_params.get("thread_id"))
     path = _norm_path(request.query_params.get("path"))
     res = (
-        await ws_sbx.download(settings, ws, path)
+        await ws_sbx.download(settings, uid, ws, path)
         if _sbx()
         else await asyncio.to_thread(workspace_mod.download, settings, uid, ws, path)
     )
@@ -174,7 +174,7 @@ async def workspace_save(request: Request):
     ws = await _ws_id(uid, body.get("thread_id"))
     path, content = _norm_path(body.get("path")), body.get("content", "")
     res = (
-        await ws_sbx.save_file(settings, ws, path, content)
+        await ws_sbx.save_file(settings, uid, ws, path, content)
         if _sbx()
         else await asyncio.to_thread(workspace_mod.save_file, settings, uid, ws, path, content)
     )
@@ -189,7 +189,7 @@ async def workspace_mkdir(request: Request):
     ws = await _ws_id(uid, body.get("thread_id"))
     path = _norm_path(body.get("path"))
     res = (
-        await ws_sbx.make_dir(settings, ws, path)
+        await ws_sbx.make_dir(settings, uid, ws, path)
         if _sbx()
         else await asyncio.to_thread(workspace_mod.make_dir, settings, uid, ws, path)
     )
@@ -204,7 +204,7 @@ async def workspace_delete(request: Request):
     ws = await _ws_id(uid, body.get("thread_id"))
     path = _norm_path(body.get("path"))
     res = (
-        await ws_sbx.delete_path(settings, ws, path)
+        await ws_sbx.delete_path(settings, uid, ws, path)
         if _sbx()
         else await asyncio.to_thread(workspace_mod.delete_path, settings, uid, ws, path)
     )
@@ -219,7 +219,7 @@ async def workspace_rename(request: Request):
     ws = await _ws_id(uid, body.get("thread_id"))
     src, dst = _norm_path(body.get("from")), _norm_path(body.get("to"))
     res = (
-        await ws_sbx.rename_path(settings, ws, src, dst)
+        await ws_sbx.rename_path(settings, uid, ws, src, dst)
         if _sbx()
         else await asyncio.to_thread(workspace_mod.rename_path, settings, uid, ws, src, dst)
     )
@@ -240,7 +240,7 @@ async def workspace_upload(request: Request):
     ws = await _ws_id(uid, form.get("thread_id"))
     dir_rel, filename = _norm_path(form.get("dir")), getattr(up, "filename", "upload")
     res = (
-        await ws_sbx.save_upload(settings, ws, dir_rel, filename, data)
+        await ws_sbx.save_upload(settings, uid, ws, dir_rel, filename, data)
         if _sbx()
         else await asyncio.to_thread(workspace_mod.save_upload, settings, uid, ws, dir_rel, filename, data)
     )
